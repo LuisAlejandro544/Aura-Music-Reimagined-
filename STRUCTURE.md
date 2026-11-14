@@ -35,9 +35,9 @@
 │   ├── feature/
 │   │   ├── library/                   # Pantalla Biblioteca + buscador + hoja de importación
 │   │   ├── playlists/                 # Pantallas Playlists, Favoritos, Detalle y diálogos
-│   │   ├── player/                    # MiniPlayerBar y PlayerScreen (carátula cuadrada)
-│   │   ├── settings/                  # Pantalla Ajustes (color de la app, acceso a EQ y estado Rust)
-│   │   └── equalizer/                 # Pantalla dedicada del ecualizador de 10 bandas en Rust
+│   │   ├── player/                    # MiniPlayerBar, PlayerScreen y CoverDynamicTheme (Palette + MaterialKolor)
+│   │   ├── settings/                  # Pantalla Ajustes (color global, toggle de carátula dinámica y estado Rust)
+│   │   └── equalizer/                 # Pantalla dedicada del ecualizador de 10 bandas (abierta desde PlayerScreen)
 │   └── rust/aura_core/                # Crate Rust (Edition 2024)
 │       ├── Cargo.toml
 │       ├── rust-toolchain.toml        # Targets armv7, arm64 y x86_64

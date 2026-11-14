@@ -87,6 +87,7 @@ fun AuraAppRoot(viewModel: AuraViewModel) {
     val playbackState by viewModel.playbackState.collectAsStateWithLifecycle()
     val importProgress by viewModel.importProgress.collectAsStateWithLifecycle()
     val accentColor by viewModel.accentColor.collectAsStateWithLifecycle()
+    val dynamicCoverColorsEnabled by viewModel.dynamicCoverColorsEnabled.collectAsStateWithLifecycle()
     val equalizerState by viewModel.equalizerState.collectAsStateWithLifecycle()
     val rustEngineInfo by viewModel.rustEngineInfo.collectAsStateWithLifecycle()
 
@@ -136,6 +137,7 @@ fun AuraAppRoot(viewModel: AuraViewModel) {
                     ) {
                         MiniPlayerBar(
                             playbackState = playbackState,
+                            dynamicCoverColorsEnabled = dynamicCoverColorsEnabled,
                             onOpenFullPlayer = {
                                 navController.navigate(AuraRoutes.PLAYER) {
                                     launchSingleTop = true
@@ -181,8 +183,7 @@ fun AuraAppRoot(viewModel: AuraViewModel) {
                             label = { Text("Playlists") },
                         )
                         NavigationBarItem(
-                            selected = currentRoute == AuraRoutes.SETTINGS ||
-                                currentRoute == AuraRoutes.EQUALIZER,
+                            selected = currentRoute == AuraRoutes.SETTINGS,
                             onClick = {
                                 navController.navigate(AuraRoutes.SETTINGS) {
                                     popUpTo(navController.graph.findStartDestination().id) {
@@ -281,14 +282,10 @@ fun AuraAppRoot(viewModel: AuraViewModel) {
                 composable(AuraRoutes.SETTINGS) {
                     SettingsScreen(
                         selectedAccent = accentColor,
+                        dynamicCoverColorsEnabled = dynamicCoverColorsEnabled,
                         rustEngineInfo = rustEngineInfo,
-                        equalizerState = equalizerState,
                         onSelectAccent = viewModel::selectAccentColor,
-                        onOpenEqualizer = {
-                            navController.navigate(AuraRoutes.EQUALIZER) {
-                                launchSingleTop = true
-                            }
-                        },
+                        onToggleDynamicCoverColors = viewModel::setDynamicCoverColorsEnabled,
                     )
                 }
 
@@ -306,6 +303,7 @@ fun AuraAppRoot(viewModel: AuraViewModel) {
                 composable(AuraRoutes.PLAYER) {
                     PlayerScreen(
                         playbackState = playbackState,
+                        dynamicCoverColorsEnabled = dynamicCoverColorsEnabled,
                         onCollapse = { navController.popBackStack() },
                         onTogglePlayPause = viewModel::togglePlayPause,
                         onSkipNext = viewModel::skipNext,

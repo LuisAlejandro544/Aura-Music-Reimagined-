@@ -20,9 +20,8 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.rounded.KeyboardArrowRight
+import androidx.compose.material.icons.rounded.AutoAwesome
 import androidx.compose.material.icons.rounded.Check
-import androidx.compose.material.icons.rounded.GraphicEq
 import androidx.compose.material.icons.rounded.Memory
 import androidx.compose.material.icons.rounded.Palette
 import androidx.compose.material3.Card
@@ -32,6 +31,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
@@ -43,21 +43,21 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.auramusic.core.model.AppAccentColor
-import com.auramusic.core.model.EqualizerState
 
 /**
  * Pantalla de Ajustes de Aura Music.
  * Permite cambiar la paleta de colores principal de toda la aplicación en tiempo real,
- * abrir el ecualizador de 10 bandas en Rust y verificar el estado del motor nativo.
+ * activar o desactivar los colores dinámicos extraídos de la carátula en el reproductor
+ * y verificar el estado del motor nativo Rust.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SettingsScreen(
     selectedAccent: AppAccentColor,
+    dynamicCoverColorsEnabled: Boolean,
     rustEngineInfo: String,
-    equalizerState: EqualizerState,
     onSelectAccent: (AppAccentColor) -> Unit,
-    onOpenEqualizer: () -> Unit,
+    onToggleDynamicCoverColors: (Boolean) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     Scaffold(
@@ -194,13 +194,11 @@ fun SettingsScreen(
 
             item {
                 Spacer(modifier = Modifier.height(6.dp))
-                val eqPresetName = EqualizerState.findPresetById(equalizerState.activePresetId)?.displayName
-                    ?: "Personalizado"
                 Surface(
                     modifier = Modifier
                         .fillMaxWidth()
                         .clip(RoundedCornerShape(16.dp))
-                        .clickable(onClick = onOpenEqualizer),
+                        .clickable { onToggleDynamicCoverColors(!dynamicCoverColorsEnabled) },
                     shape = RoundedCornerShape(16.dp),
                     color = MaterialTheme.colorScheme.surfaceContainerHigh,
                     tonalElevation = 2.dp,
@@ -216,7 +214,7 @@ fun SettingsScreen(
                         ) {
                             Box(contentAlignment = Alignment.Center) {
                                 Icon(
-                                    imageVector = Icons.Rounded.GraphicEq,
+                                    imageVector = Icons.Rounded.AutoAwesome,
                                     contentDescription = null,
                                     tint = MaterialTheme.colorScheme.primary,
                                 )
@@ -225,29 +223,29 @@ fun SettingsScreen(
                         Spacer(modifier = Modifier.width(12.dp))
                         Column(modifier = Modifier.weight(1f)) {
                             Text(
-                                text = "Ecualizador de 10 bandas",
+                                text = "Colores dinámicos de carátula",
                                 style = MaterialTheme.typography.titleSmall,
                                 fontWeight = FontWeight.SemiBold,
                             )
                             Spacer(modifier = Modifier.height(2.dp))
                             Text(
-                                text = if (equalizerState.isEnabled) {
-                                    "Activo • Perfil: $eqPresetName (Rust DSP)"
+                                text = if (dynamicCoverColorsEnabled) {
+                                    "Activo • Adapta el mini reproductor y reproductor a la portada"
                                 } else {
-                                    "Desactivado • Toca para configurar (Rust DSP)"
+                                    "Desactivado • Usa el color global de la app"
                                 },
                                 style = MaterialTheme.typography.bodySmall,
-                                color = if (equalizerState.isEnabled) {
+                                color = if (dynamicCoverColorsEnabled) {
                                     MaterialTheme.colorScheme.primary
                                 } else {
                                     MaterialTheme.colorScheme.onSurfaceVariant
                                 },
                             )
                         }
-                        Icon(
-                            imageVector = Icons.AutoMirrored.Rounded.KeyboardArrowRight,
-                            contentDescription = "Abrir ecualizador",
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Switch(
+                            checked = dynamicCoverColorsEnabled,
+                            onCheckedChange = onToggleDynamicCoverColors,
                         )
                     }
                 }

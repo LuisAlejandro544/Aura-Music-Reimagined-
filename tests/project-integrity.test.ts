@@ -300,4 +300,54 @@ test('10-band equalizer runs in Rust DSP wired to Media3 AudioSink with dedicate
   assert.doesNotMatch(serviceKt, /android\.media\.audiofx\.Equalizer/);
 });
 
+test('dynamic cover colors use androidx.palette + MaterialKolor with smooth animations and DataStore toggle', () => {
+  const catalog = fs.readFileSync(path.join(rootDir, 'android/gradle/libs.versions.toml'), 'utf8');
+  const playerGradle = fs.readFileSync(path.join(rootDir, 'android/feature/player/build.gradle.kts'), 'utf8');
+  const coverThemeKt = fs.readFileSync(
+    path.join(rootDir, 'android/feature/player/src/main/kotlin/com/auramusic/feature/player/CoverDynamicTheme.kt'),
+    'utf8',
+  );
+  const playerScreenKt = fs.readFileSync(
+    path.join(rootDir, 'android/feature/player/src/main/kotlin/com/auramusic/feature/player/PlayerScreen.kt'),
+    'utf8',
+  );
+  const reposKt = fs.readFileSync(
+    path.join(rootDir, 'android/core/database/src/main/kotlin/com/auramusic/core/database/AuraRepositories.kt'),
+    'utf8',
+  );
 
+  assert.match(catalog, /androidx\.palette/);
+  assert.match(catalog, /material-kolor-material3/);
+  assert.match(catalog, /material-kolor-palette/);
+  assert.match(playerGradle, /libs\.androidx\.palette/);
+  assert.match(playerGradle, /libs\.material\.kolor\.material3/);
+  assert.match(playerGradle, /libs\.material\.kolor\.palette/);
+
+  assert.match(coverThemeKt, /androidx\.palette\.graphics\.Palette/);
+  assert.match(coverThemeKt, /com\.materialkolor\.material3\.rememberDynamicColorScheme/);
+  assert.match(coverThemeKt, /com\.materialkolor\.palette\.rememberPaletteState/);
+  assert.match(coverThemeKt, /animateColorAsState/);
+  assert.match(coverThemeKt, /Dispatchers\.IO/);
+  assert.match(coverThemeKt, /Dispatchers\.Default/);
+
+  assert.match(playerScreenKt, /CoverDynamicTheme\(/);
+  assert.match(reposKt, /dynamic_cover_colors/);
+  assert.match(reposKt, /setDynamicCoverColorsEnabled/);
+});
+
+test('equalizer entry is removed from SettingsScreen and kept only in PlayerScreen', () => {
+  const settingsKt = fs.readFileSync(
+    path.join(rootDir, 'android/feature/settings/src/main/kotlin/com/auramusic/feature/settings/SettingsScreen.kt'),
+    'utf8',
+  );
+  const playerKt = fs.readFileSync(
+    path.join(rootDir, 'android/feature/player/src/main/kotlin/com/auramusic/feature/player/PlayerScreen.kt'),
+    'utf8',
+  );
+
+  assert.doesNotMatch(settingsKt, /Ecualizador de 10 bandas/);
+  assert.doesNotMatch(settingsKt, /onOpenEqualizer/);
+  assert.match(settingsKt, /Colores dinámicos de carátula/);
+  assert.match(settingsKt, /Switch\(/);
+  assert.match(playerKt, /onOpenEqualizer/);
+});

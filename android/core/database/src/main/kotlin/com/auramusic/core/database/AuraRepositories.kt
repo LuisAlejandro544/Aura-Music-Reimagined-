@@ -179,21 +179,35 @@ class MusicRepository(
 }
 
 /**
- * Repositorio de preferencias visuales (color de acento de la app) respaldado por Jetpack DataStore.
+ * Repositorio de preferencias visuales (color de acento y colores dinámicos de carátula)
+ * respaldado por Jetpack DataStore.
  */
 class ThemePreferencesRepository(
     private val context: Context,
 ) {
     private val accentKey = stringPreferencesKey("accent_color")
+    private val dynamicCoverColorsKey = booleanPreferencesKey("dynamic_cover_colors")
 
     val accentColor: Flow<AppAccentColor> = context.auraSettingsDataStore.data.map { prefs ->
         AppAccentColor.fromName(prefs[accentKey])
+    }
+
+    val dynamicCoverColorsEnabled: Flow<Boolean> = context.auraSettingsDataStore.data.map { prefs ->
+        prefs[dynamicCoverColorsKey] ?: true
     }
 
     suspend fun setAccentColor(color: AppAccentColor) {
         withContext(Dispatchers.IO) {
             context.auraSettingsDataStore.edit { prefs ->
                 prefs[accentKey] = color.name
+            }
+        }
+    }
+
+    suspend fun setDynamicCoverColorsEnabled(enabled: Boolean) {
+        withContext(Dispatchers.IO) {
+            context.auraSettingsDataStore.edit { prefs ->
+                prefs[dynamicCoverColorsKey] = enabled
             }
         }
     }

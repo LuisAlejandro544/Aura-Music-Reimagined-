@@ -15,7 +15,8 @@ Plan de evolución por fases para convertir Aura Music en un reproductor local m
 ## Fase 2 — Procesamiento de audio, carátulas y metadatos en Rust (En curso)
 - [x] Lectura rápida de etiquetas (ID3, Vorbis, FLAC, MP4, WAV, AIFF), duración y carátulas embebidas directamente desde Rust (`lofty`) vía descriptor de archivo SAF (`ParcelFileDescriptor`), guardando el formato de imagen real (`.png`, `.jpg`, `.webp`, etc.).
 - [x] Importación paralela acotada con consulta única de identidades en Room y carátulas personalizadas desde galería convertidas en segundo plano a WebP sin pérdida a máxima compresión.
-- [x] Ecualizador gráfico de 10 bandas en Rust (`aura_core::equalizer`) conectado en tiempo real a Media3 ExoPlayer y configurable desde pantalla dedicada.
+- [x] Ecualizador gráfico de 10 bandas en Rust (`aura_core::equalizer`) conectado en tiempo real a Media3 ExoPlayer y configurable exclusivamente desde el reproductor.
+- [x] Colores dinámicos animados desde la carátula para `MiniPlayerBar` y `PlayerScreen` (`androidx.palette:palette` + `MaterialKolor`) compatibles desde Android 8.0 y configurables desde Ajustes.
 - [ ] Análisis de ganancia (ReplayGain) y extracción de forma de onda (waveform) en Rust para previsualización de pistas.
 
 ## Fase 3 — Gestión avanzada de biblioteca y playlists

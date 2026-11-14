@@ -42,6 +42,14 @@ class AuraViewModel(
             initialValue = AppAccentColor.AMETHYST,
         )
 
+    val dynamicCoverColorsEnabled: StateFlow<Boolean> =
+        container.themePreferencesRepository.dynamicCoverColorsEnabled
+            .stateIn(
+                scope = viewModelScope,
+                started = SharingStarted.Eagerly,
+                initialValue = true,
+            )
+
     val equalizerState: StateFlow<EqualizerState> = container.equalizerPreferencesRepository.equalizerState
         .stateIn(
             scope = viewModelScope,
@@ -94,6 +102,7 @@ class AuraViewModel(
         viewModelScope.launch {
             val minSplashDelay = async { delay(320L) }
             val themeJob = async { container.themePreferencesRepository.accentColor.first() }
+            val coverColorsJob = async { container.themePreferencesRepository.dynamicCoverColorsEnabled.first() }
             val eqJob = async { container.equalizerPreferencesRepository.equalizerState.first() }
             val tracksJob = async { container.musicRepository.observeAllTracks().first() }
             val playlistsJob = async { container.musicRepository.observePlaylists().first() }
@@ -104,6 +113,7 @@ class AuraViewModel(
             }
 
             themeJob.await()
+            coverColorsJob.await()
             val savedEq = eqJob.await()
             AuraRustBridge.setEqualizerConfig(savedEq.isEnabled, savedEq.bandGainsDb)
             tracksJob.await()
@@ -207,6 +217,12 @@ class AuraViewModel(
     fun selectAccentColor(color: AppAccentColor) {
         viewModelScope.launch {
             container.themePreferencesRepository.setAccentColor(color)
+        }
+    }
+
+    fun setDynamicCoverColorsEnabled(enabled: Boolean) {
+        viewModelScope.launch {
+            container.themePreferencesRepository.setDynamicCoverColorsEnabled(enabled)
         }
     }
 

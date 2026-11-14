@@ -72,11 +72,13 @@ import java.util.Locale
 
 /**
  * Mini reproductor persistente anclado sobre la barra de navegación inferior.
- * Muestra la carátula cuadrada normal, título, artista, botón de Me gusta, Play/Pausa y Siguiente.
+ * Muestra la carátula cuadrada normal, título, artista, botón de Me gusta, Play/Pausa y Siguiente,
+ * adaptando sus colores con animaciones suaves a la carátula activa si el usuario lo habilita.
  */
 @Composable
 fun MiniPlayerBar(
     playbackState: PlaybackState,
+    dynamicCoverColorsEnabled: Boolean = true,
     onOpenFullPlayer: () -> Unit,
     onTogglePlayPause: () -> Unit,
     onSkipNext: () -> Unit,
@@ -85,17 +87,25 @@ fun MiniPlayerBar(
 ) {
     val track = playbackState.currentTrack ?: return
 
-    Surface(
-        modifier = modifier
-            .fillMaxWidth()
-            .padding(horizontal = 10.dp, vertical = 6.dp)
-            .clickable(onClick = onOpenFullPlayer),
-        shape = RoundedCornerShape(16.dp),
-        color = MaterialTheme.colorScheme.surfaceContainerHigh,
-        tonalElevation = 6.dp,
-        shadowElevation = 6.dp,
+    CoverDynamicTheme(
+        coverPath = track.coverFilePath,
+        enabled = dynamicCoverColorsEnabled,
     ) {
-        Column {
+        Surface(
+            modifier = modifier
+                .fillMaxWidth()
+                .padding(horizontal = 10.dp, vertical = 6.dp)
+                .clickable(onClick = onOpenFullPlayer),
+            shape = RoundedCornerShape(16.dp),
+            color = MaterialTheme.colorScheme.surfaceContainerHigh,
+            border = BorderStroke(
+                width = 1.dp,
+                color = MaterialTheme.colorScheme.primary.copy(alpha = 0.22f),
+            ),
+            tonalElevation = 6.dp,
+            shadowElevation = 6.dp,
+        ) {
+            Column {
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -170,18 +180,21 @@ fun MiniPlayerBar(
                 color = MaterialTheme.colorScheme.primary,
                 trackColor = MaterialTheme.colorScheme.surfaceContainerHighest,
             )
+            }
         }
     }
 }
 
 /**
  * Pantalla completa del reproductor de Aura Music.
- * Diseñada con controles claros y carátula cuadrada clásica (sin diseños rebuscados ni confusos).
+ * Diseñada con controles claros y carátula cuadrada clásica (sin diseños rebuscados ni confusos),
+ * adaptando sus acentos y fondo animado a la carátula activa cuando está habilitado.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun PlayerScreen(
     playbackState: PlaybackState,
+    dynamicCoverColorsEnabled: Boolean = true,
     onCollapse: () -> Unit,
     onTogglePlayPause: () -> Unit,
     onSkipNext: () -> Unit,
@@ -196,9 +209,13 @@ fun PlayerScreen(
 ) {
     val track = playbackState.currentTrack
 
-    Scaffold(
-        containerColor = MaterialTheme.colorScheme.background,
-        topBar = {
+    CoverDynamicTheme(
+        coverPath = track?.coverFilePath,
+        enabled = dynamicCoverColorsEnabled,
+    ) {
+        Scaffold(
+            containerColor = MaterialTheme.colorScheme.background,
+            topBar = {
             TopAppBar(
                 title = {
                     Column {
@@ -269,9 +286,11 @@ fun PlayerScreen(
             return@Scaffold
         }
 
+        val backdropTint = LocalCoverBackdropTint.current
         val bgGradient = Brush.verticalGradient(
             colors = listOf(
-                MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.30f),
+                backdropTint.copy(alpha = 0.48f),
+                MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.24f),
                 MaterialTheme.colorScheme.background,
             ),
         )
@@ -515,6 +534,7 @@ fun PlayerScreen(
                     )
                 }
             }
+        }
         }
     }
 }
