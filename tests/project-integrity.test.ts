@@ -317,15 +317,13 @@ test('dynamic cover colors use androidx.palette + MaterialKolor with smooth anim
   );
 
   assert.match(catalog, /androidx\.palette/);
-  assert.match(catalog, /material-kolor-material3/);
-  assert.match(catalog, /material-kolor-palette/);
+  assert.match(catalog, /material-kolor\s*=/);
   assert.match(playerGradle, /libs\.androidx\.palette/);
-  assert.match(playerGradle, /libs\.material\.kolor\.material3/);
-  assert.match(playerGradle, /libs\.material\.kolor\.palette/);
+  assert.match(playerGradle, /libs\.material\.kolor/);
 
   assert.match(coverThemeKt, /androidx\.palette\.graphics\.Palette/);
-  assert.match(coverThemeKt, /com\.materialkolor\.material3\.rememberDynamicColorScheme/);
-  assert.match(coverThemeKt, /com\.materialkolor\.palette\.rememberPaletteState/);
+  assert.match(coverThemeKt, /com\.materialkolor\.rememberDynamicColorScheme/);
+  assert.match(coverThemeKt, /com\.materialkolor\.ktx\.themeColorOrNull/);
   assert.match(coverThemeKt, /animateColorAsState/);
   assert.match(coverThemeKt, /Dispatchers\.IO/);
   assert.match(coverThemeKt, /Dispatchers\.Default/);

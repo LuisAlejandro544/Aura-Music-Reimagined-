@@ -19,9 +19,8 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.palette.graphics.Palette
 import com.materialkolor.PaletteStyle
-import com.materialkolor.material3.rememberDynamicColorScheme
-import com.materialkolor.palette.rememberPaletteState
-import com.materialkolor.palette.themeColorOrNull
+import com.materialkolor.ktx.themeColorOrNull
+import com.materialkolor.rememberDynamicColorScheme
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.File
@@ -71,7 +70,6 @@ fun CoverDynamicTheme(
     content: @Composable () -> Unit,
 ) {
     val baseColorScheme = MaterialTheme.colorScheme
-    val paletteState = rememberPaletteState()
 
     val cacheKey = remember(coverPath) {
         if (coverPath.isNullOrBlank()) {
@@ -111,22 +109,26 @@ fun CoverDynamicTheme(
             return@LaunchedEffect
         }
 
-        // 1. Extracción rápida con AndroidX Palette (compatible desde Android 8.0 / API 26).
-        val androidPaletteProfile = withContext(Dispatchers.Default) {
-            extractAndroidPaletteProfile(bitmap)
-        }
+        // 1 y 2. Extracción rápida con AndroidX Palette y cuantización/puntuación Material
+        // con MaterialKolor (QuantizerCelebi + Score) fuera del hilo principal.
+        val resolvedProfile = withContext(Dispatchers.Default) {
+            try {
+                val androidPaletteProfile = extractAndroidPaletteProfile(bitmap)
+                val scoredSeedColor = runCatching {
+                    bitmap.asImageBitmap().themeColorOrNull()
+                }.getOrNull()
 
-        // 2. Cuantización y puntuación Material con material-kolor-palette (off main thread).
-        runCatching {
-            paletteState.generate(bitmap.asImageBitmap())
+                val resolvedSeed = scoredSeedColor ?: androidPaletteProfile.seedColor
+                CoverColorProfile(
+                    seedColor = resolvedSeed,
+                    backdropTint = androidPaletteProfile.backdropTint,
+                )
+            } finally {
+                if (!bitmap.isRecycled) {
+                    bitmap.recycle()
+                }
+            }
         }
-        val scoredSeedColor = paletteState.themeColorOrNull()
-
-        val resolvedSeed = scoredSeedColor ?: androidPaletteProfile.seedColor
-        val resolvedProfile = CoverColorProfile(
-            seedColor = resolvedSeed,
-            backdropTint = androidPaletteProfile.backdropTint,
-        )
         CoverColorCache.put(cacheKey, resolvedProfile)
         extractedProfile = resolvedProfile
     }
@@ -134,10 +136,11 @@ fun CoverDynamicTheme(
     val activeProfile = if (enabled) extractedProfile else null
     val activeSeedColor = activeProfile?.seedColor ?: baseColorScheme.primary
 
-    // 3. Generación completa del esquema tonal oscuro Material 3 con material-kolor-material3.
+    // 3. Generación completa del esquema tonal oscuro Material 3 con MaterialKolor.
     val coverScheme = rememberDynamicColorScheme(
         seedColor = activeSeedColor,
         isDark = true,
+        isAmoled = false,
         style = PaletteStyle.TonalSpot,
     )
 

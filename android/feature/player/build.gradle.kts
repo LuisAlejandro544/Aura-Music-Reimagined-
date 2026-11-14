@@ -38,6 +38,5 @@ dependencies {
     implementation(libs.androidx.compose.material.icons.extended)
     implementation(libs.coil.compose)
     implementation(libs.androidx.palette)
-    implementation(libs.material.kolor.material3)
-    implementation(libs.material.kolor.palette)
+    implementation(libs.material.kolor)
 }

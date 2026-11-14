@@ -17,7 +17,7 @@ datastore = "1.1.4"
 documentfile = "1.0.1"
 coil = "3.1.0"
 coroutines = "1.10.2"
-materialKolor = "6.0.0"
+materialKolor = "2.1.1"
 androidxPalette = "1.1.0"
 chaquopy = "17.2.0"
 junit = "4.13.2"
@@ -64,8 +64,7 @@ coil-compose = { group = "io.coil-kt.coil3", name = "coil-compose", version.ref 
 
 # Extracción de paleta y colores dinámicos Material 3 desde carátulas (Apache-2.0 / MIT)
 androidx-palette = { group = "androidx.palette", name = "palette", version.ref = "androidxPalette" }
-material-kolor-material3 = { group = "com.materialkolor", name = "material-kolor-material3", version.ref = "materialKolor" }
-material-kolor-palette = { group = "com.materialkolor", name = "material-kolor-palette", version.ref = "materialKolor" }
+material-kolor = { group = "com.materialkolor", name = "material-kolor", version.ref = "materialKolor" }
 
 # Testing
 junit = { group = "junit", name = "junit", version.ref = "junit" }
