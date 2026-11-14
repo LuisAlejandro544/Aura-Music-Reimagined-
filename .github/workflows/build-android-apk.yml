@@ -1,0 +1,70 @@
+# Flujo de compilación manual en la nube (GitHub Actions) para Aura Music.
+# Se ejecuta EXCLUSIVAMENTE de forma manual (workflow_dispatch), sin caché alguna,
+# descargando todo el código del proyecto, todas las dependencias de Rust y compilando
+# el binario nativo Rust (32 y 64 bits) junto con Kotlin mediante gradlew para generar el APK Debug.
+
+name: apk Debug
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build-apk-debug:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Descargar todo el código del proyecto
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          submodules: recursive
+
+      - name: Configurar JDK 17 (sin caché)
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Configurar Android SDK y NDK
+        uses: android-actions/setup-android@v3
+
+      - name: Instalar componentes Android SDK y NDK 27
+        run: |
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager --install "platform-tools" "platforms;android-35" "build-tools;35.0.1" "ndk;27.2.12479018"
+
+      - name: Instalar Rust estable y targets Android (32 y 64 bits)
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android,armv7-linux-androideabi,x86_64-linux-android
+
+      - name: Instalar cargo-ndk (sin caché)
+        run: cargo install cargo-ndk --locked
+
+      - name: Descargar dependencias de Rust y ejecutar tests nativos
+        working-directory: android/rust/aura_core
+        run: |
+          cargo fetch
+          cargo test
+
+      - name: Configurar Gradle 8.14.7 (sin caché)
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.14.7"
+          cache-disabled: true
+
+      - name: Generar wrapper oficial y dar permisos a gradlew
+        working-directory: android
+        run: |
+          gradle wrapper --gradle-version 8.14.7 --no-daemon
+          chmod +x gradlew
+
+      - name: Compilar Rust (cargo-ndk) y Kotlin para generar APK Debug sin caché
+        working-directory: android
+        run: ./gradlew assembleDebug --no-daemon --no-build-cache --rerun-tasks
+
+      - name: Subir artefacto APK Debug
+        uses: actions/upload-artifact@v4
+        with:
+          name: AuraMusic-apk-Debug
+          path: android/app/build/outputs/apk/debug/*.apk

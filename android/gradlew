@@ -1,0 +1,44 @@
+#!/bin/sh
+# Script oficial adaptado de Gradle Wrapper (8.14.7) para Aura Music (Linux / macOS / Termux / CI).
+# Si gradle-wrapper.jar no está presente aún en el repositorio, genera el wrapper auténtico
+# usando Gradle del sistema o descargando la distribución oficial de Gradle 8.14.7 desde
+# services.gradle.org, garantizando que Kotlin + Rust (cargo-ndk) compilen sin omitir pasos.
+
+set -e
+
+GRADLE_VERSION="8.14.7"
+APP_HOME=$(cd "$(dirname "$0")" && pwd)
+WRAPPER_JAR="$APP_HOME/gradle/wrapper/gradle-wrapper.jar"
+
+if [ ! -f "$WRAPPER_JAR" ]; then
+  echo "Generando gradle-wrapper.jar oficial para Gradle $GRADLE_VERSION..."
+  mkdir -p "$APP_HOME/gradle/wrapper"
+  if command -v gradle >/dev/null 2>&1; then
+    (cd "$APP_HOME" && gradle wrapper --gradle-version "$GRADLE_VERSION" --no-daemon)
+  else
+    TMP_DIR=$(mktemp -d)
+    DIST_ZIP="$TMP_DIR/gradle-$GRADLE_VERSION-bin.zip"
+    DIST_URL="https://services.gradle.org/distributions/gradle-$GRADLE_VERSION-bin.zip"
+    if command -v curl >/dev/null 2>&1; then
+      curl -fsSL "$DIST_URL" -o "$DIST_ZIP"
+    elif command -v wget >/dev/null 2>&1; then
+      wget -qO "$DIST_ZIP" "$DIST_URL"
+    else
+      echo "Error: se requiere curl, wget o gradle instalado para inicializar gradlew." >&2
+      rm -rf "$TMP_DIR"
+      exit 1
+    fi
+    unzip -q "$DIST_ZIP" -d "$TMP_DIR"
+    (cd "$APP_HOME" && "$TMP_DIR/gradle-$GRADLE_VERSION/bin/gradle" wrapper --gradle-version "$GRADLE_VERSION" --no-daemon)
+    rm -rf "$TMP_DIR"
+  fi
+fi
+
+JAVACMD="${JAVA_HOME:+$JAVA_HOME/bin/}java"
+if [ ! -x "$JAVACMD" ] && ! command -v "$JAVACMD" >/dev/null 2>&1; then
+  echo "Error: JAVA_HOME no está definido y no se encontró 'java' en el PATH." >&2
+  exit 1
+fi
+
+DEFAULT_JVM_OPTS='"-Xmx64m" "-Xms64m"'
+exec "$JAVACMD" $DEFAULT_JVM_OPTS -Dorg.gradle.appname="gradlew" -classpath "$WRAPPER_JAR" org.gradle.wrapper.GradleWrapperMain "$@"

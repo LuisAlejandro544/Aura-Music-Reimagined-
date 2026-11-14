@@ -1,0 +1,9 @@
+# Configuración del toolchain oficial de Rust para compilación cruzada en Android
+# (32 bits ARMv7, 64 bits ARM64 y 64 bits x86_64 para emuladores).
+[toolchain]
+channel = "stable"
+targets = [
+  "aarch64-linux-android",
+  "armv7-linux-androideabi",
+  "x86_64-linux-android"
+]

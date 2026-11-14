@@ -1,0 +1,101 @@
+package com.auramusic.core.database
+
+import androidx.room.Dao
+import androidx.room.Database
+import androidx.room.Insert
+import androidx.room.OnConflictStrategy
+import androidx.room.Query
+import androidx.room.RoomDatabase
+import kotlinx.coroutines.flow.Flow
+
+/**
+ * DAO de acceso a pistas locales y estado de "Me gusta".
+ */
+@Dao
+interface TrackDao {
+
+    @Query("SELECT * FROM tracks ORDER BY added_at DESC, title ASC")
+    fun observeAllTracks(): Flow<List<TrackEntity>>
+
+    @Query("SELECT * FROM tracks WHERE is_liked = 1 ORDER BY added_at DESC")
+    fun observeLikedTracks(): Flow<List<TrackEntity>>
+
+    @Query("SELECT COUNT(*) FROM tracks WHERE is_liked = 1")
+    fun observeLikedCount(): Flow<Int>
+
+    @Query("SELECT EXISTS(SELECT 1 FROM tracks WHERE content_uri = :uri OR track_fingerprint = :fingerprint)")
+    suspend fun existsByUriOrFingerprint(uri: String, fingerprint: String): Boolean
+
+    @Insert(onConflict = OnConflictStrategy.IGNORE)
+    suspend fun insertAll(tracks: List<TrackEntity>): List<Long>
+
+    @Query("UPDATE tracks SET is_liked = NOT is_liked WHERE id = :trackId")
+    suspend fun toggleLike(trackId: Long)
+
+    @Query("UPDATE tracks SET cover_file_path = :coverPath, is_procedural_cover = :isProcedural WHERE id = :trackId")
+    suspend fun updateCoverPath(trackId: Long, coverPath: String, isProcedural: Boolean)
+
+    @Query("DELETE FROM tracks WHERE id = :trackId")
+    suspend fun deleteById(trackId: Long)
+}
+
+/**
+ * DAO para crear, listar y administrar playlists del usuario.
+ */
+@Dao
+interface PlaylistDao {
+
+    @Query(
+        """
+        SELECT p.id, p.name, p.created_at,
+               COUNT(pt.track_id) AS track_count,
+               (SELECT t.cover_file_path FROM tracks t
+                INNER JOIN playlist_tracks pt2 ON pt2.track_id = t.id
+                WHERE pt2.playlist_id = p.id
+                ORDER BY pt2.added_at ASC LIMIT 1) AS cover_file_path
+        FROM playlists p
+        LEFT JOIN playlist_tracks pt ON pt.playlist_id = p.id
+        GROUP BY p.id
+        ORDER BY p.created_at DESC
+        """,
+    )
+    fun observePlaylists(): Flow<List<PlaylistSummaryRow>>
+
+    @Query("SELECT * FROM playlists WHERE id = :playlistId LIMIT 1")
+    fun observePlaylistById(playlistId: Long): Flow<PlaylistEntity?>
+
+    @Query(
+        """
+        SELECT t.* FROM tracks t
+        INNER JOIN playlist_tracks pt ON pt.track_id = t.id
+        WHERE pt.playlist_id = :playlistId
+        ORDER BY pt.added_at ASC
+        """,
+    )
+    fun observeTracksForPlaylist(playlistId: Long): Flow<List<TrackEntity>>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertPlaylist(playlist: PlaylistEntity): Long
+
+    @Query("DELETE FROM playlists WHERE id = :playlistId")
+    suspend fun deletePlaylist(playlistId: Long)
+
+    @Insert(onConflict = OnConflictStrategy.IGNORE)
+    suspend fun addTrackToPlaylist(crossRef: PlaylistTrackCrossRef)
+
+    @Query("DELETE FROM playlist_tracks WHERE playlist_id = :playlistId AND track_id = :trackId")
+    suspend fun removeTrackFromPlaylist(playlistId: Long, trackId: Long)
+}
+
+/**
+ * Base de datos local Room de Aura Music.
+ */
+@Database(
+    entities = [TrackEntity::class, PlaylistEntity::class, PlaylistTrackCrossRef::class],
+    version = 1,
+    exportSchema = false,
+)
+abstract class AuraDatabase : RoomDatabase() {
+    abstract fun trackDao(): TrackDao
+    abstract fun playlistDao(): PlaylistDao
+}

@@ -1,0 +1,11 @@
+# Archivos generados localmente por Gradle, Android SDK y Cargo/Rust.
+*.iml
+.gradle/
+local.properties
+.idea/
+.DS_Store
+build/
+captures/
+.cxx/
+rust/aura_core/target/
+core/rust/src/main/jniLibs/
