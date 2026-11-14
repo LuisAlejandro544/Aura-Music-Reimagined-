@@ -156,6 +156,7 @@ fn draw_radial_glow(
 
     if let Some(shader) = RadialGradient::new(
         Point::from_xy(cx, cy),
+        0.0,
         Point::from_xy(cx, cy),
         radius,
         stops,
