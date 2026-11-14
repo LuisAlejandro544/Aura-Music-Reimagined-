@@ -27,6 +27,7 @@ import androidx.compose.material.icons.rounded.Favorite
 import androidx.compose.material.icons.rounded.FavoriteBorder
 import androidx.compose.material.icons.rounded.Image
 import androidx.compose.material.icons.rounded.KeyboardArrowDown
+import androidx.compose.material.icons.rounded.MoreVert
 import androidx.compose.material.icons.rounded.MusicNote
 import androidx.compose.material.icons.rounded.Pause
 import androidx.compose.material.icons.rounded.PlayArrow
@@ -37,6 +38,8 @@ import androidx.compose.material.icons.rounded.SkipNext
 import androidx.compose.material.icons.rounded.SkipPrevious
 import androidx.compose.material.icons.rounded.Speed
 import androidx.compose.material.icons.rounded.Tune
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.FilledTonalButton
@@ -227,6 +230,7 @@ fun PlayerScreen(
 ) {
     val track = playbackState.currentTrack
     var showTuningSheet by remember { mutableStateOf(false) }
+    var showOptionsMenu by remember { mutableStateOf(false) }
 
     CoverDynamicTheme(
         coverPath = track?.coverFilePath,
@@ -243,11 +247,15 @@ fun PlayerScreen(
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.primary,
                             fontWeight = FontWeight.Bold,
+                            maxLines = 1,
+                            softWrap = false,
+                            overflow = TextOverflow.Ellipsis,
                         )
                         Text(
                             text = track?.album ?: "Aura Music",
                             style = MaterialTheme.typography.titleSmall,
                             maxLines = 1,
+                            softWrap = false,
                             overflow = TextOverflow.Ellipsis,
                         )
                     }
@@ -262,44 +270,114 @@ fun PlayerScreen(
                     }
                 },
                 actions = {
-                    IconButton(onClick = { showTuningSheet = true }) {
-                        Icon(
-                            imageVector = Icons.Rounded.Speed,
-                            contentDescription = "Velocidad y Crossfade",
-                            tint = if (
-                                kotlin.math.abs(playbackTuning.playbackSpeed - 1.0f) > 0.01f ||
-                                playbackTuning.crossfadeEnabled
-                            ) {
-                                MaterialTheme.colorScheme.primary
-                            } else {
-                                MaterialTheme.colorScheme.onSurface
-                            },
-                        )
-                    }
-                    IconButton(onClick = onOpenQueue) {
-                        Icon(
-                            imageVector = Icons.AutoMirrored.Rounded.QueueMusic,
-                            contentDescription = "Cola de reproducción",
-                        )
-                    }
-                    IconButton(onClick = onOpenEqualizer) {
-                        Icon(
-                            imageVector = Icons.Rounded.Tune,
-                            contentDescription = "Ecualizador",
-                        )
-                    }
-                    if (track != null) {
-                        IconButton(onClick = { onChangeCover(track) }) {
+                    Box {
+                        IconButton(onClick = { showOptionsMenu = true }) {
                             Icon(
-                                imageVector = Icons.Rounded.Image,
-                                contentDescription = "Cambiar carátula",
+                                imageVector = Icons.Rounded.MoreVert,
+                                contentDescription = "Opciones del reproductor",
                             )
                         }
-                        IconButton(onClick = { onOpenAddToPlaylist(track) }) {
-                            Icon(
-                                imageVector = Icons.AutoMirrored.Rounded.PlaylistAdd,
-                                contentDescription = "Añadir a playlist",
+
+                        DropdownMenu(
+                            expanded = showOptionsMenu,
+                            onDismissRequest = { showOptionsMenu = false },
+                        ) {
+                            val hasCustomTuning =
+                                kotlin.math.abs(playbackTuning.playbackSpeed - 1.0f) > 0.01f ||
+                                    playbackTuning.crossfadeEnabled
+                            val tuningLabel = if (hasCustomTuning) {
+                                val parts = buildList {
+                                    if (kotlin.math.abs(playbackTuning.playbackSpeed - 1.0f) > 0.01f) {
+                                        add(PlaybackTuningHelper.formatSpeedLabel(playbackTuning.playbackSpeed))
+                                    }
+                                    if (playbackTuning.crossfadeEnabled) {
+                                        add("Crossfade ${playbackTuning.crossfadeSeconds}s")
+                                    }
+                                }.joinToString(" • ")
+                                "Velocidad y Crossfade ($parts)"
+                            } else {
+                                "Velocidad y Crossfade"
+                            }
+
+                            DropdownMenuItem(
+                                text = { Text(tuningLabel) },
+                                leadingIcon = {
+                                    Icon(
+                                        imageVector = Icons.Rounded.Speed,
+                                        contentDescription = null,
+                                        tint = if (hasCustomTuning) {
+                                            MaterialTheme.colorScheme.primary
+                                        } else {
+                                            MaterialTheme.colorScheme.onSurfaceVariant
+                                        },
+                                    )
+                                },
+                                onClick = {
+                                    showOptionsMenu = false
+                                    showTuningSheet = true
+                                },
                             )
+
+                            DropdownMenuItem(
+                                text = { Text("Ecualizador") },
+                                leadingIcon = {
+                                    Icon(
+                                        imageVector = Icons.Rounded.Tune,
+                                        contentDescription = null,
+                                    )
+                                },
+                                onClick = {
+                                    showOptionsMenu = false
+                                    onOpenEqualizer()
+                                },
+                            )
+
+                            DropdownMenuItem(
+                                text = { Text("Cola de reproducción") },
+                                leadingIcon = {
+                                    Icon(
+                                        imageVector = Icons.AutoMirrored.Rounded.QueueMusic,
+                                        contentDescription = null,
+                                    )
+                                },
+                                onClick = {
+                                    showOptionsMenu = false
+                                    onOpenQueue()
+                                },
+                            )
+
+                            if (track != null) {
+                                HorizontalDivider(
+                                    modifier = Modifier.padding(vertical = 4.dp),
+                                    color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f),
+                                )
+                                DropdownMenuItem(
+                                    text = { Text("Cambiar carátula") },
+                                    leadingIcon = {
+                                        Icon(
+                                            imageVector = Icons.Rounded.Image,
+                                            contentDescription = null,
+                                        )
+                                    },
+                                    onClick = {
+                                        showOptionsMenu = false
+                                        onChangeCover(track)
+                                    },
+                                )
+                                DropdownMenuItem(
+                                    text = { Text("Añadir a playlist") },
+                                    leadingIcon = {
+                                        Icon(
+                                            imageVector = Icons.AutoMirrored.Rounded.PlaylistAdd,
+                                            contentDescription = null,
+                                        )
+                                    },
+                                    onClick = {
+                                        showOptionsMenu = false
+                                        onOpenAddToPlaylist(track)
+                                    },
+                                )
+                            }
                         }
                     }
                 },

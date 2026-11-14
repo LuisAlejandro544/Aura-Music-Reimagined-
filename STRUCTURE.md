@@ -32,13 +32,13 @@
 │   │   ├── database/                  # Room (DAOs, entidades, AuraMigrations) y DataStore (tema, EQ, animaciones, crossfade/velocidad y auto-update)
 │   │   ├── importer/                  # Importador SAF, receptor seguro "Abrir con" (opened_audio/), importación de audio descargado vía Rust fd y WebP sin pérdida
 │   │   ├── downloader/                # Chaquopy Python 3.11 (.pyc), aura_ytdlp.py, AuraDownloadForegroundService (dataSync) y AndroidManifest.xml
-│   │   └── player/                    # Media3 ExoPlayer, AuraPlaybackService (Crossfade + Velocidad + AuraPlaybackTuningProvider), AuraPlayerController y RustEqualizerAudioProcessor
+│   │   └── player/                    # Media3 ExoPlayer, AuraPlaybackService (Crossfade + Velocidad + SessionControlForwardingPlayer + setSessionActivity), AuraPlayerController, RustEqualizerAudioProcessor y res/drawable/ic_aura_notification.xml
 │   ├── feature/
 │   │   ├── library/                   # Pantalla Biblioteca + buscador + menú de cola + hoja de importación / enlace a descargas + animación Rust
 │   │   ├── downloader/                # Pantalla dedicada Descargar audio + vista previa + cancelación + auto-actualizador (sin WebView)
 │   │   ├── playlists/                 # PlaylistsScreen (pestañas Mis playlists y Artistas), LikedSongsScreen, PlaylistDetailScreen y ArtistDetailScreen
-│   │   ├── player/                    # MiniPlayerBar, PlayerScreen (hoja modal Velocidad y Crossfade), QueueScreen (cola de reproducción) y CoverDynamicTheme (Palette + MaterialKolor)
-│   │   ├── settings/                  # Pantalla Ajustes (color global, toggles carátula dinámica/animaciones Rust, Crossfade y velocidad, estado Rust)
+│   │   ├── player/                    # MiniPlayerBar, PlayerScreen (menú de 3 puntos + hoja modal Velocidad y Crossfade), QueueScreen (cola de reproducción) y CoverDynamicTheme (Palette + MaterialKolor)
+│   │   ├── settings/                  # Pantalla Ajustes (color global, toggles carátula dinámica/animaciones Rust y estado Rust)
 │   │   └── equalizer/                 # Pantalla dedicada del ecualizador de 10 bandas (abierta desde PlayerScreen)
 │   └── rust/aura_core/                # Crate Rust (Edition 2024)
 │       ├── .cargo/config.toml         # Flags NDK (-latomic para armv7-linux-androideabi)

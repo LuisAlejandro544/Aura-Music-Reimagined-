@@ -714,12 +714,12 @@ test('Open-with ("Abrir con") ACTION_VIEW handles content/file URIs safely and o
   assert.match(dbKt, /fun findByUriOrFingerprint/);
 
   assert.match(vmKt, /fun openExternalAudioUri\(uri:\s*Uri\)/);
-  assert.match(vmKt, /val openPlayerEvents:\s*SharedFlow<Unit>/);
+  assert.match(vmKt, /val openPlayerEvents:\s*Flow<Unit>/);
   assert.match(rootKt, /viewModel\.openPlayerEvents\.collect/);
   assert.match(rootKt, /AuraRoutes\.PLAYER/);
 });
 
-test('configurable Crossfade (seconds before end) and playback speed work in background service, DataStore, PlayerScreen, and SettingsScreen', () => {
+test('configurable Crossfade (seconds before end) and playback speed live exclusively in PlayerScreen 3-dot menu, service, and DataStore', () => {
   const modelsKt = fs.readFileSync(
     path.join(rootDir, 'android/core/model/src/main/kotlin/com/auramusic/core/model/AuraModels.kt'),
     'utf8',
@@ -775,12 +775,116 @@ test('configurable Crossfade (seconds before end) and playback speed work in bac
   assert.match(vmKt, /fun setCrossfadeSeconds/);
   assert.match(vmKt, /fun setPlaybackSpeed/);
 
+  // PlayerScreen agrupa sus acciones en menú de 3 puntos y mantiene el encabezado en una línea
+  assert.match(playerScreenKt, /Icons\.Rounded\.MoreVert/);
+  assert.match(playerScreenKt, /DropdownMenu\(/);
+  assert.match(playerScreenKt, /DropdownMenuItem\(/);
   assert.match(playerScreenKt, /PlaybackTuningBottomSheet/);
   assert.match(playerScreenKt, /Velocidad y Crossfade/);
-  assert.match(settingsScreenKt, /Crossfade entre canciones/);
-  assert.match(settingsScreenKt, /Velocidad de reproducción/);
+
+  // Ajustes NO debe mostrar Crossfade ni Velocidad de reproducción
+  assert.doesNotMatch(settingsScreenKt, /Crossfade entre canciones/);
+  assert.doesNotMatch(settingsScreenKt, /Velocidad de reproducción/);
+  assert.doesNotMatch(settingsScreenKt, /onToggleCrossfade/);
 });
 
+test('Android system media notification keeps symmetric transport controls, small icon, and opens PlayerScreen', () => {
+  const iconXml = path.join(
+    rootDir,
+    'android/core/player/src/main/res/drawable/ic_aura_notification.xml',
+  );
+  const serviceKt = fs.readFileSync(
+    path.join(rootDir, 'android/core/player/src/main/kotlin/com/auramusic/core/player/AuraPlaybackService.kt'),
+    'utf8',
+  );
+  const appKt = fs.readFileSync(
+    path.join(rootDir, 'android/app/src/main/kotlin/com/auramusic/app/AuraApplication.kt'),
+    'utf8',
+  );
+  const mainKt = fs.readFileSync(
+    path.join(rootDir, 'android/app/src/main/kotlin/com/auramusic/app/MainActivity.kt'),
+    'utf8',
+  );
+  const vmKt = fs.readFileSync(
+    path.join(rootDir, 'android/app/src/main/kotlin/com/auramusic/app/AuraViewModel.kt'),
+    'utf8',
+  );
+  const rootKt = fs.readFileSync(
+    path.join(rootDir, 'android/app/src/main/kotlin/com/auramusic/app/AuraAppRoot.kt'),
+    'utf8',
+  );
 
+  assert.ok(fs.existsSync(iconXml), 'Missing ic_aura_notification.xml');
+  assert.match(serviceKt, /DefaultMediaNotificationProvider/);
+  assert.match(serviceKt, /setSmallIcon\(R\.drawable\.ic_aura_notification\)/);
+  assert.match(serviceKt, /class SessionControlForwardingPlayer/);
+  assert.match(serviceKt, /class ExtendedCommandsListener/);
+  assert.match(serviceKt, /COMMAND_SEEK_TO_NEXT_MEDIA_ITEM/);
+  assert.match(serviceKt, /COMMAND_SEEK_TO_PREVIOUS_MEDIA_ITEM/);
+  assert.match(serviceKt, /setSessionActivity\(pendingIntent\)/);
 
+  assert.match(appKt, /EXTRA_OPEN_PLAYER/);
+  assert.match(appKt, /createOpenPlayerIntent\(\)/);
+  assert.match(mainKt, /EXTRA_OPEN_PLAYER/);
+  assert.match(mainKt, /requestOpenPlayer\(\)/);
+  assert.match(vmKt, /Channel<Unit>\(Channel\.BUFFERED\)/);
+  assert.match(vmKt, /fun requestOpenPlayer\(\)/);
+
+  // Al reproducir una pista descargada se carga la cola completa de la biblioteca para mantener navegación fluida
+  assert.match(rootKt, /onPlayDownloadedTrack\s*=\s*\{\s*track\s*->/);
+  assert.match(rootKt, /viewModel\.playQueue\(tracks,\s*idx\)/);
+});
+
+test('Disco Local con Aura SVG logo and adaptive/notification drawables are wired across app and services', () => {
+  const masterSvg = path.join(rootDir, 'android/app/branding/aura_music_logo.svg');
+  const monoSvg = path.join(rootDir, 'android/app/branding/aura_music_monochrome.svg');
+  const bgXml = fs.readFileSync(
+    path.join(rootDir, 'android/app/src/main/res/drawable/ic_launcher_background.xml'),
+    'utf8',
+  );
+  const fgXml = fs.readFileSync(
+    path.join(rootDir, 'android/app/src/main/res/drawable/ic_launcher_foreground.xml'),
+    'utf8',
+  );
+  const monoXml = path.join(rootDir, 'android/app/src/main/res/drawable/ic_launcher_monochrome.xml');
+  const brandXml = path.join(rootDir, 'android/app/src/main/res/drawable/ic_aura_brand_logo.xml');
+  const launcherXml = fs.readFileSync(
+    path.join(rootDir, 'android/app/src/main/res/mipmap-anydpi-v26/ic_launcher.xml'),
+    'utf8',
+  );
+  const launcherRoundXml = fs.readFileSync(
+    path.join(rootDir, 'android/app/src/main/res/mipmap-anydpi-v26/ic_launcher_round.xml'),
+    'utf8',
+  );
+  const playerNotifXml = fs.readFileSync(
+    path.join(rootDir, 'android/core/player/src/main/res/drawable/ic_aura_notification.xml'),
+    'utf8',
+  );
+  const dlNotifXml = path.join(
+    rootDir,
+    'android/core/downloader/src/main/res/drawable/ic_aura_download_notification.xml',
+  );
+  const dlServiceKt = fs.readFileSync(
+    path.join(rootDir, 'android/core/downloader/src/main/kotlin/com/auramusic/core/downloader/AuraDownloadForegroundService.kt'),
+    'utf8',
+  );
+  const rootKt = fs.readFileSync(
+    path.join(rootDir, 'android/app/src/main/kotlin/com/auramusic/app/AuraAppRoot.kt'),
+    'utf8',
+  );
+
+  assert.ok(fs.existsSync(masterSvg), 'Missing android/app/branding/aura_music_logo.svg');
+  assert.ok(fs.existsSync(monoSvg), 'Missing android/app/branding/aura_music_monochrome.svg');
+  assert.ok(fs.existsSync(monoXml), 'Missing ic_launcher_monochrome.xml');
+  assert.ok(fs.existsSync(brandXml), 'Missing ic_aura_brand_logo.xml');
+  assert.ok(fs.existsSync(dlNotifXml), 'Missing ic_aura_download_notification.xml');
+
+  assert.match(bgXml, /<gradient/);
+  assert.match(fgXml, /<gradient/);
+  assert.match(launcherXml, /<monochrome android:drawable="@drawable\/ic_launcher_monochrome"/);
+  assert.match(launcherRoundXml, /<monochrome android:drawable="@drawable\/ic_launcher_monochrome"/);
+  assert.match(playerNotifXml, /evenOdd/);
+  assert.match(dlServiceKt, /R\.drawable\.ic_aura_download_notification/);
+  assert.match(rootKt, /R\.drawable\.ic_aura_brand_logo/);
+});
 

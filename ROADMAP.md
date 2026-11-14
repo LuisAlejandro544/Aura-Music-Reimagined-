@@ -25,7 +25,7 @@ Plan de evolución por fases para convertir Aura Music en un reproductor local m
 - [x] Playlists automáticas por nombre de artista (`ArtistPlaylistBuilder` + `ArtistDetailScreen`) que agrupan canciones del mismo artista y reproducen únicamente sus temas al entrar en su lista.
 - [x] Cola de reproducción interactiva (`QueueScreen` + `PlaybackQueueHelper`: "Reproducir siguiente", "Añadir a la cola", saltar a pista, reordenar posiciones, quitar elementos y limpiar siguientes).
 - [x] Sistema **"Abrir con Aura Music"** (`Intent.ACTION_VIEW` para `content://` y `file://`), con deduplicación en Room, copia segura de grants temporales en `filesDir/opened_audio/` y reproducción directa en `PlayerScreen`.
-- [x] **Crossfade entre canciones** en segundo plano (`AuraPlaybackService`) con selector de activación y de cuántos segundos antes del final empieza (`1 s – 12 s`), más **control de velocidad de reproducción** (`0.50x – 2.00x`) en `PlayerScreen` y `SettingsScreen` persistidos en DataStore.
+- [x] **Crossfade entre canciones** en segundo plano (`AuraPlaybackService`) con selector de activación y de cuántos segundos antes del final empieza (`1 s – 12 s`), **control de velocidad** (`0.50x – 2.00x`) persistidos en DataStore y **menú de 3 puntos** en `PlayerScreen` para organizar las opciones del reproductor sin saturar el encabezado.
 - [ ] Edición de metadatos básicos de pistas dentro de la base de datos local.
 - [ ] Soporte para letras locales (`.lrc` embebidas o externas).
 - [ ] Exportación e importación de playlists en formato `.m3u8`.

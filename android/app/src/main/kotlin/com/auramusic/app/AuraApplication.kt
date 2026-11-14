@@ -110,4 +110,14 @@ class AuraApplication : Application(), AuraDownloadHost, AuraPlaybackTuningProvi
 
     override fun observePlaybackTuning(): Flow<PlaybackTuning> =
         container.playbackPreferencesRepository.playbackTuning
+
+    override fun createOpenPlayerIntent(): Intent =
+        Intent(this, MainActivity::class.java).apply {
+            flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
+            putExtra(EXTRA_OPEN_PLAYER, true)
+        }
+
+    companion object {
+        const val EXTRA_OPEN_PLAYER = "aura_open_player"
+    }
 }

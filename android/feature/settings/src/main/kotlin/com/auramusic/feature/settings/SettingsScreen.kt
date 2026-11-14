@@ -23,20 +23,14 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.AutoAwesome
 import androidx.compose.material.icons.rounded.AutoFixHigh
 import androidx.compose.material.icons.rounded.Check
-import androidx.compose.material.icons.rounded.GraphicEq
 import androidx.compose.material.icons.rounded.Memory
 import androidx.compose.material.icons.rounded.Palette
-import androidx.compose.material.icons.rounded.Speed
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.FilledTonalButton
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
@@ -50,9 +44,6 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.auramusic.core.model.AppAccentColor
-import com.auramusic.core.model.PlaybackTuning
-import com.auramusic.core.model.PlaybackTuningHelper
-import kotlin.math.roundToInt
 
 /**
  * Pantalla de Ajustes de Aura Music.
@@ -66,14 +57,10 @@ fun SettingsScreen(
     selectedAccent: AppAccentColor,
     dynamicCoverColorsEnabled: Boolean,
     deleteAnimationsEnabled: Boolean,
-    playbackTuning: PlaybackTuning = PlaybackTuning(),
     rustEngineInfo: String,
     onSelectAccent: (AppAccentColor) -> Unit,
     onToggleDynamicCoverColors: (Boolean) -> Unit,
     onToggleDeleteAnimations: (Boolean) -> Unit,
-    onToggleCrossfade: (Boolean) -> Unit = {},
-    onChangeCrossfadeSeconds: (Int) -> Unit = {},
-    onChangePlaybackSpeed: (Float) -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     Scaffold(
@@ -321,152 +308,6 @@ fun SettingsScreen(
                             checked = deleteAnimationsEnabled,
                             onCheckedChange = onToggleDeleteAnimations,
                         )
-                    }
-                }
-            }
-
-            item {
-                Surface(
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(16.dp),
-                    color = MaterialTheme.colorScheme.surfaceContainerHigh,
-                    tonalElevation = 2.dp,
-                ) {
-                    Column(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(16.dp),
-                        verticalArrangement = Arrangement.spacedBy(12.dp),
-                    ) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            Surface(
-                                modifier = Modifier.size(44.dp),
-                                shape = RoundedCornerShape(12.dp),
-                                color = MaterialTheme.colorScheme.primaryContainer,
-                            ) {
-                                Box(contentAlignment = Alignment.Center) {
-                                    Icon(
-                                        imageVector = Icons.Rounded.GraphicEq,
-                                        contentDescription = null,
-                                        tint = MaterialTheme.colorScheme.primary,
-                                    )
-                                }
-                            }
-                            Spacer(modifier = Modifier.width(12.dp))
-                            Column(modifier = Modifier.weight(1f)) {
-                                Text(
-                                    text = "Crossfade entre canciones",
-                                    style = MaterialTheme.typography.titleSmall,
-                                    fontWeight = FontWeight.SemiBold,
-                                )
-                                Text(
-                                    text = if (playbackTuning.crossfadeEnabled) {
-                                        "Activo • Empieza ${playbackTuning.crossfadeSeconds} s antes de terminar"
-                                    } else {
-                                        "Desactivado • Reproducción continua estándar"
-                                    },
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = if (playbackTuning.crossfadeEnabled) {
-                                        MaterialTheme.colorScheme.primary
-                                    } else {
-                                        MaterialTheme.colorScheme.onSurfaceVariant
-                                    },
-                                )
-                            }
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Switch(
-                                checked = playbackTuning.crossfadeEnabled,
-                                onCheckedChange = onToggleCrossfade,
-                            )
-                        }
-
-                        Text(
-                            text = "¿En cuántos segundos antes de terminar empieza?: ${playbackTuning.crossfadeSeconds} s",
-                            style = MaterialTheme.typography.labelMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-
-                        Slider(
-                            value = playbackTuning.crossfadeSeconds.toFloat(),
-                            onValueChange = { raw -> onChangeCrossfadeSeconds(raw.roundToInt()) },
-                            valueRange = PlaybackTuning.MIN_CROSSFADE_SECONDS.toFloat()..PlaybackTuning.MAX_CROSSFADE_SECONDS.toFloat(),
-                            steps = PlaybackTuning.MAX_CROSSFADE_SECONDS - PlaybackTuning.MIN_CROSSFADE_SECONDS - 1,
-                        )
-
-                        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
-
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                        ) {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Icon(
-                                    imageVector = Icons.Rounded.Speed,
-                                    contentDescription = null,
-                                    tint = MaterialTheme.colorScheme.primary,
-                                    modifier = Modifier.size(20.dp),
-                                )
-                                Spacer(modifier = Modifier.width(8.dp))
-                                Text(
-                                    text = "Velocidad de reproducción",
-                                    style = MaterialTheme.typography.titleSmall,
-                                    fontWeight = FontWeight.SemiBold,
-                                )
-                            }
-                            Text(
-                                text = PlaybackTuningHelper.formatSpeedLabel(playbackTuning.playbackSpeed),
-                                style = MaterialTheme.typography.titleSmall,
-                                fontWeight = FontWeight.Bold,
-                                color = MaterialTheme.colorScheme.primary,
-                            )
-                        }
-
-                        Slider(
-                            value = playbackTuning.playbackSpeed,
-                            onValueChange = { raw ->
-                                val snapped = ((raw * 20f).roundToInt() / 20f)
-                                onChangePlaybackSpeed(snapped)
-                            },
-                            valueRange = PlaybackTuning.MIN_PLAYBACK_SPEED..PlaybackTuning.MAX_PLAYBACK_SPEED,
-                        )
-
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(6.dp),
-                        ) {
-                            PlaybackTuning.SPEED_PRESETS.forEach { preset ->
-                                val selected = kotlin.math.abs(playbackTuning.playbackSpeed - preset) < 0.02f
-                                if (selected) {
-                                    FilledTonalButton(
-                                        onClick = { onChangePlaybackSpeed(preset) },
-                                        modifier = Modifier.weight(1f),
-                                        contentPadding = PaddingValues(horizontal = 2.dp),
-                                    ) {
-                                        Text(
-                                            text = PlaybackTuningHelper.formatSpeedLabel(preset),
-                                            style = MaterialTheme.typography.labelSmall,
-                                            maxLines = 1,
-                                        )
-                                    }
-                                } else {
-                                    OutlinedButton(
-                                        onClick = { onChangePlaybackSpeed(preset) },
-                                        modifier = Modifier.weight(1f),
-                                        contentPadding = PaddingValues(horizontal = 2.dp),
-                                    ) {
-                                        Text(
-                                            text = PlaybackTuningHelper.formatSpeedLabel(preset),
-                                            style = MaterialTheme.typography.labelSmall,
-                                            maxLines = 1,
-                                        )
-                                    }
-                                }
-                            }
-                        }
                     }
                 }
             }

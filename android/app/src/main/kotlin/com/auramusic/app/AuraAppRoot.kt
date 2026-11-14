@@ -6,6 +6,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -18,7 +19,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.rounded.GraphicEq
 import androidx.compose.material.icons.rounded.LibraryMusic
 import androidx.compose.material.icons.rounded.QueueMusic
 import androidx.compose.material.icons.rounded.Settings
@@ -42,6 +42,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavGraph.Companion.findStartDestination
@@ -420,14 +422,10 @@ fun AuraAppRoot(viewModel: AuraViewModel) {
                         selectedAccent = accentColor,
                         dynamicCoverColorsEnabled = dynamicCoverColorsEnabled,
                         deleteAnimationsEnabled = deleteAnimationsEnabled,
-                        playbackTuning = playbackTuning,
                         rustEngineInfo = rustEngineInfo,
                         onSelectAccent = viewModel::selectAccentColor,
                         onToggleDynamicCoverColors = viewModel::setDynamicCoverColorsEnabled,
                         onToggleDeleteAnimations = viewModel::setDeleteAnimationsEnabled,
-                        onToggleCrossfade = viewModel::setCrossfadeEnabled,
-                        onChangeCrossfadeSeconds = viewModel::setCrossfadeSeconds,
-                        onChangePlaybackSpeed = viewModel::setPlaybackSpeed,
                     )
                 }
 
@@ -441,7 +439,15 @@ fun AuraAppRoot(viewModel: AuraViewModel) {
                         onCancelPreview = viewModel::dismissDownloadStatus,
                         onCancelDownload = viewModel::cancelActiveDownload,
                         onPlayDownloadedTrack = { track ->
-                            viewModel.playQueue(listOf(track), 0)
+                            val idx = tracks.indexOfFirst {
+                                it.contentUri == track.contentUri ||
+                                    it.trackFingerprint == track.trackFingerprint
+                            }
+                            if (idx >= 0) {
+                                viewModel.playQueue(tracks, idx)
+                            } else {
+                                viewModel.playQueue(listOf(track) + tracks, 0)
+                            }
                             navController.navigate(AuraRoutes.PLAYER) {
                                 launchSingleTop = true
                             }
@@ -557,18 +563,17 @@ fun AuraStartupLoadingScreen() {
             verticalArrangement = Arrangement.Center,
         ) {
             Surface(
-                modifier = Modifier.size(88.dp),
-                shape = RoundedCornerShape(24.dp),
-                color = MaterialTheme.colorScheme.primaryContainer,
+                modifier = Modifier.size(96.dp),
+                shape = RoundedCornerShape(26.dp),
+                color = Color(0xFF151028),
                 tonalElevation = 8.dp,
-                shadowElevation = 12.dp,
+                shadowElevation = 14.dp,
             ) {
                 Box(contentAlignment = Alignment.Center) {
-                    Icon(
-                        imageVector = Icons.Rounded.GraphicEq,
+                    Image(
+                        painter = painterResource(id = R.drawable.ic_aura_brand_logo),
                         contentDescription = "Aura Music",
-                        tint = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.size(46.dp),
+                        modifier = Modifier.size(80.dp),
                     )
                 }
             }

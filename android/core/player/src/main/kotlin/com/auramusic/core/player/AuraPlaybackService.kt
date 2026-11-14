@@ -1,9 +1,12 @@
 package com.auramusic.core.player
 
+import android.app.PendingIntent
 import android.content.Context
+import android.content.Intent
 import androidx.annotation.OptIn
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
+import androidx.media3.common.ForwardingPlayer
 import androidx.media3.common.MediaItem
 import androidx.media3.common.PlaybackParameters
 import androidx.media3.common.Player
@@ -12,6 +15,7 @@ import androidx.media3.exoplayer.DefaultRenderersFactory
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.audio.AudioSink
 import androidx.media3.exoplayer.audio.DefaultAudioSink
+import androidx.media3.session.DefaultMediaNotificationProvider
 import androidx.media3.session.MediaSession
 import androidx.media3.session.MediaSessionService
 import com.auramusic.core.model.PlaybackTuning
@@ -26,14 +30,16 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import java.util.IdentityHashMap
 
 /**
  * Contrato desacoplado para que `:app` suministre al servicio Media3 el flujo reactivo
- * de configuración de Crossfade y velocidad guardado en DataStore sin acoplar `:core:player`
- * con `:core:database`.
+ * de configuración de Crossfade y velocidad guardado en DataStore y el Intent de apertura
+ * del reproductor sin acoplar `:core:player` con `:core:database` ni `:app`.
  */
 interface AuraPlaybackTuningProvider {
     fun observePlaybackTuning(): Flow<PlaybackTuning>
+    fun createOpenPlayerIntent(): Intent? = null
 }
 
 /**
@@ -119,7 +125,31 @@ class AuraPlaybackService : MediaSessionService() {
         player.addListener(primaryListener)
         primaryPlayer = player
 
-        mediaSession = MediaSession.Builder(this, player).build()
+        setMediaNotificationProvider(
+            DefaultMediaNotificationProvider.Builder(this)
+                .build()
+                .apply {
+                    setSmallIcon(R.drawable.ic_aura_notification)
+                },
+        )
+
+        val sessionPlayer = SessionControlForwardingPlayer(player)
+        val sessionBuilder = MediaSession.Builder(this, sessionPlayer)
+        val launchIntent = (applicationContext as? AuraPlaybackTuningProvider)
+            ?.createOpenPlayerIntent()
+            ?: packageManager.getLaunchIntentForPackage(packageName)
+
+        if (launchIntent != null) {
+            val pendingIntent = PendingIntent.getActivity(
+                this,
+                1001,
+                launchIntent,
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+            )
+            sessionBuilder.setSessionActivity(pendingIntent)
+        }
+
+        mediaSession = sessionBuilder.build()
 
         observeTuningPreferences()
     }
@@ -356,5 +386,123 @@ class AuraPlaybackService : MediaSessionService() {
         }
         super.onDestroy()
     }
+
+    /**
+     * Envoltorio de [ForwardingPlayer] exclusivamente para la [MediaSession] del sistema Android.
+     * Garantiza que los comandos de pista anterior y siguiente estén siempre expuestos para que
+     * el reproductor de la barra de notificaciones / pantalla de bloqueo muestre los 3 botones
+     * (`Anterior`, `Play/Pausa` y `Siguiente`) de forma simétrica incluso con 1 pista en cola,
+     * sin alterar la lógica interna de Crossfade sobre `primaryPlayer`.
+     */
+    @OptIn(UnstableApi::class)
+    private class SessionControlForwardingPlayer(
+        private val wrapped: ExoPlayer,
+    ) : ForwardingPlayer(wrapped) {
+
+        private val listenerWrappers = IdentityHashMap<Player.Listener, Player.Listener>()
+
+        private fun extendCommands(base: Player.Commands): Player.Commands {
+            if (wrapped.mediaItemCount <= 0) return base
+            return base.buildUpon()
+                .addAll(
+                    COMMAND_SEEK_TO_PREVIOUS,
+                    COMMAND_SEEK_TO_PREVIOUS_MEDIA_ITEM,
+                    COMMAND_SEEK_TO_NEXT,
+                    COMMAND_SEEK_TO_NEXT_MEDIA_ITEM,
+                )
+                .build()
+        }
+
+        override fun getAvailableCommands(): Player.Commands {
+            return extendCommands(super.getAvailableCommands())
+        }
+
+        override fun isCommandAvailable(command: Int): Boolean {
+            return when (command) {
+                COMMAND_SEEK_TO_PREVIOUS,
+                COMMAND_SEEK_TO_PREVIOUS_MEDIA_ITEM,
+                COMMAND_SEEK_TO_NEXT,
+                COMMAND_SEEK_TO_NEXT_MEDIA_ITEM -> wrapped.mediaItemCount > 0 || super.isCommandAvailable(command)
+                else -> super.isCommandAvailable(command)
+            }
+        }
+
+        override fun addListener(listener: Player.Listener) {
+            val wrapper = synchronized(listenerWrappers) {
+                listenerWrappers.getOrPut(listener) {
+                    ExtendedCommandsListener(listener, ::extendCommands)
+                }
+            }
+            super.addListener(wrapper)
+        }
+
+        override fun removeListener(listener: Player.Listener) {
+            val wrapper = synchronized(listenerWrappers) {
+                listenerWrappers.remove(listener)
+            }
+            super.removeListener(wrapper ?: listener)
+        }
+
+        override fun seekToNext() {
+            if (wrapped.hasNextMediaItem()) {
+                super.seekToNext()
+            } else if (wrapped.mediaItemCount > 0) {
+                wrapped.seekTo(0, 0L)
+                wrapped.play()
+            }
+        }
+
+        override fun seekToNextMediaItem() {
+            if (wrapped.hasNextMediaItem()) {
+                super.seekToNextMediaItem()
+            } else if (wrapped.mediaItemCount > 0) {
+                wrapped.seekTo(0, 0L)
+                wrapped.play()
+            }
+        }
+
+        override fun seekToPrevious() {
+            if (wrapped.currentPosition > 3_500L) {
+                wrapped.seekTo(0L)
+            } else if (wrapped.hasPreviousMediaItem()) {
+                super.seekToPrevious()
+            } else if (wrapped.mediaItemCount > 0) {
+                wrapped.seekTo(0L)
+            }
+        }
+
+        override fun seekToPreviousMediaItem() {
+            if (wrapped.currentPosition > 3_500L) {
+                wrapped.seekTo(0L)
+            } else if (wrapped.hasPreviousMediaItem()) {
+                super.seekToPreviousMediaItem()
+            } else if (wrapped.mediaItemCount > 0) {
+                wrapped.seekTo(0L)
+            }
+        }
+    }
+
+    /**
+     * Delegado de [Player.Listener] para que MediaSession reciba siempre los comandos
+     * completos de pista anterior/siguiente también en el evento `onAvailableCommandsChanged`.
+     */
+    private class ExtendedCommandsListener(
+        private val delegate: Player.Listener,
+        private val extend: (Player.Commands) -> Player.Commands,
+    ) : Player.Listener by delegate {
+
+        override fun onAvailableCommandsChanged(availableCommands: Player.Commands) {
+            delegate.onAvailableCommandsChanged(extend(availableCommands))
+        }
+
+        override fun equals(other: Any?): Boolean {
+            if (this === other) return true
+            val target = (other as? ExtendedCommandsListener)?.delegate ?: other
+            return delegate == target
+        }
+
+        override fun hashCode(): Int = delegate.hashCode()
+    }
 }
+
 

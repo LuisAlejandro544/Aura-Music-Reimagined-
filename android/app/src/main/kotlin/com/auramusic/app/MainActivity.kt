@@ -39,7 +39,7 @@ class MainActivity : ComponentActivity() {
         requestNotificationPermissionIfNeeded()
 
         if (savedInstanceState == null) {
-            handleIncomingViewIntent(intent)
+            handleIncomingIntent(intent)
         }
 
         setContent {
@@ -64,15 +64,20 @@ class MainActivity : ComponentActivity() {
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
-        handleIncomingViewIntent(intent)
+        handleIncomingIntent(intent)
     }
 
-    private fun handleIncomingViewIntent(incoming: Intent?) {
-        if (incoming?.action != Intent.ACTION_VIEW) return
-        val targetUri: Uri = incoming.data
-            ?: incoming.clipData?.takeIf { it.itemCount > 0 }?.getItemAt(0)?.uri
-            ?: return
-        viewModel.openExternalAudioUri(targetUri)
+    private fun handleIncomingIntent(incoming: Intent?) {
+        if (incoming == null) return
+        if (incoming.getBooleanExtra(AuraApplication.EXTRA_OPEN_PLAYER, false)) {
+            viewModel.requestOpenPlayer()
+        }
+        if (incoming.action == Intent.ACTION_VIEW) {
+            val targetUri: Uri = incoming.data
+                ?: incoming.clipData?.takeIf { it.itemCount > 0 }?.getItemAt(0)?.uri
+                ?: return
+            viewModel.openExternalAudioUri(targetUri)
+        }
     }
 
     private fun requestNotificationPermissionIfNeeded() {

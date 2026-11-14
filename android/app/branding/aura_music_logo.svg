@@ -1,0 +1,97 @@
+<!-- Logo maestro en SVG para Aura Music: "Disco Local con Aura" -->
+<!-- Lienzo 108x108 con zona segura adaptativa (r <= 31 alrededor de 54,54) para adaptarse a mascaras circulares, squircle y cuadradas -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 108 108" width="512" height="512">
+  <defs>
+    <!-- Fondo radial nocturno acorde al tema oscuro de Aura Music -->
+    <radialGradient id="auraBgGrad" cx="50%" cy="50%" r="62%">
+      <stop offset="0%" stop-color="#2B1F54" />
+      <stop offset="52%" stop-color="#151028" />
+      <stop offset="100%" stop-color="#09070F" />
+    </radialGradient>
+
+    <!-- Brillo ambiental suave del disco -->
+    <radialGradient id="auraGlowGrad" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#8B5CF6" stop-opacity="0.34" />
+      <stop offset="65%" stop-color="#38BDF8" stop-opacity="0.10" />
+      <stop offset="100%" stop-color="#09070F" stop-opacity="0" />
+    </radialGradient>
+
+    <!-- Cuerpo fisico del disco de vinilo/CD local -->
+    <linearGradient id="vinylBodyGrad" x1="20%" y1="15%" x2="85%" y2="85%">
+      <stop offset="0%" stop-color="#33265E" />
+      <stop offset="50%" stop-color="#19132E" />
+      <stop offset="100%" stop-color="#0E0B1A" />
+    </linearGradient>
+
+    <!-- Borde especular del disco -->
+    <linearGradient id="vinylRimGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#EDE9FE" stop-opacity="0.60" />
+      <stop offset="50%" stop-color="#A78BFA" stop-opacity="0.22" />
+      <stop offset="100%" stop-color="#67E8F9" stop-opacity="0.45" />
+    </linearGradient>
+
+    <!-- Nucleo luminoso central -->
+    <linearGradient id="coreLabelGrad" x1="15%" y1="10%" x2="85%" y2="90%">
+      <stop offset="0%" stop-color="#C084FC" />
+      <stop offset="52%" stop-color="#7C3AED" />
+      <stop offset="100%" stop-color="#38BDF8" />
+    </linearGradient>
+
+    <!-- Arcos de aura sonora superior derecha -->
+    <linearGradient id="arcTopOuterGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#67E8F9" />
+      <stop offset="100%" stop-color="#A78BFA" />
+    </linearGradient>
+    <linearGradient id="arcTopInnerGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#EDE9FE" />
+      <stop offset="100%" stop-color="#8B5CF6" />
+    </linearGradient>
+
+    <!-- Arcos de aura sonora inferior izquierda -->
+    <linearGradient id="arcBottomOuterGrad" x1="100%" y1="100%" x2="0%" y2="0%">
+      <stop offset="0%" stop-color="#67E8F9" />
+      <stop offset="100%" stop-color="#C084FC" />
+    </linearGradient>
+    <linearGradient id="arcBottomInnerGrad" x1="100%" y1="100%" x2="0%" y2="0%">
+      <stop offset="0%" stop-color="#DDD6FE" />
+      <stop offset="100%" stop-color="#A78BFA" />
+    </linearGradient>
+  </defs>
+
+  <!-- Fondo adaptativo completo (108x108) -->
+  <rect x="0" y="0" width="108" height="108" fill="url(#auraBgGrad)" />
+  <circle cx="54" cy="54" r="46" fill="none" stroke="#8B5CF6" stroke-opacity="0.08" stroke-width="0.8" />
+  <circle cx="54" cy="54" r="38" fill="none" stroke="#A78BFA" stroke-opacity="0.12" stroke-width="0.9" />
+  <circle cx="54" cy="54" r="32" fill="url(#auraGlowGrad)" />
+
+  <!-- Ondas de Aura (arcos concentricos asimetricos dentro de la zona segura) -->
+  <path d="M 64.09,26.28 A 29.5,29.5 0 0,1 82.62,61.14"
+        fill="none" stroke="url(#arcTopOuterGrad)" stroke-width="2.5" stroke-linecap="round" />
+  <path d="M 67.87,33.44 A 24.8,24.8 0 0,1 78.74,55.73"
+        fill="none" stroke="url(#arcTopInnerGrad)" stroke-width="2.2" stroke-linecap="round" />
+
+  <path d="M 43.91,81.72 A 29.5,29.5 0 0,1 25.38,46.86"
+        fill="none" stroke="url(#arcBottomOuterGrad)" stroke-width="2.5" stroke-linecap="round" />
+  <path d="M 40.13,74.56 A 24.8,24.8 0 0,1 29.26,52.27"
+        fill="none" stroke="url(#arcBottomInnerGrad)" stroke-width="2.2" stroke-linecap="round" />
+
+  <!-- Disco local fisico (vinilo/CD estilizado) -->
+  <circle cx="54" cy="54" r="20.2" fill="url(#vinylBodyGrad)" />
+  <circle cx="54" cy="54" r="19.8" fill="none" stroke="url(#vinylRimGrad)" stroke-width="1.15" />
+
+  <!-- Reflejos diagonales sutiles de disco -->
+  <path d="M 61.9,38.4 A 17.5,17.5 0 0,1 70.6,48.5 L 65.1,50.3 A 11.7,11.7 0 0,0 59.3,43.6 Z"
+        fill="#EDE9FE" fill-opacity="0.13" />
+  <path d="M 46.1,69.6 A 17.5,17.5 0 0,1 37.4,59.5 L 42.9,57.7 A 11.7,11.7 0 0,0 48.7,64.4 Z"
+        fill="#67E8F9" fill-opacity="0.11" />
+
+  <!-- Surcos del disco local -->
+  <circle cx="54" cy="54" r="16.8" fill="none" stroke="#C4B5FD" stroke-opacity="0.38" stroke-width="0.85" />
+  <circle cx="54" cy="54" r="13.7" fill="none" stroke="#A78BFA" stroke-opacity="0.28" stroke-width="0.85" />
+
+  <!-- Etiqueta central luminosa + icono Play redondeado -->
+  <circle cx="54" cy="54" r="9.2" fill="url(#coreLabelGrad)" />
+  <circle cx="54" cy="54" r="9.2" fill="none" stroke="#F5F3FF" stroke-opacity="0.70" stroke-width="0.85" />
+  <path d="M 51.6,50.1 C 51.6,49.4 52.35,49.0 52.95,49.4 L 58.2,53.2 C 58.75,53.6 58.75,54.4 58.2,54.8 L 52.95,58.6 C 52.35,59.0 51.6,58.6 51.6,57.9 Z"
+        fill="#FFFFFF" />
+</svg>

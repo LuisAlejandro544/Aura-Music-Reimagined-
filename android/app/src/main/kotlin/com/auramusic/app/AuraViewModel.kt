@@ -20,18 +20,17 @@ import com.auramusic.core.model.Track
 import com.auramusic.core.rust.AuraRustBridge
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.onEach
+import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -137,11 +136,11 @@ class AuraViewModel(
     private val _isAppReady = MutableStateFlow(false)
     val isAppReady: StateFlow<Boolean> = _isAppReady.asStateFlow()
 
-    private val _openPlayerEvents = MutableSharedFlow<Unit>(extraBufferCapacity = 1)
-    val openPlayerEvents: SharedFlow<Unit> = _openPlayerEvents.asSharedFlow()
+    private val _openPlayerChannel = Channel<Unit>(Channel.BUFFERED)
+    val openPlayerEvents: Flow<Unit> = _openPlayerChannel.receiveAsFlow()
 
-    private val _uiMessages = MutableSharedFlow<String>(extraBufferCapacity = 4)
-    val uiMessages: SharedFlow<String> = _uiMessages.asSharedFlow()
+    private val _uiMessagesChannel = Channel<String>(Channel.BUFFERED)
+    val uiMessages: Flow<String> = _uiMessagesChannel.receiveAsFlow()
 
     init {
         container.playerController.onUiAttached()
@@ -323,6 +322,10 @@ class AuraViewModel(
         }
     }
 
+    fun requestOpenPlayer() {
+        _openPlayerChannel.trySend(Unit)
+    }
+
     /**
      * Abre e importa de forma segura una canción seleccionada desde otra app ("Abrir con")
      * y la reproduce al instante abriendo la pantalla del reproductor.
@@ -342,10 +345,10 @@ class AuraViewModel(
                 }
                 val startIndex = queue.indexOfFirst { it.id == importedTrack.id }.coerceAtLeast(0)
                 container.playerController.playQueue(queue, startIndex)
-                _openPlayerEvents.tryEmit(Unit)
-                _uiMessages.tryEmit("Abriendo en Aura Music: ${importedTrack.title}")
+                _openPlayerChannel.trySend(Unit)
+                _uiMessagesChannel.trySend("Abriendo en Aura Music: ${importedTrack.title}")
             } else {
-                _uiMessages.tryEmit("No se pudo abrir el archivo de audio seleccionado.")
+                _uiMessagesChannel.trySend("No se pudo abrir el archivo de audio seleccionado.")
             }
         }
     }

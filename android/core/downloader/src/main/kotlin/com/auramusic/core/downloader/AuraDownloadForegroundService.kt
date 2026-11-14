@@ -69,19 +69,20 @@ class AuraDownloadForegroundService : Service() {
             return START_NOT_STICKY
         }
 
+        val accentArgb = intent?.getIntExtra(EXTRA_ACCENT_ARGB, DEFAULT_ACCENT_ARGB)
+            ?: DEFAULT_ACCENT_ARGB
+        val rawUrl = intent?.getStringExtra(EXTRA_URL)
+
         val initialNotification = buildProgressNotification(
             state = downloader.downloadState.value,
             launchIntent = host.createDownloaderNotificationIntent(),
+            accentArgb = accentArgb,
         )
         startForegroundCompat(initialNotification)
 
         if (activeDownloadJob?.isActive == true) {
             return START_NOT_STICKY
         }
-
-        val accentArgb = intent?.getIntExtra(EXTRA_ACCENT_ARGB, DEFAULT_ACCENT_ARGB)
-            ?: DEFAULT_ACCENT_ARGB
-        val rawUrl = intent?.getStringExtra(EXTRA_URL)
 
         acquireWakeLockSafely()
 
@@ -95,6 +96,7 @@ class AuraDownloadForegroundService : Service() {
                         buildProgressNotification(
                             state = state,
                             launchIntent = host.createDownloaderNotificationIntent(),
+                            accentArgb = accentArgb,
                         ),
                     )
                 }
@@ -119,6 +121,7 @@ class AuraDownloadForegroundService : Service() {
                 postTerminalNotification(
                     state = finalState,
                     launchIntent = host.createDownloaderNotificationIntent(),
+                    accentArgb = accentArgb,
                 )
                 ServiceCompat.stopForeground(this@AuraDownloadForegroundService, ServiceCompat.STOP_FOREGROUND_REMOVE)
                 stopSelf()
@@ -174,6 +177,7 @@ class AuraDownloadForegroundService : Service() {
     private fun buildProgressNotification(
         state: DownloadState,
         launchIntent: Intent,
+        accentArgb: Int = DEFAULT_ACCENT_ARGB,
     ): Notification {
         val tapPendingIntent = PendingIntent.getActivity(
             this,
@@ -206,7 +210,8 @@ class AuraDownloadForegroundService : Service() {
         }
 
         return NotificationCompat.Builder(this, CHANNEL_PROGRESS_ID)
-            .setSmallIcon(android.R.drawable.stat_sys_download)
+            .setSmallIcon(R.drawable.ic_aura_download_notification)
+            .setColor(accentArgb)
             .setContentTitle(title)
             .setContentText(contentText)
             .setOngoing(true)
@@ -225,6 +230,7 @@ class AuraDownloadForegroundService : Service() {
     private fun postTerminalNotification(
         state: DownloadState,
         launchIntent: Intent,
+        accentArgb: Int = DEFAULT_ACCENT_ARGB,
     ) {
         if (state.status != DownloadStatus.COMPLETED &&
             state.status != DownloadStatus.ERROR &&
@@ -241,26 +247,24 @@ class AuraDownloadForegroundService : Service() {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
 
-        val (icon, title, message) = when (state.status) {
-            DownloadStatus.COMPLETED -> Triple(
-                android.R.drawable.stat_sys_download_done,
+        val (title, message) = when (state.status) {
+            DownloadStatus.COMPLETED -> Pair(
                 "Descarga completada",
                 state.lastCompletedTrack?.title ?: state.title ?: "Audio añadido a tu biblioteca",
             )
-            DownloadStatus.CANCELLED -> Triple(
-                android.R.drawable.stat_notify_error,
+            DownloadStatus.CANCELLED -> Pair(
                 "Descarga cancelada",
                 state.title ?: "La descarga en segundo plano fue cancelada",
             )
-            else -> Triple(
-                android.R.drawable.stat_notify_error,
+            else -> Pair(
                 "Error en la descarga",
                 state.errorMessage ?: "No se pudo completar la descarga",
             )
         }
 
         val notification = NotificationCompat.Builder(this, CHANNEL_ALERTS_ID)
-            .setSmallIcon(icon)
+            .setSmallIcon(R.drawable.ic_aura_download_notification)
+            .setColor(accentArgb)
             .setContentTitle(title)
             .setContentText(message)
             .setStyle(NotificationCompat.BigTextStyle().bigText(message))
