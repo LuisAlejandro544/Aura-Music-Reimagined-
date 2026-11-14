@@ -25,17 +25,15 @@ jobs:
           distribution: temurin
           java-version: "17"
 
-      - name: Configurar Android SDK 35 y NDK 27 (sin paquete legado tools)
+      - name: Configurar Android SDK base
         uses: android-actions/setup-android@v4
         with:
-          packages: |
-            platform-tools
-            platforms;android-35
-            build-tools;35.0.1
-            ndk;27.2.12479018
+          packages: platform-tools
 
-      - name: Exportar ANDROID_NDK_HOME para cargo-ndk
+      - name: Instalar Android SDK 35, Build Tools y NDK 27
         run: |
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager --install "platform-tools" "platforms;android-35" "build-tools;35.0.1" "ndk;27.2.12479018"
           NDK_PATH="$ANDROID_HOME/ndk/27.2.12479018"
           echo "ANDROID_NDK_HOME=$NDK_PATH" >> "$GITHUB_ENV"
 
