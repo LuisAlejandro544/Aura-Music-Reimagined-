@@ -6,10 +6,10 @@ Guía práctica para extender **Aura Music** de forma ordenada usando asistentes
 
 | Qué quieres añadir | Dónde empezar | Qué conectar |
 | :--- | :--- | :--- |
-| Nueva función nativa, DSP o capacidad JS en Rust | `android/rust/aura_core/src/` (`Cargo.toml` + módulo `.rs` + `lib.rs` o `bin/aura_qjs.rs`) | Añadir `external fun` y wrapper en `AuraRustBridge.kt` (`:core:rust`); si es audio en tiempo real, integrarlo en `RustEqualizerAudioProcessor` / `DefaultAudioSink` (`:core:player`). |
+| Nueva función nativa, DSP, efecto visual o capacidad JS en Rust | `android/rust/aura_core/src/` (`Cargo.toml` + módulo `.rs` como `delete_fx.rs` + `lib.rs` o `bin/aura_qjs.rs`) | Añadir `external fun` y wrapper en `AuraRustBridge.kt` (`:core:rust`); si se consume en `:feature:*`, definir interfaz desacoplada en `:core:model` (ej. `DeleteEffectFrameRenderer`); si es audio en tiempo real, integrarlo en `RustEqualizerAudioProcessor` / `DefaultAudioSink` (`:core:player`). |
 | Mejora en descargas `yt-dlp`, formatos o auto-actualización PyPI | `aura_ytdlp.py` y `YtDlpAudioDownloader.kt` (`:core:downloader`) | Exponer estados en `DownloadState` / `DownloaderEngineStatus` (`:core:model`), conectar en `AuraViewModel.kt` y mostrarlo en `DownloaderScreen.kt` (`:feature:downloader`). |
 | Nuevo campo o tabla en base de datos | `AuraEntities.kt`, `AuraMigrations.kt` y `AuraDatabase.kt` (`:core:database`) | Incrementar `AuraMigrations.CURRENT_DATABASE_VERSION`, añadir `Migration(n, n+1)` en `ALL_MIGRATIONS` (nunca destructiva), exponer en `MusicRepository` y `AuraModels.kt`. |
-| Nueva opción en Ajustes o Ecualizador | `SettingsScreen.kt` (`:feature:settings`), `EqualizerScreen.kt` (`:feature:equalizer`) y DataStore (`:core:database`) | Exponer `StateFlow` y setter en `AuraViewModel.kt` (el ecualizador se abre solo desde `PlayerScreen`). |
+| Nueva opción en Ajustes o Ecualizador | `SettingsScreen.kt` (`:feature:settings`), `EqualizerScreen.kt` (`:feature:equalizer`) y DataStore (`:core:database`) | Exponer `StateFlow` y setter en `AuraViewModel.kt` (ej. `deleteAnimationsEnabled`; el ecualizador se abre solo desde `PlayerScreen`). |
 | Nueva pantalla o subvista | Nuevo composable o módulo `:feature:*` | Registrar ruta en `AuraRoutes` dentro de `AuraAppRoot.kt`. |
 | Nueva acción de reproducción, carátulas o color dinámico | `AuraPlaybackService.kt` (`:core:player`), `CoverDynamicTheme.kt` (`:feature:player`) y `AudioImporter.kt` (`:core:importer`) | Exponer método en `AuraViewModel.kt` y conectarlo a `PlayerScreen` / `MiniPlayerBar` / `LibraryScreen`. |
 

@@ -13,12 +13,22 @@ plugins {
 val rustCrateDir = rootProject.file("rust/aura_core")
 val jniLibsOutputDir = layout.projectDirectory.dir("src/main/jniLibs")
 
+val targetAbis: List<String> = (project.findProperty("auraAbis") as? String)
+    ?.split(",")
+    ?.map { it.trim() }
+    ?.filter { it.isNotEmpty() }
+    ?: listOf("armeabi-v7a", "arm64-v8a", "x86_64")
+
 val buildRustAndroidLibs by tasks.registering(Exec::class) {
     group = "rust"
-    description = "Compila aura_core (libaura_core.so) y aura_qjs (libaura_qjs.so) en Rust para 32 y 64 bits usando cargo-ndk."
+    description = "Compila aura_core (libaura_core.so) y aura_qjs (libaura_qjs.so) en Rust usando cargo-ndk para las ABIs seleccionadas."
     workingDir = rustCrateDir
 
     doFirst {
+        // Limpia salidas nativas previas para evitar mezclar ABIs entre compilaciones individuales secuenciales.
+        jniLibsOutputDir.asFile.deleteRecursively()
+        jniLibsOutputDir.asFile.mkdirs()
+
         // Detecta el NDK en tiempo de ejecución desde ANDROID_NDK_HOME, ANDROID_HOME o local.properties
         // para evitar errores durante la fase de configuración de Gradle.
         val envNdk = System.getenv("ANDROID_NDK_HOME")?.takeIf { it.isNotBlank() }
@@ -81,20 +91,24 @@ val buildRustAndroidLibs by tasks.registering(Exec::class) {
         }
     }
 
-    commandLine(
-        "cargo",
-        "ndk",
-        "-t", "armeabi-v7a",
-        "-t", "arm64-v8a",
-        "-t", "x86_64",
-        "--platform", "26",
-        "-o", jniLibsOutputDir.asFile.absolutePath,
-        "build",
-        "--release",
-        "--lib",
-        "--bin",
-        "aura_qjs",
-    )
+    val ndkCommand = buildList {
+        add("cargo")
+        add("ndk")
+        for (abi in targetAbis) {
+            add("-t")
+            add(abi)
+        }
+        add("--platform")
+        add("26")
+        add("-o")
+        add(jniLibsOutputDir.asFile.absolutePath)
+        add("build")
+        add("--release")
+        add("--lib")
+        add("--bin")
+        add("aura_qjs")
+    }
+    commandLine(ndkCommand)
 
     doLast {
         // Copia el binario ejecutable `aura_qjs` como `libaura_qjs.so` dentro de cada ABI en jniLibs
@@ -104,7 +118,8 @@ val buildRustAndroidLibs by tasks.registering(Exec::class) {
             "arm64-v8a" to "aarch64-linux-android",
             "x86_64" to "x86_64-linux-android",
         )
-        for ((abi, triple) in abiToTriple) {
+        for (abi in targetAbis) {
+            val triple = abiToTriple[abi] ?: error("ABI Rust no soportada: $abi")
             val srcBin = File(rustCrateDir, "target/$triple/release/aura_qjs")
             if (!srcBin.exists()) {
                 error("Falta el binario compilado aura_qjs para $abi en ${srcBin.absolutePath}")
@@ -116,6 +131,7 @@ val buildRustAndroidLibs by tasks.registering(Exec::class) {
         }
     }
 
+    inputs.property("targetAbis", targetAbis.joinToString(","))
     inputs.dir(File(rustCrateDir, "src"))
     inputs.file(File(rustCrateDir, "Cargo.toml"))
     inputs.file(File(rustCrateDir, ".cargo/config.toml"))

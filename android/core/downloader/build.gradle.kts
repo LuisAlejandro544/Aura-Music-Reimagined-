@@ -14,8 +14,13 @@ android {
         minSdk = 26
         consumerProguardFiles("consumer-rules.pro")
 
+        val targetAbis = (project.findProperty("auraAbis") as? String)
+            ?.split(",")
+            ?.map { it.trim() }
+            ?.filter { it.isNotEmpty() }
+            ?: listOf("armeabi-v7a", "arm64-v8a", "x86_64")
         ndk {
-            abiFilters += listOf("armeabi-v7a", "arm64-v8a", "x86_64")
+            abiFilters += targetAbis
         }
     }
 

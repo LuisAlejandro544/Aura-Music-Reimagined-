@@ -5,7 +5,7 @@
 ```text
 .
 ├── .github/workflows/
-│   └── build-android-apk.yml          # Workflow manual "apk Debug" sin caché (Rust + Python 3.11 + Kotlin)
+│   └── build-android-apk.yml          # Workflow manual "apk Debug" sin caché (universal o individuales 32/64 bits)
 ├── android/                           # Proyecto nativo Android (Gradle 8.14.7)
 │   ├── gradlew / gradlew.bat          # Wrapper oficial 8.14.7 con bootstrap automático
 │   ├── gradle/
@@ -23,22 +23,22 @@
 │   │       └── kotlin/com/auramusic/app/
 │   │           ├── AuraApplication.kt # Contenedor modular de dependencias (incluye YtDlpAudioDownloader)
 │   │           ├── AuraTheme.kt       # Esquema de color Material 3 dinámico
-│   │           ├── AuraViewModel.kt   # Coordinador StateFlow de UI, descargas y casos de uso
+│   │           ├── AuraViewModel.kt     # Coordinador StateFlow de UI, descargas y casos de uso
 │   │           ├── AuraAppRoot.kt     # Navegación, barra inferior, MiniPlayer y launchers SAF/galería
 │   │           └── MainActivity.kt    # Punto de entrada edge-to-edge
 │   ├── core/
-│   │   ├── model/                     # Entidades puras de dominio (Track, Playlist, DownloadState, EqualizerState, etc.)
+│   │   ├── model/                     # Entidades puras de dominio (Track, Playlist, DownloadState, DeleteAnimationEffect, EqualizerState, etc.)
 │   │   ├── rust/                      # Puente JNI (AuraRustBridge), códec y tarea cargo-ndk (--lib --bin aura_qjs)
-│   │   ├── database/                  # Room (DAOs, entidades, AuraMigrations) y DataStore (tema, EQ y auto-update)
+│   │   ├── database/                  # Room (DAOs, entidades, AuraMigrations) y DataStore (tema, EQ, animaciones y auto-update)
 │   │   ├── importer/                  # Importador SAF + importación de audio descargado vía Rust fd y WebP sin pérdida
 │   │   ├── downloader/                # Chaquopy Python 3.11 (.pyc) + aura_ytdlp.py (yt-dlp, yt-dlp-ejs, PyPI SHA-256)
 │   │   └── player/                    # Media3 ExoPlayer, AuraPlaybackService y RustEqualizerAudioProcessor
 │   ├── feature/
-│   │   ├── library/                   # Pantalla Biblioteca + buscador + hoja de importación / enlace a descargas
-│   │   ├── downloader/                # Pantalla dedicada Descargar audio + auto-actualizador (sin WebView)
-│   │   ├── playlists/                 # Pantallas Playlists, Favoritos, Detalle y diálogos
+│   │   ├── library/                   # Pantalla Biblioteca + buscador + hoja de importación / enlace a descargas + host de animación Rust
+│   │   ├── downloader/                # Pantalla dedicada Descargar audio + vista previa + auto-actualizador (sin WebView)
+│   │   ├── playlists/                 # Pantallas Playlists, Favoritos, Detalle y host de animación Rust al quitar pistas
 │   │   ├── player/                    # MiniPlayerBar, PlayerScreen y CoverDynamicTheme (Palette + MaterialKolor)
-│   │   ├── settings/                  # Pantalla Ajustes (color global, toggle carátula dinámica, estado Rust y descargas)
+│   │   ├── settings/                  # Pantalla Ajustes (color global, toggles carátula dinámica/animaciones Rust y estado Rust)
 │   │   └── equalizer/                 # Pantalla dedicada del ecualizador de 10 bandas (abierta desde PlayerScreen)
 │   └── rust/aura_core/                # Crate Rust (Edition 2024)
 │       ├── .cargo/config.toml         # Flags NDK (-latomic para armv7-linux-androideabi)
@@ -51,7 +51,8 @@
 │           ├── metadata.rs            # Lector nativo de tags y carátulas embebidas (lofty)
 │           ├── equalizer.rs           # Motor DSP de ecualización de 10 bandas (filtros biquad IIR f64)
 │           ├── artwork.rs             # Motor procedural de carátulas (tiny-skia) y SHA-256
-│           └── palette.rs             # Generador armónico de paletas cromáticas
+│           ├── palette.rs             # Generador armónico de paletas cromáticas
+│           └── delete_fx.rs           # Renderizador de animaciones de eliminación (cenizas, papel quemándose, aura extraña)
 ├── src/                               # Entorno web mínimo ("Hello World") para previsualización
 ├── tests/
 │   └── project-integrity.test.ts      # Validación estructural automatizada (node:test)
@@ -71,5 +72,5 @@
 - `:core:importer` depende de `:core:model`, `:core:database` y `:core:rust`.
 - `:core:downloader` depende de `:core:model`, `:core:database`, `:core:rust` y `:core:importer`; encapsula Chaquopy Python 3.11 (`yt-dlp` y `yt-dlp-ejs`) sin exponer detalles Python al resto de módulos.
 - `:core:player` depende de `:core:model` y `:core:rust` para encapsular Media3 ExoPlayer junto al procesador DSP Rust.
-- Los módulos `:feature:*` (incluyendo `:feature:downloader`) dependen únicamente de `:core:model` (desacoplados entre sí para evitar ciclos y colapsos al escalar).
+- Los módulos `:feature:*` (incluyendo `:feature:downloader`) dependen únicamente de `:core:model` (desacoplados entre sí para evitar ciclos y colapsos al escalar; por ejemplo, las animaciones Rust se invocan mediante `DeleteEffectFrameRenderer`).
 - `:app` conecta todos los módulos mediante `AuraAppContainer`, `AuraViewModel` y `AuraAppRoot`.

@@ -14,8 +14,8 @@ Reglas operativas para cualquier agente que modifique o amplíe **Aura Music**.
    - Cada método `private external fun nombre(...)` en `com.auramusic.core.rust.AuraRustBridge` debe corresponder exactamente a `#[unsafe(no_mangle)] pub extern "system" fn Java_com_auramusic_core_rust_AuraRustBridge_nombre` en `android/rust/aura_core/src/lib.rs`.
    - El binario CLI `aura_qjs` (`android/rust/aura_core/src/bin/aura_qjs.rs`) debe seguir copiándose como `jniLibs/<abi>/libaura_qjs.so` en `:core:rust` con `useLegacyPackaging = true` en `:app`.
 4. **Uso de hilos y motor nativo Rust/Python**:
-   - Prohibido ejecutar `ParcelFileDescriptor`, `DocumentFile`, Room, compresión WebP, Chaquopy (`Python.start` / `yt-dlp`), red PyPI o llamadas JNI (`extractAudioMetadata`, carátulas, hashing, configuración EQ, `evalQuickJs`) en `Dispatchers.Main`.
-   - No reintroducir `MediaMetadataRetriever` ni `android.media.audiofx.Equalizer` en Kotlin; la lectura de metadatos y el DSP del ecualizador pertenecen a Rust (`aura_core::metadata` y `aura_core::equalizer`).
+   - Prohibido ejecutar `ParcelFileDescriptor`, `DocumentFile`, Room, compresión WebP, Chaquopy (`Python.start` / `yt-dlp`), red PyPI o llamadas JNI (`extractAudioMetadata`, carátulas, hashing, configuración EQ, `renderDeleteEffectFrame`, `evalQuickJs`) en `Dispatchers.Main`.
+   - No reintroducir `MediaMetadataRetriever` ni `android.media.audiofx.Equalizer` en Kotlin ni simular en Kotlin los efectos de eliminación; la lectura de metadatos, el DSP del ecualizador y los efectos de eliminación pertenecen a Rust (`aura_core::metadata`, `aura_core::equalizer` y `aura_core::delete_fx`).
    - No añadir `WebView` en descargas ni wrappers copyleft (`youtubedl-android`, `NewPipeExtractor`, `FFmpeg`).
 5. **Documentación en código**:
    - Incluir comentarios explicativos claros en español en archivos nuevos o modificados.

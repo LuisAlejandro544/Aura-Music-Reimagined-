@@ -52,6 +52,14 @@ class AuraViewModel(
                 initialValue = true,
             )
 
+    val deleteAnimationsEnabled: StateFlow<Boolean> =
+        container.themePreferencesRepository.deleteAnimationsEnabled
+            .stateIn(
+                scope = viewModelScope,
+                started = SharingStarted.Eagerly,
+                initialValue = true,
+            )
+
     val equalizerState: StateFlow<EqualizerState> = container.equalizerPreferencesRepository.equalizerState
         .stateIn(
             scope = viewModelScope,
@@ -110,6 +118,7 @@ class AuraViewModel(
             val minSplashDelay = async { delay(320L) }
             val themeJob = async { container.themePreferencesRepository.accentColor.first() }
             val coverColorsJob = async { container.themePreferencesRepository.dynamicCoverColorsEnabled.first() }
+            val deleteFxJob = async { container.themePreferencesRepository.deleteAnimationsEnabled.first() }
             val eqJob = async { container.equalizerPreferencesRepository.equalizerState.first() }
             val tracksJob = async { container.musicRepository.observeAllTracks().first() }
             val playlistsJob = async { container.musicRepository.observePlaylists().first() }
@@ -121,6 +130,7 @@ class AuraViewModel(
 
             themeJob.await()
             coverColorsJob.await()
+            deleteFxJob.await()
             val savedEq = eqJob.await()
             AuraRustBridge.setEqualizerConfig(savedEq.isEnabled, savedEq.bandGainsDb)
             tracksJob.await()
@@ -162,6 +172,20 @@ class AuraViewModel(
 
     fun dismissImportMessage() {
         container.audioImporter.clearLastMessage()
+    }
+
+    fun inspectDownloadUrl(url: String) {
+        viewModelScope.launch {
+            container.ytDlpAudioDownloader.inspectAudioUrl(rawUrl = url)
+        }
+    }
+
+    fun confirmPendingDownload() {
+        viewModelScope.launch {
+            container.ytDlpAudioDownloader.confirmPendingDownload(
+                accentArgb = accentColor.value.primaryArgb.toInt(),
+            )
+        }
     }
 
     fun downloadAudioFromUrl(url: String) {
@@ -270,6 +294,12 @@ class AuraViewModel(
     fun setDynamicCoverColorsEnabled(enabled: Boolean) {
         viewModelScope.launch {
             container.themePreferencesRepository.setDynamicCoverColorsEnabled(enabled)
+        }
+    }
+
+    fun setDeleteAnimationsEnabled(enabled: Boolean) {
+        viewModelScope.launch {
+            container.themePreferencesRepository.setDeleteAnimationsEnabled(enabled)
         }
     }
 

@@ -21,8 +21,8 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.AutoAwesome
+import androidx.compose.material.icons.rounded.AutoFixHigh
 import androidx.compose.material.icons.rounded.Check
-import androidx.compose.material.icons.rounded.CloudDownload
 import androidx.compose.material.icons.rounded.Memory
 import androidx.compose.material.icons.rounded.Palette
 import androidx.compose.material3.Card
@@ -48,18 +48,19 @@ import com.auramusic.core.model.AppAccentColor
 /**
  * Pantalla de Ajustes de Aura Music.
  * Permite cambiar la paleta de colores principal de toda la aplicación en tiempo real,
- * activar o desactivar los colores dinámicos extraídos de la carátula en el reproductor
- * y verificar el estado del motor nativo Rust.
+ * activar o desactivar los colores dinámicos extraídos de la carátula en el reproductor,
+ * controlar las animaciones de eliminación en Rust y verificar el estado del motor nativo Rust.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SettingsScreen(
     selectedAccent: AppAccentColor,
     dynamicCoverColorsEnabled: Boolean,
+    deleteAnimationsEnabled: Boolean,
     rustEngineInfo: String,
     onSelectAccent: (AppAccentColor) -> Unit,
     onToggleDynamicCoverColors: (Boolean) -> Unit,
-    onOpenDownloader: () -> Unit = {},
+    onToggleDeleteAnimations: (Boolean) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     Scaffold(
@@ -255,6 +256,64 @@ fun SettingsScreen(
 
             item {
                 Surface(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(16.dp))
+                        .clickable { onToggleDeleteAnimations(!deleteAnimationsEnabled) },
+                    shape = RoundedCornerShape(16.dp),
+                    color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                    tonalElevation = 2.dp,
+                ) {
+                    Row(
+                        modifier = Modifier.padding(16.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Surface(
+                            modifier = Modifier.size(44.dp),
+                            shape = RoundedCornerShape(12.dp),
+                            color = MaterialTheme.colorScheme.primaryContainer,
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Icon(
+                                    imageVector = Icons.Rounded.AutoFixHigh,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.primary,
+                                )
+                            }
+                        }
+                        Spacer(modifier = Modifier.width(12.dp))
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "Animaciones al eliminar (Rust)",
+                                style = MaterialTheme.typography.titleSmall,
+                                fontWeight = FontWeight.SemiBold,
+                            )
+                            Spacer(modifier = Modifier.height(2.dp))
+                            Text(
+                                text = if (deleteAnimationsEnabled) {
+                                    "Activo • Cenizas, papel quemándose o aura extraña al azar"
+                                } else {
+                                    "Desactivado • Eliminación instantánea tras confirmar"
+                                },
+                                style = MaterialTheme.typography.bodySmall,
+                                color = if (deleteAnimationsEnabled) {
+                                    MaterialTheme.colorScheme.primary
+                                } else {
+                                    MaterialTheme.colorScheme.onSurfaceVariant
+                                },
+                            )
+                        }
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Switch(
+                            checked = deleteAnimationsEnabled,
+                            onCheckedChange = onToggleDeleteAnimations,
+                        )
+                    }
+                }
+            }
+
+            item {
+                Surface(
                     modifier = Modifier.fillMaxWidth(),
                     shape = RoundedCornerShape(16.dp),
                     color = MaterialTheme.colorScheme.surfaceContainerLow,
@@ -283,43 +342,7 @@ fun SettingsScreen(
                             )
                             Spacer(modifier = Modifier.height(4.dp))
                             Text(
-                                text = "Incluye lectura de metadatos, carátulas procedurales, ecualizador de 10 bandas y QuickJS-NG.",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                        }
-                    }
-                }
-            }
-
-            item {
-                Surface(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(16.dp))
-                        .clickable(onClick = onOpenDownloader),
-                    shape = RoundedCornerShape(16.dp),
-                    color = MaterialTheme.colorScheme.surfaceContainerLow,
-                ) {
-                    Row(
-                        modifier = Modifier.padding(16.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Icon(
-                            imageVector = Icons.Rounded.CloudDownload,
-                            contentDescription = null,
-                            tint = MaterialTheme.colorScheme.primary,
-                        )
-                        Spacer(modifier = Modifier.width(12.dp))
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(
-                                text = "Descargas y actualizaciones (yt-dlp)",
-                                style = MaterialTheme.typography.titleSmall,
-                                fontWeight = FontWeight.SemiBold,
-                            )
-                            Spacer(modifier = Modifier.height(2.dp))
-                            Text(
-                                text = "Gestiona descargas de solo audio y actualiza yt-dlp / yt-dlp-ejs desde PyPI.",
+                                text = "Incluye lectura de metadatos, carátulas procedurales, ecualizador de 10 bandas, efectos visuales de eliminación y QuickJS-NG.",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )

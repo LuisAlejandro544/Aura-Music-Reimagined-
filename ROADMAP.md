@@ -18,6 +18,7 @@ Plan de evolución por fases para convertir Aura Music en un reproductor local m
 - [x] Ecualizador gráfico de 10 bandas en Rust (`aura_core::equalizer`) conectado en tiempo real a Media3 ExoPlayer y configurable exclusivamente desde el reproductor.
 - [x] Colores dinámicos animados desde la carátula para `MiniPlayerBar` y `PlayerScreen` (`androidx.palette:palette` + `MaterialKolor`) compatibles desde Android 8.0 y configurables desde Ajustes.
 - [x] Descarga de solo audio con **Python 3.11 ligero (Chaquopy)** + **`yt-dlp`** + **`yt-dlp-ejs`** + **QuickJS-NG compilado en Rust (`libaura_qjs.so`)**, con auto-actualización verificada por SHA-256 desde PyPI sin WebView ni FFmpeg.
+- [x] Animaciones creativas de eliminación en **Rust** (`aura_core::delete_fx`): al confirmar borrar o quitar una canción, ejecuta aleatoriamente *Cenizas*, *Papel quemándose* o *Aura extraña* sobre `DirectByteBuffer` RGBA8888, con interruptor persistido en *Ajustes*.
 - [ ] Análisis de ganancia (ReplayGain) y extracción de forma de onda (waveform) en Rust para previsualización de pistas.
 
 ## Fase 3 — Gestión avanzada de biblioteca y playlists

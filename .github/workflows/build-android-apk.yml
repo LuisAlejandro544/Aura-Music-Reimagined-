@@ -1,12 +1,22 @@
 # Flujo de compilación manual en la nube (GitHub Actions) para Aura Music.
 # Se ejecuta EXCLUSIVAMENTE de forma manual (workflow_dispatch), sin caché alguna,
-# descargando todo el código del proyecto, todas las dependencias de Rust y compilando
-# el binario nativo Rust (32 y 64 bits) junto con Kotlin mediante gradlew para generar el APK Debug.
+# permitiendo elegir entre APK universal o APKs individuales (32 bits y 64 bits).
 
 name: apk Debug
 
 on:
   workflow_dispatch:
+    inputs:
+      apk_mode:
+        description: "Tipo de APK Debug a compilar"
+        required: true
+        default: "universal"
+        type: choice
+        options:
+          - universal
+          - individuales
+          - solo-32bits
+          - solo-64bits
 
 jobs:
   build-apk-debug:
@@ -74,12 +84,33 @@ jobs:
         working-directory: android
         run: chmod +x gradlew
 
-      - name: Compilar Rust (cargo-ndk) y Kotlin para generar APK Debug sin caché
+      - name: Compilar APK Debug (universal o individuales 32/64 bits) sin caché
         working-directory: android
-        run: ./gradlew assembleDebug --no-daemon --no-build-cache --rerun-tasks
+        env:
+          APK_MODE: ${{ inputs.apk_mode }}
+        run: |
+          mkdir -p ../dist-apks
+          if [ "$APK_MODE" = "universal" ]; then
+            ./gradlew assembleDebug -PauraAbis=armeabi-v7a,arm64-v8a,x86_64 --no-daemon --no-build-cache --rerun-tasks
+            cp app/build/outputs/apk/debug/app-debug.apk ../dist-apks/AuraMusic-Debug-universal.apk
+          elif [ "$APK_MODE" = "individuales" ]; then
+            ./gradlew assembleDebug -PauraAbis=armeabi-v7a --no-daemon --no-build-cache --rerun-tasks
+            cp app/build/outputs/apk/debug/app-debug.apk ../dist-apks/AuraMusic-Debug-32bit-armeabi-v7a.apk
+            ./gradlew assembleDebug -PauraAbis=arm64-v8a --no-daemon --no-build-cache --rerun-tasks
+            cp app/build/outputs/apk/debug/app-debug.apk ../dist-apks/AuraMusic-Debug-64bit-arm64-v8a.apk
+          elif [ "$APK_MODE" = "solo-32bits" ]; then
+            ./gradlew assembleDebug -PauraAbis=armeabi-v7a --no-daemon --no-build-cache --rerun-tasks
+            cp app/build/outputs/apk/debug/app-debug.apk ../dist-apks/AuraMusic-Debug-32bit-armeabi-v7a.apk
+          elif [ "$APK_MODE" = "solo-64bits" ]; then
+            ./gradlew assembleDebug -PauraAbis=arm64-v8a --no-daemon --no-build-cache --rerun-tasks
+            cp app/build/outputs/apk/debug/app-debug.apk ../dist-apks/AuraMusic-Debug-64bit-arm64-v8a.apk
+          else
+            echo "Modo desconocido: $APK_MODE"
+            exit 1
+          fi
 
       - name: Subir artefacto APK Debug
         uses: actions/upload-artifact@v4
         with:
-          name: AuraMusic-apk-Debug
-          path: android/app/build/outputs/apk/debug/*.apk
+          name: AuraMusic-apk-Debug-${{ inputs.apk_mode }}
+          path: dist-apks/*.apk

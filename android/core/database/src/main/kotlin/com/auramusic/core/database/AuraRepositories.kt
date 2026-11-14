@@ -179,14 +179,15 @@ class MusicRepository(
 }
 
 /**
- * Repositorio de preferencias visuales (color de acento y colores dinámicos de carátula)
- * respaldado por Jetpack DataStore.
+ * Repositorio de preferencias visuales (color de acento, colores dinámicos de carátula y
+ * animaciones de eliminación en Rust) respaldado por Jetpack DataStore.
  */
 class ThemePreferencesRepository(
     private val context: Context,
 ) {
     private val accentKey = stringPreferencesKey("accent_color")
     private val dynamicCoverColorsKey = booleanPreferencesKey("dynamic_cover_colors")
+    private val deleteAnimationsKey = booleanPreferencesKey("delete_animations_enabled")
 
     val accentColor: Flow<AppAccentColor> = context.auraSettingsDataStore.data.map { prefs ->
         AppAccentColor.fromName(prefs[accentKey])
@@ -194,6 +195,10 @@ class ThemePreferencesRepository(
 
     val dynamicCoverColorsEnabled: Flow<Boolean> = context.auraSettingsDataStore.data.map { prefs ->
         prefs[dynamicCoverColorsKey] ?: true
+    }
+
+    val deleteAnimationsEnabled: Flow<Boolean> = context.auraSettingsDataStore.data.map { prefs ->
+        prefs[deleteAnimationsKey] ?: true
     }
 
     suspend fun setAccentColor(color: AppAccentColor) {
@@ -208,6 +213,14 @@ class ThemePreferencesRepository(
         withContext(Dispatchers.IO) {
             context.auraSettingsDataStore.edit { prefs ->
                 prefs[dynamicCoverColorsKey] = enabled
+            }
+        }
+    }
+
+    suspend fun setDeleteAnimationsEnabled(enabled: Boolean) {
+        withContext(Dispatchers.IO) {
+            context.auraSettingsDataStore.edit { prefs ->
+                prefs[deleteAnimationsKey] = enabled
             }
         }
     }

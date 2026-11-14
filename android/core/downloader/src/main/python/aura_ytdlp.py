@@ -264,6 +264,140 @@ def update_packages(updates_dir: str) -> str:
     return json.dumps(payload)
 
 
+def _resolve_audio_size_and_format(info: dict) -> tuple[int, str]:
+    """Calcula peso estimado en bytes y etiqueta legible de formato/bitrate para la vista previa."""
+    selected = None
+    requested = info.get("requested_formats") or []
+    if requested and isinstance(requested, list):
+        selected = requested[0]
+    elif info.get("acodec") not in (None, "none"):
+        selected = info
+
+    if selected is None:
+        formats = info.get("formats") or []
+        audio_only = [f for f in formats if f.get("acodec") not in (None, "none") and f.get("vcodec") in (None, "none")]
+        if audio_only:
+            selected = audio_only[-1]
+        elif formats:
+            selected = formats[-1]
+        else:
+            selected = info
+
+    size_bytes = int(
+        selected.get("filesize")
+        or selected.get("filesize_approx")
+        or info.get("filesize")
+        or info.get("filesize_approx")
+        or 0
+    )
+    ext = str(selected.get("ext") or info.get("ext") or "audio").upper()
+    abr = selected.get("abr") or info.get("abr")
+    if abr:
+        try:
+            format_label = f"{ext} • {int(round(float(abr)))} kbps"
+        except Exception:
+            format_label = ext
+    else:
+        format_label = ext
+    return max(0, size_bytes), format_label
+
+
+def _detect_thumb_ext(raw_bytes: bytes) -> str:
+    if raw_bytes.startswith(b"\x89PNG\r\n\x1a\n"):
+        return "png"
+    if raw_bytes.startswith(b"\xff\xd8\xff"):
+        return "jpg"
+    if len(raw_bytes) >= 12 and raw_bytes[:4] == b"RIFF" and raw_bytes[8:12] == b"WEBP":
+        return "webp"
+    return "jpg"
+
+
+def _download_preview_thumbnail(thumbnail_url: Optional[str], cache_dir: str, video_id: str) -> Optional[str]:
+    """Descarga la miniatura de vista previa a disco local para mostrarla con Coil sin red extra."""
+    if not thumbnail_url or not cache_dir:
+        return None
+    try:
+        os.makedirs(cache_dir, exist_ok=True)
+        req = urllib.request.Request(
+            thumbnail_url,
+            headers={"User-Agent": "AuraMusic/1.0 (Android)"},
+        )
+        with urllib.request.urlopen(req, timeout=12) as resp:
+            data = resp.read(4 * 1024 * 1024)
+        if not data:
+            return None
+        ext = _detect_thumb_ext(data)
+        safe_id = "".join(c if c.isalnum() or c in ("-", "_") else "_" for c in (video_id or "preview"))[:48]
+        out_path = os.path.join(cache_dir, f"thumb_{safe_id}_{int(time.time() * 1000)}.{ext}")
+        with open(out_path, "wb") as f:
+            f.write(data)
+        return out_path
+    except Exception:
+        return None
+
+
+def inspect_audio_preview(
+    url: str,
+    cache_dir: str,
+    updates_dir: str,
+    qjs_binary_path: Optional[str],
+) -> str:
+    """Obtiene metadatos, duración, peso estimado y miniatura sin descargar el audio aún."""
+    ensure_updates_in_sys_path(updates_dir)
+    import yt_dlp
+
+    ydl_opts: dict = {
+        "format": "bestaudio[ext=m4a]/bestaudio[ext=webm]/bestaudio/best",
+        "noplaylist": True,
+        "quiet": True,
+        "no_warnings": False,
+        "skip_download": True,
+        "socket_timeout": 20,
+    }
+
+    if qjs_binary_path and os.path.exists(qjs_binary_path):
+        ydl_opts["js_runtimes"] = {
+            "quickjs": {
+                "path": qjs_binary_path,
+            }
+        }
+
+    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+        info = ydl.extract_info(url, download=False)
+        if info is None:
+            raise RuntimeError("No se pudo obtener información del enlace.")
+
+        if "entries" in info and info["entries"]:
+            info = next((item for item in info["entries"] if item is not None), info)
+
+        video_id = str(info.get("id") or "")
+        title = info.get("track") or info.get("title") or "Audio sin título"
+        artist = info.get("artist") or info.get("creator") or info.get("uploader") or info.get("channel") or "YouTube"
+        duration_sec = info.get("duration") or 0
+        duration_ms = int(float(duration_sec) * 1000) if duration_sec else 0
+        estimated_size_bytes, format_label = _resolve_audio_size_and_format(info)
+
+        thumb_url = info.get("thumbnail")
+        if not thumb_url:
+            thumbs = info.get("thumbnails") or []
+            if thumbs and isinstance(thumbs, list):
+                thumb_url = thumbs[-1].get("url")
+        local_thumb_path = _download_preview_thumbnail(thumb_url, cache_dir, video_id)
+
+        return json.dumps(
+            {
+                "video_id": video_id,
+                "title": str(title),
+                "artist": str(artist),
+                "duration_ms": duration_ms,
+                "estimated_size_bytes": estimated_size_bytes,
+                "audio_format_label": format_label,
+                "thumbnail_path": local_thumb_path,
+                "webpage_url": str(info.get("webpage_url") or url),
+            }
+        )
+
+
 def download_audio(
     url: str,
     output_dir: str,
@@ -278,8 +412,18 @@ def download_audio(
     import yt_dlp
 
     last_emit_ts = [0.0]
+    last_speed_ts = [time.monotonic()]
+    last_speed_bytes = [0]
+    smoothed_speed = [0.0]
 
-    def emit(stage: str, percent: float = 0.0, downloaded: int = 0, total: int = 0, title: Optional[str] = None) -> None:
+    def emit(
+        stage: str,
+        percent: float = 0.0,
+        downloaded: int = 0,
+        total: int = 0,
+        speed_bps: int = 0,
+        title: Optional[str] = None,
+    ) -> None:
         if progress_callback is None:
             return
         now = time.monotonic()
@@ -294,6 +438,7 @@ def download_audio(
                         "percent": float(percent),
                         "downloaded": int(downloaded),
                         "total": int(total),
+                        "speed_bps": int(max(0, speed_bps)),
                         "title": title,
                     }
                 )
@@ -314,10 +459,32 @@ def download_audio(
             downloaded = int(status_dict.get("downloaded_bytes") or 0)
             total = int(status_dict.get("total_bytes") or status_dict.get("total_bytes_estimate") or 0)
             percent = (downloaded * 100.0 / total) if total > 0 else 0.0
-            emit("downloading", percent=percent, downloaded=downloaded, total=total, title=title)
+
+            raw_speed = status_dict.get("speed")
+            now = time.monotonic()
+            dt = now - last_speed_ts[0]
+            if raw_speed is not None and float(raw_speed) > 0:
+                inst_speed = float(raw_speed)
+                smoothed_speed[0] = inst_speed if smoothed_speed[0] <= 0 else (smoothed_speed[0] * 0.5 + inst_speed * 0.5)
+                last_speed_ts[0] = now
+                last_speed_bytes[0] = downloaded
+            elif dt >= 0.35 and downloaded >= last_speed_bytes[0]:
+                inst_speed = (downloaded - last_speed_bytes[0]) / dt
+                smoothed_speed[0] = inst_speed if smoothed_speed[0] <= 0 else (smoothed_speed[0] * 0.6 + inst_speed * 0.4)
+                last_speed_ts[0] = now
+                last_speed_bytes[0] = downloaded
+
+            emit(
+                "downloading",
+                percent=percent,
+                downloaded=downloaded,
+                total=total,
+                speed_bps=int(smoothed_speed[0]),
+                title=title,
+            )
         elif status == "finished":
             total = int(status_dict.get("total_bytes") or status_dict.get("downloaded_bytes") or 0)
-            emit("importing", percent=100.0, downloaded=total, total=total, title=title)
+            emit("importing", percent=100.0, downloaded=total, total=total, speed_bps=0, title=title)
 
     ydl_opts: dict = {
         # Prioriza audio puro nativo para Media3 ExoPlayer sin depender de FFmpeg (evita LGPL/GPL).

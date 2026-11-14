@@ -1,5 +1,7 @@
 package com.auramusic.feature.library
 
+import android.graphics.Bitmap
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -34,7 +36,9 @@ import androidx.compose.material.icons.rounded.MoreVert
 import androidx.compose.material.icons.rounded.MusicNote
 import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.Search
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.DropdownMenu
@@ -52,25 +56,46 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.asAndroidBitmap
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.layer.drawLayer
+import androidx.compose.ui.graphics.rememberGraphicsLayer
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.layout
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import coil3.compose.AsyncImage
+import com.auramusic.core.model.DeleteAnimationEffect
+import com.auramusic.core.model.DeleteEffectFrameRenderer
 import com.auramusic.core.model.ImportProgress
 import com.auramusic.core.model.Track
 import java.io.File
+import java.nio.ByteBuffer
 import java.util.Locale
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import kotlin.math.roundToInt
 
 /**
  * Pantalla principal de Biblioteca local de Aura Music.
@@ -95,10 +120,15 @@ fun LibraryScreen(
     onOpenLikedSongs: () -> Unit,
     onDismissImportMessage: () -> Unit,
     onOpenDownloader: () -> Unit = {},
+    deleteAnimationsEnabled: Boolean = true,
+    accentArgb: Int = 0xFFA78BFA.toInt(),
+    deleteEffectRenderer: DeleteEffectFrameRenderer? = null,
     modifier: Modifier = Modifier,
 ) {
     var searchQuery by remember { mutableStateOf("") }
     var showImportSheet by remember { mutableStateOf(false) }
+    var trackPendingDelete by remember { mutableStateOf<Track?>(null) }
+    val deletingEffects = remember { mutableStateMapOf<Long, DeleteAnimationEffect>() }
 
     val filteredTracks = remember(tracks, searchQuery) {
         val q = searchQuery.trim().lowercase()
@@ -215,19 +245,67 @@ fun LibraryScreen(
                         items = filteredTracks,
                         key = { _, track -> track.id },
                     ) { index, track ->
-                        TrackRowCard(
-                            track = track,
-                            isCurrent = track.id == currentPlayingTrackId,
-                            onPlay = { onPlayTrack(filteredTracks, index) },
-                            onToggleLike = { onToggleLike(track.id) },
-                            onAddToPlaylist = { onAddToPlaylist(track) },
-                            onChangeCover = { onChangeCover(track) },
-                            onDelete = { onDeleteTrack(track.id) },
-                        )
+                        RustDeleteEffectHost(
+                            trackId = track.id,
+                            activeEffect = deletingEffects[track.id],
+                            accentArgb = accentArgb,
+                            renderer = deleteEffectRenderer,
+                            onAnimationFinished = {
+                                deletingEffects.remove(track.id)
+                                onDeleteTrack(track.id)
+                            },
+                        ) {
+                            TrackRowCard(
+                                track = track,
+                                isCurrent = track.id == currentPlayingTrackId,
+                                onPlay = { onPlayTrack(filteredTracks, index) },
+                                onToggleLike = { onToggleLike(track.id) },
+                                onAddToPlaylist = { onAddToPlaylist(track) },
+                                onChangeCover = { onChangeCover(track) },
+                                onDelete = { trackPendingDelete = track },
+                            )
+                        }
                     }
                 }
             }
         }
+    }
+
+    val pendingDelete = trackPendingDelete
+    if (pendingDelete != null) {
+        AlertDialog(
+            onDismissRequest = { trackPendingDelete = null },
+            title = { Text("Eliminar canción") },
+            text = {
+                Text(
+                    "¿Seguro que quieres quitar \"${pendingDelete.title}\" de Aura Music? Se quitará también de tus playlists.",
+                )
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        val target = pendingDelete
+                        trackPendingDelete = null
+                        if (deleteAnimationsEnabled && deleteEffectRenderer != null) {
+                            deletingEffects[target.id] = DeleteAnimationEffect.random()
+                        } else {
+                            onDeleteTrack(target.id)
+                        }
+                    },
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = MaterialTheme.colorScheme.error,
+                        contentColor = MaterialTheme.colorScheme.onError,
+                    ),
+                ) {
+                    Text("Eliminar")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { trackPendingDelete = null }) {
+                    Text("Cancelar")
+                }
+            },
+        )
     }
 
     if (showImportSheet) {
@@ -641,6 +719,166 @@ private fun ImportResultBanner(
                     imageVector = Icons.Rounded.Close,
                     contentDescription = "Cerrar aviso",
                     modifier = Modifier.size(16.dp),
+                )
+            }
+        }
+    }
+}
+
+/**
+ * Captura la tarjeta de canción y delega en Rust la animación cuadro a cuadro
+ * (cenizas, papel quemándose o aura extraña) antes de ejecutar la eliminación real en Room.
+ */
+@Composable
+private fun RustDeleteEffectHost(
+    trackId: Long,
+    activeEffect: DeleteAnimationEffect?,
+    accentArgb: Int,
+    renderer: DeleteEffectFrameRenderer?,
+    onAnimationFinished: () -> Unit,
+    content: @Composable () -> Unit,
+) {
+    val captureLayer = rememberGraphicsLayer()
+    var renderedFrame by remember(trackId, activeEffect) { mutableStateOf<ImageBitmap?>(null) }
+    var collapseFraction by remember(trackId, activeEffect) { mutableFloatStateOf(0f) }
+    var isFinished by remember(trackId, activeEffect) { mutableStateOf(false) }
+
+    LaunchedEffect(trackId, activeEffect) {
+        if (activeEffect == null) return@LaunchedEffect
+        if (renderer == null) {
+            isFinished = true
+            onAnimationFinished()
+            return@LaunchedEffect
+        }
+
+        try {
+            // Espera un frame para garantizar que la tarjeta esté dibujada sin el modal encima.
+            withFrameNanos { }
+            val capturedBitmap = captureLayer.toImageBitmap().asAndroidBitmap()
+            if (capturedBitmap.width <= 0 || capturedBitmap.height <= 0) {
+                return@LaunchedEffect
+            }
+
+            val prepared = withContext(Dispatchers.Default) {
+                val softwareBitmap = if (capturedBitmap.config != Bitmap.Config.ARGB_8888) {
+                    capturedBitmap.copy(Bitmap.Config.ARGB_8888, false)
+                } else {
+                    capturedBitmap
+                } ?: return@withContext null
+
+                val targetWidth = softwareBitmap.width.coerceAtMost(340).coerceAtLeast(1)
+                val targetHeight = ((softwareBitmap.height.toFloat() / softwareBitmap.width.toFloat()) * targetWidth)
+                    .toInt()
+                    .coerceAtLeast(1)
+                val scaledBitmap = if (targetWidth != softwareBitmap.width || targetHeight != softwareBitmap.height) {
+                    Bitmap.createScaledBitmap(softwareBitmap, targetWidth, targetHeight, true)
+                } else {
+                    softwareBitmap
+                }
+                if (softwareBitmap !== capturedBitmap && scaledBitmap !== softwareBitmap) {
+                    softwareBitmap.recycle()
+                }
+
+                val byteCount = targetWidth * targetHeight * 4
+                val srcBuffer = ByteBuffer.allocateDirect(byteCount)
+                scaledBitmap.copyPixelsToBuffer(srcBuffer)
+                srcBuffer.rewind()
+                if (scaledBitmap !== capturedBitmap) {
+                    scaledBitmap.recycle()
+                }
+
+                Triple(targetWidth, targetHeight, srcBuffer)
+            } ?: return@LaunchedEffect
+
+            val (width, height, srcBuffer) = prepared
+            val dstBuffer = ByteBuffer.allocateDirect(width * height * 4)
+            val frameBitmapA = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+            val frameBitmapB = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+            var useBufferA = true
+
+            val startNanos = System.nanoTime()
+            val durationMs = 1050L
+            val seed = (trackId xor startNanos).toInt()
+
+            while (true) {
+                val elapsedMs = (System.nanoTime() - startNanos) / 1_000_000L
+                val progress = (elapsedMs.toFloat() / durationMs.toFloat()).coerceIn(0f, 1f)
+                collapseFraction = if (progress > 0.85f) {
+                    ((progress - 0.85f) / 0.15f).coerceIn(0f, 1f)
+                } else {
+                    0f
+                }
+
+                srcBuffer.rewind()
+                dstBuffer.rewind()
+                val ok = renderer.renderFrame(
+                    sourceDirectRgba = srcBuffer,
+                    outputDirectRgba = dstBuffer,
+                    width = width,
+                    height = height,
+                    effect = activeEffect,
+                    progress = progress,
+                    seed = seed,
+                    accentArgb = accentArgb,
+                )
+                if (ok) {
+                    dstBuffer.rewind()
+                    val targetBmp = if (useBufferA) frameBitmapA else frameBitmapB
+                    targetBmp.copyPixelsFromBuffer(dstBuffer)
+                    renderedFrame = targetBmp.asImageBitmap()
+                    useBufferA = !useBufferA
+                }
+                if (progress >= 1f) break
+                withFrameNanos { }
+            }
+        } finally {
+            renderedFrame = null
+            isFinished = true
+            onAnimationFinished()
+        }
+    }
+
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clipToBounds()
+            .layout { measurable, constraints ->
+                val placeable = measurable.measure(constraints)
+                val targetHeight = (placeable.height * (1f - collapseFraction))
+                    .roundToInt()
+                    .coerceAtLeast(0)
+                layout(placeable.width, targetHeight) {
+                    placeable.placeRelative(0, 0)
+                }
+            },
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .graphicsLayer {
+                    alpha = if (renderedFrame == null && !isFinished) 1f else 0f
+                }
+                .drawWithContent {
+                    if (renderedFrame == null && !isFinished) {
+                        captureLayer.record {
+                            this@drawWithContent.drawContent()
+                        }
+                        drawLayer(captureLayer)
+                    }
+                },
+        ) {
+            content()
+        }
+
+        val frame = renderedFrame
+        if (frame != null && !isFinished) {
+            Canvas(modifier = Modifier.matchParentSize()) {
+                drawImage(
+                    image = frame,
+                    dstSize = IntSize(
+                        width = size.width.roundToInt().coerceAtLeast(1),
+                        height = size.height.roundToInt().coerceAtLeast(1),
+                    ),
                 )
             }
         }

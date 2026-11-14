@@ -407,3 +407,121 @@ test('audio downloader integrates lightweight Python 3.11 + yt-dlp + yt-dlp-ejs 
   assert.doesNotMatch(cargoToml, /rustypipe|ffmpeg/i);
 });
 
+test('downloader is removed from SettingsScreen, supports preview confirmation + speed metrics, and workflow supports universal/individual APKs', () => {
+  const settingsKt = fs.readFileSync(
+    path.join(rootDir, 'android/feature/settings/src/main/kotlin/com/auramusic/feature/settings/SettingsScreen.kt'),
+    'utf8',
+  );
+  const modelsKt = fs.readFileSync(
+    path.join(rootDir, 'android/core/model/src/main/kotlin/com/auramusic/core/model/AuraModels.kt'),
+    'utf8',
+  );
+  const pyScript = fs.readFileSync(
+    path.join(rootDir, 'android/core/downloader/src/main/python/aura_ytdlp.py'),
+    'utf8',
+  );
+  const downloaderScreen = fs.readFileSync(
+    path.join(rootDir, 'android/feature/downloader/src/main/kotlin/com/auramusic/feature/downloader/DownloaderScreen.kt'),
+    'utf8',
+  );
+  const libraryScreen = fs.readFileSync(
+    path.join(rootDir, 'android/feature/library/src/main/kotlin/com/auramusic/feature/library/LibraryScreen.kt'),
+    'utf8',
+  );
+  const playlistsScreen = fs.readFileSync(
+    path.join(rootDir, 'android/feature/playlists/src/main/kotlin/com/auramusic/feature/playlists/PlaylistsScreen.kt'),
+    'utf8',
+  );
+  const workflow = fs.readFileSync(
+    path.join(rootDir, '.github/workflows/build-android-apk.yml'),
+    'utf8',
+  );
+
+  // yt-dlp solo en Importar, no en Ajustes
+  assert.doesNotMatch(settingsKt, /onOpenDownloader/);
+  assert.doesNotMatch(settingsKt, /Descargas y actualizaciones \(yt-dlp\)/);
+  assert.match(libraryScreen, /onOpenDownloader/);
+
+  // Vista previa antes de confirmar + peso y velocidad en tiempo real
+  assert.match(modelsKt, /data class DownloadPreview/);
+  assert.match(modelsKt, /PREVIEW_READY/);
+  assert.match(modelsKt, /speedBytesPerSec/);
+  assert.match(pyScript, /def inspect_audio_preview/);
+  assert.match(pyScript, /speed_bps/);
+  assert.match(downloaderScreen, /Confirmar descarga/);
+  assert.match(downloaderScreen, /Velocidad/);
+
+  // Modales de confirmación al eliminar canción o quitar de playlist
+  assert.match(libraryScreen, /trackPendingDelete/);
+  assert.match(libraryScreen, /AlertDialog/);
+  assert.match(playlistsScreen, /trackPendingRemove/);
+  assert.match(playlistsScreen, /AlertDialog/);
+
+  // GitHub Actions permite elegir APK universal o individuales (32 y 64 bits)
+  assert.match(workflow, /apk_mode:/);
+  assert.match(workflow, /-\s*universal/);
+  assert.match(workflow, /-\s*individuales/);
+  assert.match(workflow, /armeabi-v7a/);
+  assert.match(workflow, /arm64-v8a/);
+});
+
+test('creative delete animations (ashes, burning paper, strange aura) run randomly in Rust with DataStore toggle', () => {
+  const deleteFxRs = path.join(rootDir, 'android/rust/aura_core/src/delete_fx.rs');
+  const rustLib = fs.readFileSync(path.join(rootDir, 'android/rust/aura_core/src/lib.rs'), 'utf8');
+  const modelsKt = fs.readFileSync(
+    path.join(rootDir, 'android/core/model/src/main/kotlin/com/auramusic/core/model/AuraModels.kt'),
+    'utf8',
+  );
+  const bridgeKt = fs.readFileSync(
+    path.join(rootDir, 'android/core/rust/src/main/kotlin/com/auramusic/core/rust/AuraRustBridge.kt'),
+    'utf8',
+  );
+  const reposKt = fs.readFileSync(
+    path.join(rootDir, 'android/core/database/src/main/kotlin/com/auramusic/core/database/AuraRepositories.kt'),
+    'utf8',
+  );
+  const settingsKt = fs.readFileSync(
+    path.join(rootDir, 'android/feature/settings/src/main/kotlin/com/auramusic/feature/settings/SettingsScreen.kt'),
+    'utf8',
+  );
+  const libraryKt = fs.readFileSync(
+    path.join(rootDir, 'android/feature/library/src/main/kotlin/com/auramusic/feature/library/LibraryScreen.kt'),
+    'utf8',
+  );
+  const playlistsKt = fs.readFileSync(
+    path.join(rootDir, 'android/feature/playlists/src/main/kotlin/com/auramusic/feature/playlists/PlaylistsScreen.kt'),
+    'utf8',
+  );
+  const rootKt = fs.readFileSync(
+    path.join(rootDir, 'android/app/src/main/kotlin/com/auramusic/app/AuraAppRoot.kt'),
+    'utf8',
+  );
+
+  assert.ok(fs.existsSync(deleteFxRs), 'Missing android/rust/aura_core/src/delete_fx.rs');
+  const deleteFxCode = fs.readFileSync(deleteFxRs, 'utf8');
+  assert.match(deleteFxCode, /DeleteEffectKind/);
+  assert.match(deleteFxCode, /Ashes/);
+  assert.match(deleteFxCode, /BurningPaper/);
+  assert.match(deleteFxCode, /StrangeAura/);
+  assert.match(rustLib, /mod delete_fx;/);
+  assert.match(rustLib, /nativeRenderDeleteEffectFrame/);
+
+  assert.match(modelsKt, /enum class DeleteAnimationEffect/);
+  assert.match(modelsKt, /fun random\(\)/);
+  assert.match(modelsKt, /fun interface DeleteEffectFrameRenderer/);
+  assert.match(bridgeKt, /suspend fun renderDeleteEffectFrame/);
+
+  assert.match(reposKt, /delete_animations_enabled/);
+  assert.match(reposKt, /setDeleteAnimationsEnabled/);
+  assert.match(settingsKt, /Animaciones al eliminar \(Rust\)/);
+  assert.match(settingsKt, /onToggleDeleteAnimations/);
+
+  assert.match(libraryKt, /DeleteAnimationEffect\.random\(\)/);
+  assert.match(libraryKt, /DeleteEffectFrameRenderer/);
+  assert.match(playlistsKt, /DeleteAnimationEffect\.random\(\)/);
+  assert.match(playlistsKt, /DeleteEffectFrameRenderer/);
+  assert.match(rootKt, /AuraRustBridge\.renderDeleteEffectFrame/);
+});
+
+
+

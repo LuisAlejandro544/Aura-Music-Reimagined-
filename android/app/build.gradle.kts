@@ -21,9 +21,15 @@ android {
         versionCode = 1
         versionName = "0.1.0"
 
-        // Soporte completo para dispositivos de 32 bits (armeabi-v7a) y 64 bits (arm64-v8a, x86_64).
+        // Soporte completo para dispositivos de 32 bits (armeabi-v7a) y 64 bits (arm64-v8a, x86_64),
+        // configurable mediante `-PauraAbis=...` para compilar APK universal o individuales.
+        val targetAbis = (project.findProperty("auraAbis") as? String)
+            ?.split(",")
+            ?.map { it.trim() }
+            ?.filter { it.isNotEmpty() }
+            ?: listOf("armeabi-v7a", "arm64-v8a", "x86_64")
         ndk {
-            abiFilters += listOf("armeabi-v7a", "arm64-v8a", "x86_64")
+            abiFilters += targetAbis
         }
     }
 

@@ -65,6 +65,17 @@ object AuraRustBridge {
 
     private external fun nativeProcessEqualizerPcmFloat(buffer: ByteBuffer, byteLength: Int): Boolean
 
+    private external fun nativeRenderDeleteEffectFrame(
+        sourceBuffer: ByteBuffer,
+        outputBuffer: ByteBuffer,
+        width: Int,
+        height: Int,
+        effectType: Int,
+        progress: Float,
+        seed: Int,
+        accentArgb: Int,
+    ): Boolean
+
     /**
      * Devuelve la información del motor nativo Rust compilado para la arquitectura actual.
      */
@@ -193,5 +204,34 @@ object AuraRustBridge {
     fun processEqualizerPcmFloat(buffer: ByteBuffer, byteLength: Int): Boolean {
         if (!buffer.isDirect || byteLength <= 0) return false
         return nativeProcessEqualizerPcmFloat(buffer, byteLength)
+    }
+
+    /**
+     * Procesa en Rust un fotograma del efecto de eliminación (cenizas, papel quemándose o
+     * aura extraña) sobre DirectByteBuffers RGBA8888 sin bloquear el hilo principal.
+     */
+    suspend fun renderDeleteEffectFrame(
+        sourceBuffer: ByteBuffer,
+        outputBuffer: ByteBuffer,
+        width: Int,
+        height: Int,
+        effectType: Int,
+        progress: Float,
+        seed: Int,
+        accentArgb: Int,
+    ): Boolean = withContext(Dispatchers.Default) {
+        if (!sourceBuffer.isDirect || !outputBuffer.isDirect || width <= 0 || height <= 0) {
+            return@withContext false
+        }
+        nativeRenderDeleteEffectFrame(
+            sourceBuffer = sourceBuffer,
+            outputBuffer = outputBuffer,
+            width = width,
+            height = height,
+            effectType = effectType,
+            progress = progress,
+            seed = seed,
+            accentArgb = accentArgb,
+        )
     }
 }

@@ -3,6 +3,7 @@ package com.auramusic.core.downloader
 import android.content.Context
 import com.auramusic.core.database.DownloaderPreferencesRepository
 import com.auramusic.core.importer.AudioImporter
+import com.auramusic.core.model.DownloadPreview
 import com.auramusic.core.model.DownloadState
 import com.auramusic.core.model.DownloadStatus
 import com.auramusic.core.model.DownloaderEngineStatus
@@ -48,6 +49,9 @@ class YtDlpAudioDownloader(
 
     private val downloadsDir: File
         get() = File(context.filesDir, "downloads").apply { mkdirs() }
+
+    private val previewCacheDir: File
+        get() = File(context.cacheDir, "preview_thumbs").apply { mkdirs() }
 
     /**
      * Inicializa Chaquopy (si aún no está iniciado) y lee las versiones activas
@@ -137,10 +141,10 @@ class YtDlpAudioDownloader(
     }
 
     /**
-     * Descarga solo el audio de una URL compatible (YouTube, etc.) usando yt-dlp + yt-dlp-ejs +
-     * QuickJS-NG (`libaura_qjs.so`) e importa automáticamente la pista a la biblioteca local.
+     * Analiza un enlace sin descargar el audio aún para mostrar título, miniatura,
+     * canal/artista, duración y peso estimado antes de que el usuario confirme.
      */
-    suspend fun downloadAudio(rawUrl: String, accentArgb: Int) = withContext(Dispatchers.IO) {
+    suspend fun inspectAudioUrl(rawUrl: String) = withContext(Dispatchers.IO) {
         val cleanUrl = normalizeAndValidateUrl(rawUrl)
         if (cleanUrl == null) {
             _downloadState.value = DownloadState(
@@ -153,7 +157,105 @@ class YtDlpAudioDownloader(
 
         if (_downloadState.value.isBusy) return@withContext
 
+        cleanupPreviewThumbs()
+
         if (preferencesRepository.autoUpdateEnabled.first()) {
+            _downloadState.value = DownloadState(
+                status = DownloadStatus.CHECKING_UPDATES,
+                sourceUrl = cleanUrl,
+                statusMessage = "Verificando actualizaciones de yt-dlp y yt-dlp-ejs...",
+            )
+            checkAndUpdateEngines(force = false)
+        }
+
+        _downloadState.value = DownloadState(
+            status = DownloadStatus.FETCHING_INFO,
+            sourceUrl = cleanUrl,
+            statusMessage = "Obteniendo información del enlace con QuickJS-NG...",
+        )
+
+        val qjsPath = AuraRustBridge.resolveQuickJsBinaryPath(context)
+
+        val inspectResult = runCatching {
+            pythonMutex.withLock {
+                val py = ensurePythonStarted()
+                val mod = py.getModule("aura_ytdlp")
+                val rawJson = mod.callAttr(
+                    "inspect_audio_preview",
+                    cleanUrl,
+                    previewCacheDir.absolutePath,
+                    updatesDir.absolutePath,
+                    qjsPath,
+                ).toString()
+                JSONObject(rawJson)
+            }
+        }
+
+        val info = inspectResult.getOrElse { err ->
+            _downloadState.value = DownloadState(
+                status = DownloadStatus.ERROR,
+                sourceUrl = cleanUrl,
+                errorMessage = humanizeDownloadError(err.message),
+            )
+            return@withContext
+        }
+
+        val preview = DownloadPreview(
+            sourceUrl = info.optString("webpage_url").takeIf { it.isNotBlank() } ?: cleanUrl,
+            videoId = info.optString("video_id"),
+            title = info.optString("title", "Audio sin título"),
+            channelOrArtist = info.optString("artist", "YouTube"),
+            durationMs = info.optLong("duration_ms", 0L),
+            estimatedSizeBytes = info.optLong("estimated_size_bytes", 0L),
+            audioFormatLabel = info.optString("audio_format_label"),
+            localThumbnailPath = info.optString("thumbnail_path").takeIf { it.isNotBlank() },
+        )
+
+        _downloadState.value = DownloadState(
+            status = DownloadStatus.PREVIEW_READY,
+            sourceUrl = cleanUrl,
+            title = preview.title,
+            totalBytes = preview.estimatedSizeBytes,
+            preview = preview,
+            statusMessage = "Confirma los datos antes de iniciar la descarga.",
+        )
+    }
+
+    /**
+     * Inicia la descarga del audio previamente previsualizado y confirmado por el usuario.
+     */
+    suspend fun confirmPendingDownload(accentArgb: Int) {
+        val current = _downloadState.value
+        val preview = current.preview ?: return
+        downloadAudio(
+            rawUrl = preview.sourceUrl.ifBlank { current.sourceUrl },
+            accentArgb = accentArgb,
+            preview = preview,
+        )
+    }
+
+    /**
+     * Descarga solo el audio de una URL compatible (YouTube, etc.) usando yt-dlp + yt-dlp-ejs +
+     * QuickJS-NG (`libaura_qjs.so`) e importa automáticamente la pista a la biblioteca local.
+     */
+    suspend fun downloadAudio(
+        rawUrl: String,
+        accentArgb: Int,
+        preview: DownloadPreview? = null,
+    ) = withContext(Dispatchers.IO) {
+        val cleanUrl = normalizeAndValidateUrl(rawUrl)
+        if (cleanUrl == null) {
+            _downloadState.value = DownloadState(
+                status = DownloadStatus.ERROR,
+                sourceUrl = rawUrl,
+                errorMessage = "Ingresa una URL válida que empiece por http:// o https://",
+            )
+            return@withContext
+        }
+
+        if (_downloadState.value.isBusy) return@withContext
+
+        if (preview == null && preferencesRepository.autoUpdateEnabled.first()) {
             _downloadState.value = DownloadState(
                 status = DownloadStatus.CHECKING_UPDATES,
                 sourceUrl = cleanUrl,
@@ -165,7 +267,10 @@ class YtDlpAudioDownloader(
         _downloadState.value = DownloadState(
             status = DownloadStatus.RESOLVING,
             sourceUrl = cleanUrl,
-            statusMessage = "Resolviendo audio y reto EJS con QuickJS-NG...",
+            title = preview?.title,
+            totalBytes = preview?.estimatedSizeBytes ?: 0L,
+            preview = preview,
+            statusMessage = "Resolviendo flujo de audio con QuickJS-NG...",
         )
 
         val qjsPath = AuraRustBridge.resolveQuickJsBinaryPath(context)
@@ -175,7 +280,7 @@ class YtDlpAudioDownloader(
                 val py = ensurePythonStarted()
                 val mod = py.getModule("aura_ytdlp")
                 val callback = PyProgressBridge { payloadJson ->
-                    onPythonProgress(payloadJson)
+                    onPythonProgress(payloadJson, preview?.estimatedSizeBytes ?: 0L)
                 }
                 val resultJson = mod.callAttr(
                     "download_audio",
@@ -193,6 +298,7 @@ class YtDlpAudioDownloader(
             _downloadState.value = DownloadState(
                 status = DownloadStatus.ERROR,
                 sourceUrl = cleanUrl,
+                title = preview?.title,
                 errorMessage = humanizeDownloadError(err.message),
             )
             return@withContext
@@ -201,15 +307,17 @@ class YtDlpAudioDownloader(
         val audioFile = File(info.optString("audio_path"))
         val thumbPath = info.optString("thumbnail_path").takeIf { it.isNotBlank() }
         val thumbFile = thumbPath?.let(::File)?.takeIf { it.exists() }
-        val title = info.optString("title", "Audio descargado")
-        val artist = info.optString("artist", "YouTube")
+            ?: preview?.localThumbnailPath?.let(::File)?.takeIf { it.exists() }
+        val title = info.optString("title", preview?.title ?: "Audio descargado")
+        val artist = info.optString("artist", preview?.channelOrArtist ?: "YouTube")
         val album = info.optString("album", "Descargas Aura")
-        val durationMs = info.optLong("duration_ms", 0L)
+        val durationMs = info.optLong("duration_ms", preview?.durationMs ?: 0L)
 
         _downloadState.value = _downloadState.value.copy(
             status = DownloadStatus.IMPORTING,
             title = title,
             progressPercent = 100f,
+            speedBytesPerSec = 0L,
             statusMessage = "Leyendo metadatos con Rust (lofty) y agregando a tu biblioteca...",
         )
 
@@ -222,6 +330,8 @@ class YtDlpAudioDownloader(
             thumbnailFile = thumbFile,
             accentArgb = accentArgb,
         )
+
+        cleanupPreviewThumbs()
 
         _downloadState.value = if (importedTrack != null) {
             DownloadState(
@@ -245,12 +355,21 @@ class YtDlpAudioDownloader(
 
     fun clearDownloadStatus() {
         if (!_downloadState.value.isBusy) {
+            cleanupPreviewThumbs()
             _downloadState.value = DownloadState()
         }
     }
 
     fun clearUpdateMessage() {
         _engineStatus.value = _engineStatus.value.copy(updateMessage = null)
+    }
+
+    private fun cleanupPreviewThumbs() {
+        runCatching {
+            previewCacheDir.listFiles()?.forEach { file ->
+                if (file.isFile) file.delete()
+            }
+        }
     }
 
     private fun ensurePythonStarted(): Python {
@@ -260,12 +379,14 @@ class YtDlpAudioDownloader(
         return Python.getInstance()
     }
 
-    private fun onPythonProgress(payloadJson: String) {
+    private fun onPythonProgress(payloadJson: String, fallbackTotalBytes: Long) {
         val json = runCatching { JSONObject(payloadJson) }.getOrNull() ?: return
         val stage = json.optString("stage")
         val percent = json.optDouble("percent", 0.0).toFloat()
         val downloaded = json.optLong("downloaded", 0L)
-        val total = json.optLong("total", 0L)
+        val reportedTotal = json.optLong("total", 0L)
+        val total = if (reportedTotal > 0L) reportedTotal else fallbackTotalBytes
+        val speedBps = json.optLong("speed_bps", 0L).coerceAtLeast(0L)
         val title = json.optString("title").takeIf { it.isNotBlank() }
 
         val mappedStatus = when (stage) {
@@ -275,9 +396,17 @@ class YtDlpAudioDownloader(
             else -> _downloadState.value.status
         }
 
+        val effectivePercent = if (percent > 0f) {
+            percent
+        } else if (total > 0L && downloaded > 0L) {
+            (downloaded.toFloat() * 100f / total.toFloat()).coerceIn(0f, 100f)
+        } else {
+            0f
+        }
+
         val message = when (mappedStatus) {
             DownloadStatus.RESOLVING -> "Resolviendo enlace de audio con QuickJS-NG..."
-            DownloadStatus.DOWNLOADING -> "Descargando audio (${percent.toInt().coerceIn(0, 100)}%)..."
+            DownloadStatus.DOWNLOADING -> "Descargando audio (${effectivePercent.toInt().coerceIn(0, 100)}%)..."
             DownloadStatus.IMPORTING -> "Finalizando descarga..."
             else -> _downloadState.value.statusMessage
         }
@@ -285,9 +414,10 @@ class YtDlpAudioDownloader(
         _downloadState.value = _downloadState.value.copy(
             status = mappedStatus,
             title = title ?: _downloadState.value.title,
-            progressPercent = percent,
+            progressPercent = effectivePercent,
             downloadedBytes = downloaded,
             totalBytes = total,
+            speedBytesPerSec = speedBps,
             statusMessage = message,
         )
     }

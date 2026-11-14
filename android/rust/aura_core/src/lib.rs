@@ -7,9 +7,10 @@
 
 use jni::JNIEnv;
 use jni::objects::{JByteArray, JByteBuffer, JClass, JFloatArray, JString};
-use jni::sys::{JNI_FALSE, JNI_TRUE, jboolean, jint, jlong, jstring};
+use jni::sys::{JNI_FALSE, JNI_TRUE, jboolean, jfloat, jint, jlong, jstring};
 
 mod artwork;
+mod delete_fx;
 mod equalizer;
 pub mod js_runtime;
 mod metadata;
@@ -284,5 +285,62 @@ fn process_direct_pcm_buffer(
     };
 
     if applied { JNI_TRUE } else { JNI_FALSE }
+}
+
+/// Renderiza en Rust un fotograma del efecto creativo de eliminación sobre DirectByteBuffers RGBA8888.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_com_auramusic_core_rust_AuraRustBridge_nativeRenderDeleteEffectFrame<'local>(
+    env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    source_buffer: JByteBuffer<'local>,
+    output_buffer: JByteBuffer<'local>,
+    width: jint,
+    height: jint,
+    effect_type: jint,
+    progress: jfloat,
+    seed: jint,
+    accent_argb: jint,
+) -> jboolean {
+    if width <= 0 || height <= 0 {
+        return JNI_FALSE;
+    }
+    let w = width as usize;
+    let h = height as usize;
+    let Some(required) = w.checked_mul(h).and_then(|px| px.checked_mul(4)) else {
+        return JNI_FALSE;
+    };
+
+    let Ok(src_ptr) = env.get_direct_buffer_address(&source_buffer) else {
+        return JNI_FALSE;
+    };
+    let Ok(src_cap) = env.get_direct_buffer_capacity(&source_buffer) else {
+        return JNI_FALSE;
+    };
+    let Ok(dst_ptr) = env.get_direct_buffer_address(&output_buffer) else {
+        return JNI_FALSE;
+    };
+    let Ok(dst_cap) = env.get_direct_buffer_capacity(&output_buffer) else {
+        return JNI_FALSE;
+    };
+
+    if src_ptr.is_null() || dst_ptr.is_null() || src_cap < required || dst_cap < required {
+        return JNI_FALSE;
+    }
+
+    // SAFETY: ambos son DirectByteBuffer no nulos con capacidad >= width * height * 4 verificada.
+    let src_slice = unsafe { std::slice::from_raw_parts(src_ptr, required) };
+    let dst_slice = unsafe { std::slice::from_raw_parts_mut(dst_ptr, required) };
+    let ok = delete_fx::render_delete_effect_frame(
+        src_slice,
+        dst_slice,
+        w,
+        h,
+        delete_fx::DeleteEffectKind::from_i32(effect_type),
+        progress,
+        seed as u32,
+        accent_argb as u32,
+    );
+
+    if ok { JNI_TRUE } else { JNI_FALSE }
 }
 

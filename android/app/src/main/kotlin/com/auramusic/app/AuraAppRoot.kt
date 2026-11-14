@@ -46,7 +46,9 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
+import com.auramusic.core.model.DeleteEffectFrameRenderer
 import com.auramusic.core.model.Track
+import com.auramusic.core.rust.AuraRustBridge
 import com.auramusic.feature.downloader.DownloaderScreen
 import com.auramusic.feature.equalizer.EqualizerScreen
 import com.auramusic.feature.library.LibraryScreen
@@ -92,8 +94,25 @@ fun AuraAppRoot(viewModel: AuraViewModel) {
     val downloaderEngineStatus by viewModel.downloaderEngineStatus.collectAsStateWithLifecycle()
     val accentColor by viewModel.accentColor.collectAsStateWithLifecycle()
     val dynamicCoverColorsEnabled by viewModel.dynamicCoverColorsEnabled.collectAsStateWithLifecycle()
+    val deleteAnimationsEnabled by viewModel.deleteAnimationsEnabled.collectAsStateWithLifecycle()
     val equalizerState by viewModel.equalizerState.collectAsStateWithLifecycle()
     val rustEngineInfo by viewModel.rustEngineInfo.collectAsStateWithLifecycle()
+
+    // Puente desacoplado hacia el renderizador nativo de animaciones de eliminación en Rust.
+    val deleteEffectRenderer = remember {
+        DeleteEffectFrameRenderer { src, dst, width, height, effect, progress, seed, accentArgb ->
+            AuraRustBridge.renderDeleteEffectFrame(
+                sourceBuffer = src,
+                outputBuffer = dst,
+                width = width,
+                height = height,
+                effectType = effect.id,
+                progress = progress,
+                seed = seed,
+                accentArgb = accentArgb,
+            )
+        }
+    }
 
     var trackForPlaylistSheet by remember { mutableStateOf<Track?>(null) }
     var pendingCoverTrackId by remember { mutableStateOf<Long?>(null) }
@@ -241,6 +260,9 @@ fun AuraAppRoot(viewModel: AuraViewModel) {
                                 launchSingleTop = true
                             }
                         },
+                        deleteAnimationsEnabled = deleteAnimationsEnabled,
+                        accentArgb = accentColor.primaryArgb.toInt(),
+                        deleteEffectRenderer = deleteEffectRenderer,
                     )
                 }
 
@@ -287,6 +309,9 @@ fun AuraAppRoot(viewModel: AuraViewModel) {
                         onRemoveFromPlaylist = { trackId ->
                             viewModel.removeTrackFromPlaylist(playlistId, trackId)
                         },
+                        deleteAnimationsEnabled = deleteAnimationsEnabled,
+                        accentArgb = accentColor.primaryArgb.toInt(),
+                        deleteEffectRenderer = deleteEffectRenderer,
                     )
                 }
 
@@ -294,14 +319,11 @@ fun AuraAppRoot(viewModel: AuraViewModel) {
                     SettingsScreen(
                         selectedAccent = accentColor,
                         dynamicCoverColorsEnabled = dynamicCoverColorsEnabled,
+                        deleteAnimationsEnabled = deleteAnimationsEnabled,
                         rustEngineInfo = rustEngineInfo,
                         onSelectAccent = viewModel::selectAccentColor,
                         onToggleDynamicCoverColors = viewModel::setDynamicCoverColorsEnabled,
-                        onOpenDownloader = {
-                            navController.navigate(AuraRoutes.DOWNLOADER) {
-                                launchSingleTop = true
-                            }
-                        },
+                        onToggleDeleteAnimations = viewModel::setDeleteAnimationsEnabled,
                     )
                 }
 
@@ -310,7 +332,9 @@ fun AuraAppRoot(viewModel: AuraViewModel) {
                         downloadState = downloadState,
                         engineStatus = downloaderEngineStatus,
                         onBack = { navController.popBackStack() },
-                        onStartDownload = viewModel::downloadAudioFromUrl,
+                        onInspectUrl = viewModel::inspectDownloadUrl,
+                        onConfirmDownload = viewModel::confirmPendingDownload,
+                        onCancelPreview = viewModel::dismissDownloadStatus,
                         onPlayDownloadedTrack = { track ->
                             viewModel.playQueue(listOf(track), 0)
                             navController.navigate(AuraRoutes.PLAYER) {

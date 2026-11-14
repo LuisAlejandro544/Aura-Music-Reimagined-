@@ -291,12 +291,28 @@ data class EqualizerState(
 enum class DownloadStatus {
     IDLE,
     CHECKING_UPDATES,
+    FETCHING_INFO,
+    PREVIEW_READY,
     RESOLVING,
     DOWNLOADING,
     IMPORTING,
     COMPLETED,
     ERROR,
 }
+
+/**
+ * Vista previa de una pista o vídeo antes de confirmar la descarga de audio.
+ */
+data class DownloadPreview(
+    val sourceUrl: String,
+    val videoId: String = "",
+    val title: String,
+    val channelOrArtist: String,
+    val durationMs: Long = 0L,
+    val estimatedSizeBytes: Long = 0L,
+    val audioFormatLabel: String = "",
+    val localThumbnailPath: String? = null,
+)
 
 /**
  * Estado reactivo de la descarga de audio en curso expuesto a la interfaz de Descargas.
@@ -308,12 +324,15 @@ data class DownloadState(
     val progressPercent: Float = 0f,
     val downloadedBytes: Long = 0L,
     val totalBytes: Long = 0L,
+    val speedBytesPerSec: Long = 0L,
+    val preview: DownloadPreview? = null,
     val statusMessage: String? = null,
     val errorMessage: String? = null,
     val lastCompletedTrack: Track? = null,
 ) {
     val isBusy: Boolean
         get() = status == DownloadStatus.CHECKING_UPDATES ||
+            status == DownloadStatus.FETCHING_INFO ||
             status == DownloadStatus.RESOLVING ||
             status == DownloadStatus.DOWNLOADING ||
             status == DownloadStatus.IMPORTING
@@ -341,5 +360,35 @@ data class DownloaderEngineStatus(
     val isUpdating: Boolean = false,
     val updateMessage: String? = null,
 )
+
+/**
+ * Efectos creativos ejecutados en Rust al eliminar o quitar una canción.
+ */
+enum class DeleteAnimationEffect(val id: Int) {
+    ASHES(0),
+    BURNING_PAPER(1),
+    STRANGE_AURA(2);
+
+    companion object {
+        fun random(): DeleteAnimationEffect = entries.random()
+    }
+}
+
+/**
+ * Contrato desacoplado para que las pantallas de `:feature:*` invoquen el motor Rust
+ * de animaciones de eliminación sin acoplarse directamente a `:core:rust`.
+ */
+fun interface DeleteEffectFrameRenderer {
+    suspend fun renderFrame(
+        sourceDirectRgba: java.nio.ByteBuffer,
+        outputDirectRgba: java.nio.ByteBuffer,
+        width: Int,
+        height: Int,
+        effect: DeleteAnimationEffect,
+        progress: Float,
+        seed: Int,
+        accentArgb: Int,
+    ): Boolean
+}
 
 
