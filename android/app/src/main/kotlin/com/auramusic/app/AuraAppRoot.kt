@@ -47,6 +47,7 @@ import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import com.auramusic.core.model.Track
+import com.auramusic.feature.downloader.DownloaderScreen
 import com.auramusic.feature.equalizer.EqualizerScreen
 import com.auramusic.feature.library.LibraryScreen
 import com.auramusic.feature.player.MiniPlayerBar
@@ -62,6 +63,7 @@ private object AuraRoutes {
     const val PLAYLISTS = "playlists"
     const val SETTINGS = "settings"
     const val EQUALIZER = "equalizer"
+    const val DOWNLOADER = "downloader"
     const val LIKED = "liked"
     const val PLAYER = "player"
     const val PLAYLIST_DETAIL = "playlist/{playlistId}"
@@ -86,6 +88,8 @@ fun AuraAppRoot(viewModel: AuraViewModel) {
     val playlists by viewModel.playlists.collectAsStateWithLifecycle()
     val playbackState by viewModel.playbackState.collectAsStateWithLifecycle()
     val importProgress by viewModel.importProgress.collectAsStateWithLifecycle()
+    val downloadState by viewModel.downloadState.collectAsStateWithLifecycle()
+    val downloaderEngineStatus by viewModel.downloaderEngineStatus.collectAsStateWithLifecycle()
     val accentColor by viewModel.accentColor.collectAsStateWithLifecycle()
     val dynamicCoverColorsEnabled by viewModel.dynamicCoverColorsEnabled.collectAsStateWithLifecycle()
     val equalizerState by viewModel.equalizerState.collectAsStateWithLifecycle()
@@ -123,7 +127,9 @@ fun AuraAppRoot(viewModel: AuraViewModel) {
         }
     }
 
-    val showBottomChrome = currentRoute != AuraRoutes.PLAYER && currentRoute != AuraRoutes.EQUALIZER
+    val showBottomChrome = currentRoute != AuraRoutes.PLAYER &&
+        currentRoute != AuraRoutes.EQUALIZER &&
+        currentRoute != AuraRoutes.DOWNLOADER
 
     Scaffold(
         containerColor = MaterialTheme.colorScheme.background,
@@ -230,6 +236,11 @@ fun AuraAppRoot(viewModel: AuraViewModel) {
                         onDeleteTrack = viewModel::deleteTrack,
                         onOpenLikedSongs = { navController.navigate(AuraRoutes.LIKED) },
                         onDismissImportMessage = viewModel::dismissImportMessage,
+                        onOpenDownloader = {
+                            navController.navigate(AuraRoutes.DOWNLOADER) {
+                                launchSingleTop = true
+                            }
+                        },
                     )
                 }
 
@@ -286,6 +297,30 @@ fun AuraAppRoot(viewModel: AuraViewModel) {
                         rustEngineInfo = rustEngineInfo,
                         onSelectAccent = viewModel::selectAccentColor,
                         onToggleDynamicCoverColors = viewModel::setDynamicCoverColorsEnabled,
+                        onOpenDownloader = {
+                            navController.navigate(AuraRoutes.DOWNLOADER) {
+                                launchSingleTop = true
+                            }
+                        },
+                    )
+                }
+
+                composable(AuraRoutes.DOWNLOADER) {
+                    DownloaderScreen(
+                        downloadState = downloadState,
+                        engineStatus = downloaderEngineStatus,
+                        onBack = { navController.popBackStack() },
+                        onStartDownload = viewModel::downloadAudioFromUrl,
+                        onPlayDownloadedTrack = { track ->
+                            viewModel.playQueue(listOf(track), 0)
+                            navController.navigate(AuraRoutes.PLAYER) {
+                                launchSingleTop = true
+                            }
+                        },
+                        onCheckUpdates = viewModel::checkDownloaderUpdates,
+                        onToggleAutoUpdate = viewModel::setDownloaderAutoUpdate,
+                        onDismissDownloadStatus = viewModel::dismissDownloadStatus,
+                        onDismissUpdateMessage = viewModel::dismissDownloaderUpdateMessage,
                     )
                 }
 

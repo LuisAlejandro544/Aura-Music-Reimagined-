@@ -22,6 +22,7 @@ import androidx.compose.material.icons.automirrored.rounded.PlaylistAdd
 import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.AudioFile
 import androidx.compose.material.icons.rounded.Close
+import androidx.compose.material.icons.rounded.CloudDownload
 import androidx.compose.material.icons.rounded.CreateNewFolder
 import androidx.compose.material.icons.rounded.DeleteOutline
 import androidx.compose.material.icons.rounded.Favorite
@@ -93,6 +94,7 @@ fun LibraryScreen(
     onDeleteTrack: (Long) -> Unit,
     onOpenLikedSongs: () -> Unit,
     onDismissImportMessage: () -> Unit,
+    onOpenDownloader: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     var searchQuery by remember { mutableStateOf("") }
@@ -169,6 +171,7 @@ fun LibraryScreen(
                     onImportSingleTrack = onImportSingleTrack,
                     onImportMultipleTracks = onImportMultipleTracks,
                     onImportFolder = onImportFolder,
+                    onOpenDownloader = onOpenDownloader,
                 )
             } else {
                 LazyColumn(
@@ -276,6 +279,15 @@ fun LibraryScreen(
                     onClick = {
                         showImportSheet = false
                         onImportFolder()
+                    },
+                )
+                ImportOptionCard(
+                    icon = Icons.Rounded.CloudDownload,
+                    title = "Descargar audio por enlace",
+                    subtitle = "Usa yt-dlp + yt-dlp-ejs + QuickJS-NG para añadir audio directo a tu biblioteca",
+                    onClick = {
+                        showImportSheet = false
+                        onOpenDownloader()
                     },
                 )
             }
@@ -460,6 +472,7 @@ private fun EmptyLibraryState(
     onImportSingleTrack: () -> Unit,
     onImportMultipleTracks: () -> Unit,
     onImportFolder: () -> Unit,
+    onOpenDownloader: () -> Unit,
 ) {
     Column(
         modifier = Modifier
@@ -524,6 +537,16 @@ private fun EmptyLibraryState(
             ) {
                 Text("Varias canciones")
             }
+        }
+        Spacer(modifier = Modifier.height(10.dp))
+        FilledTonalButton(
+            onClick = onOpenDownloader,
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(14.dp),
+        ) {
+            Icon(Icons.Rounded.CloudDownload, contentDescription = null)
+            Spacer(modifier = Modifier.width(8.dp))
+            Text("Descargar audio por enlace")
         }
     }
 }

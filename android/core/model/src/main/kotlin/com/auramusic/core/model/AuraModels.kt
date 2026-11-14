@@ -285,3 +285,61 @@ data class EqualizerState(
     }
 }
 
+/**
+ * Estados del ciclo de vida de descarga de audio desde YouTube mediante yt-dlp + QuickJS-NG.
+ */
+enum class DownloadStatus {
+    IDLE,
+    CHECKING_UPDATES,
+    RESOLVING,
+    DOWNLOADING,
+    IMPORTING,
+    COMPLETED,
+    ERROR,
+}
+
+/**
+ * Estado reactivo de la descarga de audio en curso expuesto a la interfaz de Descargas.
+ */
+data class DownloadState(
+    val status: DownloadStatus = DownloadStatus.IDLE,
+    val sourceUrl: String = "",
+    val title: String? = null,
+    val progressPercent: Float = 0f,
+    val downloadedBytes: Long = 0L,
+    val totalBytes: Long = 0L,
+    val statusMessage: String? = null,
+    val errorMessage: String? = null,
+    val lastCompletedTrack: Track? = null,
+) {
+    val isBusy: Boolean
+        get() = status == DownloadStatus.CHECKING_UPDATES ||
+            status == DownloadStatus.RESOLVING ||
+            status == DownloadStatus.DOWNLOADING ||
+            status == DownloadStatus.IMPORTING
+
+    val normalizedProgress: Float
+        get() = if (progressPercent.isFinite()) {
+            (progressPercent / 100f).coerceIn(0f, 1f)
+        } else {
+            0f
+        }
+}
+
+/**
+ * Estado e información de versiones de los componentes del motor de descargas
+ * (Python 3.11 ligero, yt-dlp, yt-dlp-ejs y QuickJS-NG compilado en Rust).
+ */
+data class DownloaderEngineStatus(
+    val pythonVersion: String = "Python 3.11 (ligero)",
+    val ytDlpVersion: String = "Cargando...",
+    val ytDlpEjsVersion: String = "Cargando...",
+    val quickJsVersion: String = "QuickJS-ng 0.12.2 (Rust)",
+    val ytDlpUpdatedAt: String? = null,
+    val ytDlpEjsUpdatedAt: String? = null,
+    val autoUpdateEnabled: Boolean = true,
+    val isUpdating: Boolean = false,
+    val updateMessage: String? = null,
+)
+
+

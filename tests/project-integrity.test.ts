@@ -351,3 +351,59 @@ test('equalizer entry is removed from SettingsScreen and kept only in PlayerScre
   assert.match(settingsKt, /Switch\(/);
   assert.match(playerKt, /onOpenEqualizer/);
 });
+
+test('audio downloader integrates lightweight Python 3.11 + yt-dlp + yt-dlp-ejs + Rust QuickJS-NG without WebView or copyleft FFmpeg', () => {
+  const settings = fs.readFileSync(path.join(rootDir, 'android/settings.gradle.kts'), 'utf8');
+  const includes = [...settings.matchAll(/include\("([^"]+)"\)/g)].map((m) => m[1]);
+  assert.ok(includes.length >= 13, 'Expected :core:downloader and :feature:downloader in settings.gradle.kts');
+  assert.ok(includes.includes(':core:downloader'));
+  assert.ok(includes.includes(':feature:downloader'));
+
+  const downloaderGradle = fs.readFileSync(
+    path.join(rootDir, 'android/core/downloader/build.gradle.kts'),
+    'utf8',
+  );
+  const appGradle = fs.readFileSync(path.join(rootDir, 'android/app/build.gradle.kts'), 'utf8');
+  const manifest = fs.readFileSync(path.join(rootDir, 'android/app/src/main/AndroidManifest.xml'), 'utf8');
+  const cargoToml = fs.readFileSync(path.join(rootDir, 'android/rust/aura_core/Cargo.toml'), 'utf8');
+  const rustGradle = fs.readFileSync(path.join(rootDir, 'android/core/rust/build.gradle.kts'), 'utf8');
+  const qjsBin = path.join(rootDir, 'android/rust/aura_core/src/bin/aura_qjs.rs');
+  const qjsMod = path.join(rootDir, 'android/rust/aura_core/src/js_runtime.rs');
+  const pyScript = fs.readFileSync(
+    path.join(rootDir, 'android/core/downloader/src/main/python/aura_ytdlp.py'),
+    'utf8',
+  );
+  const downloaderScreen = fs.readFileSync(
+    path.join(rootDir, 'android/feature/downloader/src/main/kotlin/com/auramusic/feature/downloader/DownloaderScreen.kt'),
+    'utf8',
+  );
+
+  assert.match(downloaderGradle, /version\s*=\s*"3\.11"/);
+  assert.match(downloaderGradle, /"--no-deps",\s*"yt-dlp"/);
+  assert.match(downloaderGradle, /"--no-deps",\s*"yt-dlp-ejs"/);
+  assert.match(downloaderGradle, /extractPackages\("yt_dlp_ejs"\)/);
+  assert.match(downloaderGradle, /armeabi-v7a/);
+  assert.match(downloaderGradle, /arm64-v8a/);
+  assert.match(appGradle, /useLegacyPackaging\s*=\s*true/);
+  assert.match(manifest, /android\.permission\.INTERNET/);
+
+  assert.match(cargoToml, /rquickjs\s*=/);
+  assert.match(cargoToml, /name\s*=\s*"aura_qjs"/);
+  assert.ok(fs.existsSync(qjsBin), 'Missing aura_qjs.rs binary');
+  assert.ok(fs.existsSync(qjsMod), 'Missing js_runtime.rs module');
+  assert.match(rustGradle, /libaura_qjs\.so/);
+
+  assert.match(pyScript, /sha256/i);
+  assert.match(pyScript, /js_runtimes/);
+  assert.match(pyScript, /quickjs/);
+  assert.match(pyScript, /pypi\.org\/pypi/);
+
+  // Sin WebView ni dependencias copyleft
+  const catalog = fs.readFileSync(path.join(rootDir, 'android/gradle/libs.versions.toml'), 'utf8');
+  assert.doesNotMatch(downloaderScreen, /android\.webkit\.WebView|\bWebView\s*\(/);
+  assert.doesNotMatch(downloaderGradle, /implementation\([^\n]*(youtubedl-android|newpipe|ffmpeg)/i);
+  assert.doesNotMatch(downloaderGradle, /install\([^\n]*(ffmpeg|pycryptodomex)/i);
+  assert.doesNotMatch(catalog, /youtubedl-android|newpipe|ffmpeg|rustypipe/i);
+  assert.doesNotMatch(cargoToml, /rustypipe|ffmpeg/i);
+});
+

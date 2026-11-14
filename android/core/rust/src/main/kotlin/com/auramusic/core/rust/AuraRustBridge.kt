@@ -35,6 +35,10 @@ object AuraRustBridge {
 
     private external fun nativeGetEngineInfo(): String
 
+    private external fun nativeGetQuickJsVersion(): String
+
+    private external fun nativeEvalQuickJs(script: String): String
+
     private external fun nativeGenerateCoverRgba(
         seedKey: String,
         width: Int,
@@ -65,6 +69,28 @@ object AuraRustBridge {
      * Devuelve la información del motor nativo Rust compilado para la arquitectura actual.
      */
     fun getEngineInfo(): String = nativeGetEngineInfo()
+
+    /**
+     * Devuelve la versión del runtime QuickJS-NG compilado dentro de Rust.
+     */
+    fun getQuickJsVersion(): String = nativeGetQuickJsVersion()
+
+    /**
+     * Evalúa JavaScript en QuickJS-NG dentro de Rust fuera del hilo principal.
+     */
+    suspend fun evalQuickJs(script: String): String = withContext(Dispatchers.Default) {
+        nativeEvalQuickJs(script)
+    }
+
+    /**
+     * Resuelve la ruta ejecutable del binario `libaura_qjs.so` dentro de `nativeLibraryDir`,
+     * cumpliendo con la política SELinux W^X de Android 10+ para ejecutar QuickJS desde `yt-dlp`.
+     */
+    fun resolveQuickJsBinaryPath(context: Context): String? {
+        val nativeDir = context.applicationInfo.nativeLibraryDir ?: return null
+        val candidate = File(nativeDir, "libaura_qjs.so")
+        return candidate.takeIf { it.exists() }?.absolutePath
+    }
 
     /**
      * Lee etiquetas, duración y carátula embebida directamente en Rust a partir de un

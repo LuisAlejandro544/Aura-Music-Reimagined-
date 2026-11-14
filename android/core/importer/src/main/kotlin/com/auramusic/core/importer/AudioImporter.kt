@@ -134,6 +134,125 @@ class AudioImporter(
         removed
     }
 
+    /**
+     * Importa un archivo de audio descargado localmente por `:core:downloader` hacia Room.
+     * Lee duración/etiquetas/carátula embebida directamente en Rust (`lofty`), convierte la
+     * miniatura descargada a WebP sin pérdida si existe, o genera una carátula procedural Rust.
+     */
+    suspend fun importDownloadedAudioFile(
+        audioFile: File,
+        fallbackTitle: String,
+        fallbackArtist: String,
+        fallbackAlbum: String,
+        fallbackDurationMs: Long,
+        thumbnailFile: File?,
+        accentArgb: Int,
+    ): Track? = withContext(Dispatchers.IO) {
+        if (!audioFile.exists() || audioFile.length() <= 0L) return@withContext null
+
+        val contentUri = Uri.fromFile(audioFile).toString()
+        val (dbUris, dbFingerprints) = repository.getAllTrackIdentities()
+
+        val metadata = runCatching {
+            android.os.ParcelFileDescriptor.open(
+                audioFile,
+                android.os.ParcelFileDescriptor.MODE_READ_ONLY,
+            ).use { pfd ->
+                AuraRustBridge.extractAudioMetadata(pfd.fd)
+            }
+        }.getOrNull()
+
+        val title = metadata?.title?.takeIf { it.isNotBlank() }
+            ?: fallbackTitle.takeIf { it.isNotBlank() }
+            ?: audioFile.nameWithoutExtension
+        val artist = metadata?.artist?.takeIf { it.isNotBlank() }
+            ?: fallbackArtist.takeIf { it.isNotBlank() }
+            ?: "Artista desconocido"
+        val album = metadata?.album?.takeIf { it.isNotBlank() }
+            ?: fallbackAlbum.takeIf { it.isNotBlank() }
+            ?: "Descargas Aura"
+        val durationMs = (metadata?.durationMs ?: 0L).takeIf { it > 0L }
+            ?: fallbackDurationMs.coerceAtLeast(0L)
+
+        val fingerprint = AuraRustBridge.computeTrackFingerprint(
+            title = title,
+            artist = artist,
+            durationMs = durationMs,
+            sizeBytes = audioFile.length(),
+        )
+
+        if (contentUri in dbUris || fingerprint in dbFingerprints) {
+            return@withContext null
+        }
+
+        val embeddedBytes = metadata?.embeddedCoverBytes
+        val (coverPath, isProcedural) = coverWriteMutex.withLock {
+            if (embeddedBytes != null && embeddedBytes.isNotEmpty()) {
+                saveEmbeddedCover(fingerprint, embeddedBytes) to false
+            } else if (thumbnailFile != null && thumbnailFile.exists() && thumbnailFile.length() > 0L) {
+                val webpPath = saveCustomCoverAsLosslessWebp(
+                    trackId = System.currentTimeMillis(),
+                    imageUri = Uri.fromFile(thumbnailFile),
+                )
+                if (webpPath != null) {
+                    webpPath to false
+                } else {
+                    val seedKey = "$title|$artist|$album|$fingerprint"
+                    val procPath = AuraRustBridge.generateAndSaveProceduralCover(
+                        context = context,
+                        fingerprint = fingerprint,
+                        seedKey = seedKey,
+                        accentArgb = accentArgb,
+                    )
+                    procPath to true
+                }
+            } else {
+                val seedKey = "$title|$artist|$album|$fingerprint"
+                val procPath = AuraRustBridge.generateAndSaveProceduralCover(
+                    context = context,
+                    fingerprint = fingerprint,
+                    seedKey = seedKey,
+                    accentArgb = accentArgb,
+                )
+                procPath to true
+            }
+        }
+
+        if (thumbnailFile != null && thumbnailFile.exists()) {
+            runCatching { thumbnailFile.delete() }
+        }
+
+        val track = Track(
+            contentUri = contentUri,
+            title = title,
+            artist = artist,
+            album = album,
+            durationMs = durationMs,
+            coverFilePath = coverPath,
+            isProceduralCover = isProcedural,
+            isLiked = false,
+            trackFingerprint = fingerprint,
+        )
+        repository.insertTracks(listOf(track))
+        track
+    }
+
+    /**
+     * Elimina el archivo descargado si pertenece al directorio interno `filesDir/downloads`.
+     */
+    suspend fun deleteOwnedDownloadFileIfExists(contentUri: String) = withContext(Dispatchers.IO) {
+        val parsed = runCatching { Uri.parse(contentUri) }.getOrNull() ?: return@withContext
+        if (parsed.scheme != "file") return@withContext
+        val path = parsed.path ?: return@withContext
+        val downloadsDir = File(context.filesDir, "downloads")
+        val target = File(path)
+        val canonicalDir = runCatching { downloadsDir.canonicalPath }.getOrNull() ?: return@withContext
+        val canonicalTarget = runCatching { target.canonicalPath }.getOrNull() ?: return@withContext
+        if (canonicalTarget.startsWith(canonicalDir + File.separator) && target.exists()) {
+            runCatching { target.delete() }
+        }
+    }
+
     private fun collectAudioFilesRecursively(
         directory: DocumentFile,
         output: MutableList<Uri>,

@@ -58,6 +58,10 @@ android {
     }
 
     packaging {
+        jniLibs {
+            // Extrae libaura_qjs.so y librerías nativas a nativeLibraryDir para ejecución SELinux W^X.
+            useLegacyPackaging = true
+        }
         resources {
             excludes += "/META-INF/{AL2.0,LGPL2.1}"
         }
@@ -69,12 +73,14 @@ dependencies {
     implementation(project(":core:rust"))
     implementation(project(":core:database"))
     implementation(project(":core:importer"))
+    implementation(project(":core:downloader"))
     implementation(project(":core:player"))
     implementation(project(":feature:library"))
     implementation(project(":feature:playlists"))
     implementation(project(":feature:player"))
     implementation(project(":feature:settings"))
     implementation(project(":feature:equalizer"))
+    implementation(project(":feature:downloader"))
 
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.lifecycle.runtime.ktx)

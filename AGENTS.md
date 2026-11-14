@@ -6,14 +6,17 @@ Reglas operativas para cualquier agente que modifique o amplíe **Aura Music**.
 1. **No romper lo existente**: No cambiar el diseño, iconos o lógica de pantallas que ya funcionan a menos que el usuario lo solicite expresamente.
 2. **Modularidad estricta**:
    - Nuevas entidades o modelos compartidos -> `:core:model`.
-   - Nuevos algoritmos DSP / gráficos / hashing -> `android/rust/aura_core/src/` + puente JNI en `:core:rust`.
+   - Nuevos algoritmos DSP / gráficos / hashing / JS runtime -> `android/rust/aura_core/src/` + puente JNI en `:core:rust`.
    - Persistencia y migraciones -> `:core:database` (`AuraDatabase`, `AuraMigrations` sin `fallbackToDestructiveMigration`).
+   - Lógica de descargas Python/`yt-dlp` -> `:core:downloader` (`YtDlpAudioDownloader` + `aura_ytdlp.py`), manteniendo Chaquopy encapsulado en este único módulo Gradle.
    - Nuevas vistas -> módulo `:feature:*` dedicado (sin meter toda la app en un solo archivo ni una sola pantalla).
 3. **Sincronía JNI Kotlin ↔ Rust**:
    - Cada método `private external fun nombre(...)` en `com.auramusic.core.rust.AuraRustBridge` debe corresponder exactamente a `#[unsafe(no_mangle)] pub extern "system" fn Java_com_auramusic_core_rust_AuraRustBridge_nombre` en `android/rust/aura_core/src/lib.rs`.
-4. **Uso de hilos y motor nativo Rust**:
-   - Prohibido ejecutar `ParcelFileDescriptor`, `DocumentFile`, Room, compresión WebP o llamadas JNI (`extractAudioMetadata`, carátulas, hashing, configuración EQ) en `Dispatchers.Main`.
+   - El binario CLI `aura_qjs` (`android/rust/aura_core/src/bin/aura_qjs.rs`) debe seguir copiándose como `jniLibs/<abi>/libaura_qjs.so` en `:core:rust` con `useLegacyPackaging = true` en `:app`.
+4. **Uso de hilos y motor nativo Rust/Python**:
+   - Prohibido ejecutar `ParcelFileDescriptor`, `DocumentFile`, Room, compresión WebP, Chaquopy (`Python.start` / `yt-dlp`), red PyPI o llamadas JNI (`extractAudioMetadata`, carátulas, hashing, configuración EQ, `evalQuickJs`) en `Dispatchers.Main`.
    - No reintroducir `MediaMetadataRetriever` ni `android.media.audiofx.Equalizer` en Kotlin; la lectura de metadatos y el DSP del ecualizador pertenecen a Rust (`aura_core::metadata` y `aura_core::equalizer`).
+   - No añadir `WebView` en descargas ni wrappers copyleft (`youtubedl-android`, `NewPipeExtractor`, `FFmpeg`).
 5. **Documentación en código**:
    - Incluir comentarios explicativos claros en español en archivos nuevos o modificados.
 6. **Prohibiciones**:
@@ -30,11 +33,11 @@ Reglas operativas para cualquier agente que modifique o amplíe **Aura Music**.
   ```bash
   npm run lint && npm run build
   ```
-- Pruebas unitarias de Rust (en entorno con toolchain Rust):
+- Pruebas unitarias de Rust (en entorno con toolchain Rust + libclang):
   ```bash
   cd android/rust/aura_core && cargo test
   ```
-- Compilación APK Debug sin caché (en entorno con Android SDK/NDK + Rust):
+- Compilación APK Debug sin caché (en entorno con Android SDK/NDK + Rust + Python 3.11):
   ```bash
   cd android && ./gradlew assembleDebug --no-daemon --no-build-cache
   ```

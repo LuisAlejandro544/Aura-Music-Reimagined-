@@ -11,6 +11,7 @@ use jni::sys::{JNI_FALSE, JNI_TRUE, jboolean, jint, jlong, jstring};
 
 mod artwork;
 mod equalizer;
+pub mod js_runtime;
 mod metadata;
 mod palette;
 
@@ -40,6 +41,46 @@ pub extern "system" fn Java_com_auramusic_core_rust_AuraRustBridge_nativeGetEngi
         arch
     );
     match env.new_string(info) {
+        Ok(s) => s.into_raw(),
+        Err(_) => std::ptr::null_mut(),
+    }
+}
+
+/// Devuelve la versión del motor QuickJS-NG embebido en Rust (`rquickjs`).
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_com_auramusic_core_rust_AuraRustBridge_nativeGetQuickJsVersion(
+    env: JNIEnv,
+    _class: JClass,
+) -> jstring {
+    init_android_logger();
+    match env.new_string(js_runtime::QUICKJS_VERSION_STRING) {
+        Ok(s) => s.into_raw(),
+        Err(_) => std::ptr::null_mut(),
+    }
+}
+
+/// Evalúa un script JavaScript en QuickJS-NG desde Rust y devuelve la salida estándar o error.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_com_auramusic_core_rust_AuraRustBridge_nativeEvalQuickJs(
+    mut env: JNIEnv,
+    _class: JClass,
+    script: JString,
+) -> jstring {
+    init_android_logger();
+    let script_str: String = match env.get_string(&script) {
+        Ok(s) => s.into(),
+        Err(err) => {
+            let msg = format!("ERROR: No se pudo leer script JNI: {err:?}");
+            return env.new_string(msg).map(JString::into_raw).unwrap_or(std::ptr::null_mut());
+        }
+    };
+
+    let output = match js_runtime::eval_script_with_args(&script_str, &[]) {
+        Ok(res) => res.stdout,
+        Err(err) => format!("ERROR: {err}"),
+    };
+
+    match env.new_string(output) {
         Ok(s) => s.into_raw(),
         Err(_) => std::ptr::null_mut(),
     }

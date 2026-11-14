@@ -1,6 +1,6 @@
 # Roadmap — Aura Music
 
-Plan de evolución por fases para convertir Aura Music en un reproductor local modular de alto rendimiento en Kotlin + Rust.
+Plan de evolución por fases para convertir Aura Music en un reproductor local modular de alto rendimiento en Kotlin + Rust + Python ligero.
 
 ## Fase 1 — Base funcional (Completada)
 - Estructura multi-módulo en Gradle (`:app`, `:core:*`, `:feature:*`) y crate nativo `aura_core` en Rust Edition 2024.
@@ -12,11 +12,12 @@ Plan de evolución por fases para convertir Aura Music en un reproductor local m
 - Generación procedural determinista de carátulas en Rust sin IA (`tiny-skia`).
 - Apartado de Ajustes con cambio de paleta de color en tiempo real vía DataStore.
 
-## Fase 2 — Procesamiento de audio, carátulas y metadatos en Rust (En curso)
+## Fase 2 — Procesamiento de audio, carátulas y descargas nativas (En curso)
 - [x] Lectura rápida de etiquetas (ID3, Vorbis, FLAC, MP4, WAV, AIFF), duración y carátulas embebidas directamente desde Rust (`lofty`) vía descriptor de archivo SAF (`ParcelFileDescriptor`), guardando el formato de imagen real (`.png`, `.jpg`, `.webp`, etc.).
 - [x] Importación paralela acotada con consulta única de identidades en Room y carátulas personalizadas desde galería convertidas en segundo plano a WebP sin pérdida a máxima compresión.
 - [x] Ecualizador gráfico de 10 bandas en Rust (`aura_core::equalizer`) conectado en tiempo real a Media3 ExoPlayer y configurable exclusivamente desde el reproductor.
 - [x] Colores dinámicos animados desde la carátula para `MiniPlayerBar` y `PlayerScreen` (`androidx.palette:palette` + `MaterialKolor`) compatibles desde Android 8.0 y configurables desde Ajustes.
+- [x] Descarga de solo audio con **Python 3.11 ligero (Chaquopy)** + **`yt-dlp`** + **`yt-dlp-ejs`** + **QuickJS-NG compilado en Rust (`libaura_qjs.so`)**, con auto-actualización verificada por SHA-256 desde PyPI sin WebView ni FFmpeg.
 - [ ] Análisis de ganancia (ReplayGain) y extracción de forma de onda (waveform) en Rust para previsualización de pistas.
 
 ## Fase 3 — Gestión avanzada de biblioteca y playlists

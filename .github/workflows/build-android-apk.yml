@@ -25,6 +25,14 @@ jobs:
           distribution: temurin
           java-version: "17"
 
+      - name: Configurar Python 3.11 para Chaquopy (sin caché)
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Instalar Clang / libclang-dev para bindgen de QuickJS-NG en Rust
+        run: sudo apt-get update && sudo apt-get install -y clang libclang-dev
+
       - name: Configurar Android SDK base
         uses: android-actions/setup-android@v4
         with:

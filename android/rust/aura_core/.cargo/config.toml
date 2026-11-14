@@ -1,0 +1,5 @@
+# Configuración de compilación cruzada Cargo para aura_core en Android.
+# Enlaza libatomic explícitamente en 32 bits (armv7-linux-androideabi) requerido por QuickJS-NG.
+
+[target.armv7-linux-androideabi]
+rustflags = ["-C", "link-arg=-latomic"]

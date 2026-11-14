@@ -5,6 +5,8 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import com.auramusic.core.model.AppAccentColor
+import com.auramusic.core.model.DownloadState
+import com.auramusic.core.model.DownloaderEngineStatus
 import com.auramusic.core.model.EqualizerPreset
 import com.auramusic.core.model.EqualizerState
 import com.auramusic.core.model.ImportProgress
@@ -90,6 +92,11 @@ class AuraViewModel(
 
     val importProgress: StateFlow<ImportProgress> = container.audioImporter.progress
 
+    val downloadState: StateFlow<DownloadState> = container.ytDlpAudioDownloader.downloadState
+
+    val downloaderEngineStatus: StateFlow<DownloaderEngineStatus> =
+        container.ytDlpAudioDownloader.engineStatus
+
     private val _rustEngineInfo = MutableStateFlow("Cargando motor nativo Rust...")
     val rustEngineInfo: StateFlow<String> = _rustEngineInfo.asStateFlow()
 
@@ -122,6 +129,11 @@ class AuraViewModel(
             minSplashDelay.await()
             _isAppReady.value = true
         }
+
+        // Inicializa y consulta versiones de Python/yt-dlp/QuickJS-NG en segundo plano sin retrasar el arranque.
+        viewModelScope.launch(Dispatchers.IO) {
+            runCatching { container.ytDlpAudioDownloader.refreshEngineStatus() }
+        }
     }
 
     fun observePlaylistName(playlistId: Long): Flow<String?> =
@@ -152,6 +164,36 @@ class AuraViewModel(
         container.audioImporter.clearLastMessage()
     }
 
+    fun downloadAudioFromUrl(url: String) {
+        viewModelScope.launch {
+            container.ytDlpAudioDownloader.downloadAudio(
+                rawUrl = url,
+                accentArgb = accentColor.value.primaryArgb.toInt(),
+            )
+        }
+    }
+
+    fun checkDownloaderUpdates() {
+        viewModelScope.launch {
+            container.ytDlpAudioDownloader.checkAndUpdateEngines(force = true)
+        }
+    }
+
+    fun setDownloaderAutoUpdate(enabled: Boolean) {
+        viewModelScope.launch {
+            container.downloaderPreferencesRepository.setAutoUpdateEnabled(enabled)
+            container.ytDlpAudioDownloader.refreshEngineStatus()
+        }
+    }
+
+    fun dismissDownloadStatus() {
+        container.ytDlpAudioDownloader.clearDownloadStatus()
+    }
+
+    fun dismissDownloaderUpdateMessage() {
+        container.ytDlpAudioDownloader.clearUpdateMessage()
+    }
+
     fun playQueue(tracks: List<Track>, startIndex: Int) {
         container.playerController.playQueue(tracks, startIndex)
     }
@@ -176,8 +218,13 @@ class AuraViewModel(
 
     fun deleteTrack(trackId: Long) {
         viewModelScope.launch {
+            val snapshot = tracks.value
+            val targetTrack = snapshot.firstOrNull { it.id == trackId }
             container.musicRepository.deleteTrack(trackId)
             container.audioImporter.cleanupOrphanCovers()
+            if (targetTrack != null && snapshot.none { it.id != trackId && it.contentUri == targetTrack.contentUri }) {
+                container.audioImporter.deleteOwnedDownloadFileIfExists(targetTrack.contentUri)
+            }
         }
     }
 

@@ -15,7 +15,7 @@ val jniLibsOutputDir = layout.projectDirectory.dir("src/main/jniLibs")
 
 val buildRustAndroidLibs by tasks.registering(Exec::class) {
     group = "rust"
-    description = "Compila aura_core en Rust para 32 y 64 bits usando cargo-ndk."
+    description = "Compila aura_core (libaura_core.so) y aura_qjs (libaura_qjs.so) en Rust para 32 y 64 bits usando cargo-ndk."
     workingDir = rustCrateDir
 
     doFirst {
@@ -34,6 +34,28 @@ val buildRustAndroidLibs by tasks.registering(Exec::class) {
 
         if (resolvedNdk != null) {
             environment("ANDROID_NDK_HOME", resolvedNdk)
+            val prebuiltDir = File(resolvedNdk, "toolchains/llvm/prebuilt")
+            val hostDir = prebuiltDir.listFiles()?.firstOrNull { it.isDirectory }
+            if (hostDir != null) {
+                val sysroot = File(hostDir, "sysroot").absolutePath
+                val ndkLibDir = listOf(File(hostDir, "lib64"), File(hostDir, "lib"))
+                    .firstOrNull { it.exists() }
+                if (ndkLibDir != null && System.getenv("LIBCLANG_PATH").isNullOrBlank()) {
+                    environment("LIBCLANG_PATH", ndkLibDir.absolutePath)
+                }
+                environment(
+                    "BINDGEN_EXTRA_CLANG_ARGS_armv7_linux_androideabi",
+                    "--target=armv7a-linux-androideabi26 --sysroot=$sysroot",
+                )
+                environment(
+                    "BINDGEN_EXTRA_CLANG_ARGS_aarch64_linux_android",
+                    "--target=aarch64-linux-android26 --sysroot=$sysroot",
+                )
+                environment(
+                    "BINDGEN_EXTRA_CLANG_ARGS_x86_64_linux_android",
+                    "--target=x86_64-linux-android26 --sysroot=$sysroot",
+                )
+            }
         }
     }
 
@@ -47,10 +69,34 @@ val buildRustAndroidLibs by tasks.registering(Exec::class) {
         "-o", jniLibsOutputDir.asFile.absolutePath,
         "build",
         "--release",
+        "--lib",
+        "--bin",
+        "aura_qjs",
     )
+
+    doLast {
+        // Copia el binario ejecutable `aura_qjs` como `libaura_qjs.so` dentro de cada ABI en jniLibs
+        // para que Android lo empaquete y extraiga en `nativeLibraryDir` cumpliendo SELinux W^X.
+        val abiToTriple = mapOf(
+            "armeabi-v7a" to "armv7-linux-androideabi",
+            "arm64-v8a" to "aarch64-linux-android",
+            "x86_64" to "x86_64-linux-android",
+        )
+        for ((abi, triple) in abiToTriple) {
+            val srcBin = File(rustCrateDir, "target/$triple/release/aura_qjs")
+            if (!srcBin.exists()) {
+                error("Falta el binario compilado aura_qjs para $abi en ${srcBin.absolutePath}")
+            }
+            val dstDir = File(jniLibsOutputDir.asFile, abi).apply { mkdirs() }
+            val dstFile = File(dstDir, "libaura_qjs.so")
+            srcBin.copyTo(dstFile, overwrite = true)
+            dstFile.setExecutable(true, false)
+        }
+    }
 
     inputs.dir(File(rustCrateDir, "src"))
     inputs.file(File(rustCrateDir, "Cargo.toml"))
+    inputs.file(File(rustCrateDir, ".cargo/config.toml"))
     outputs.dir(jniLibsOutputDir)
 }
 

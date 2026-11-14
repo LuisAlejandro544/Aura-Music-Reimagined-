@@ -253,3 +253,37 @@ class EqualizerPreferencesRepository(
         }
     }
 }
+
+/**
+ * Repositorio de preferencias de auto-actualización para `yt-dlp` y `yt-dlp-ejs` en DataStore.
+ */
+class DownloaderPreferencesRepository(
+    private val context: Context,
+) {
+    private val autoUpdateKey = booleanPreferencesKey("ytdlp_auto_update")
+    private val lastCheckKey = androidx.datastore.preferences.core.longPreferencesKey("ytdlp_last_check_ms")
+
+    val autoUpdateEnabled: Flow<Boolean> = context.auraSettingsDataStore.data.map { prefs ->
+        prefs[autoUpdateKey] ?: true
+    }
+
+    val lastUpdateCheckEpochMs: Flow<Long> = context.auraSettingsDataStore.data.map { prefs ->
+        prefs[lastCheckKey] ?: 0L
+    }
+
+    suspend fun setAutoUpdateEnabled(enabled: Boolean) {
+        withContext(Dispatchers.IO) {
+            context.auraSettingsDataStore.edit { prefs ->
+                prefs[autoUpdateKey] = enabled
+            }
+        }
+    }
+
+    suspend fun setLastUpdateCheckEpochMs(epochMs: Long) {
+        withContext(Dispatchers.IO) {
+            context.auraSettingsDataStore.edit { prefs ->
+                prefs[lastCheckKey] = epochMs
+            }
+        }
+    }
+}

@@ -2,9 +2,11 @@ package com.auramusic.app
 
 import android.app.Application
 import android.content.Context
+import com.auramusic.core.database.DownloaderPreferencesRepository
 import com.auramusic.core.database.EqualizerPreferencesRepository
 import com.auramusic.core.database.MusicRepository
 import com.auramusic.core.database.ThemePreferencesRepository
+import com.auramusic.core.downloader.YtDlpAudioDownloader
 import com.auramusic.core.importer.AudioImporter
 import com.auramusic.core.player.AuraPlayerController
 import com.auramusic.core.rust.AuraRustBridge
@@ -17,7 +19,8 @@ import kotlinx.coroutines.launch
 /**
  * Contenedor modular de dependencias de Aura Music.
  * Centraliza el ciclo de vida de la base de datos Room, DataStore, el importador manual,
- * el controlador Media3 ExoPlayer y la información del motor nativo en Rust.
+ * el motor de descargas (Chaquopy + yt-dlp + QuickJS-NG), el controlador Media3 ExoPlayer
+ * y la información del motor nativo en Rust.
  */
 class AuraAppContainer(context: Context) {
     private val appContext = context.applicationContext
@@ -38,10 +41,22 @@ class AuraAppContainer(context: Context) {
         EqualizerPreferencesRepository(appContext)
     }
 
+    val downloaderPreferencesRepository: DownloaderPreferencesRepository by lazy {
+        DownloaderPreferencesRepository(appContext)
+    }
+
     val audioImporter: AudioImporter by lazy {
         AudioImporter(
             context = appContext,
             repository = musicRepository,
+        )
+    }
+
+    val ytDlpAudioDownloader: YtDlpAudioDownloader by lazy {
+        YtDlpAudioDownloader(
+            context = appContext,
+            audioImporter = audioImporter,
+            preferencesRepository = downloaderPreferencesRepository,
         )
     }
 

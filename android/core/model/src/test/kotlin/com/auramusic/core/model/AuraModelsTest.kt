@@ -1,6 +1,8 @@
 package com.auramusic.core.model
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
@@ -48,5 +50,33 @@ class AuraModelsTest {
         assertEquals(0f, normalized.bandGainsDb[2], 0.001f)
         assertEquals(3.5f, normalized.bandGainsDb[3], 0.001f)
         assertEquals(0f, normalized.bandGainsDb[9], 0.001f)
+    }
+
+    @Test
+    fun `download state clamps normalizedProgress and tracks busy lifecycle`() {
+        val idle = DownloadState()
+        assertFalse(idle.isBusy)
+        assertEquals(0f, idle.normalizedProgress, 0.001f)
+
+        val downloading = DownloadState(
+            status = DownloadStatus.DOWNLOADING,
+            progressPercent = 64.5f,
+        )
+        assertTrue(downloading.isBusy)
+        assertEquals(0.645f, downloading.normalizedProgress, 0.001f)
+
+        val invalid = DownloadState(
+            status = DownloadStatus.ERROR,
+            progressPercent = Float.NaN,
+        )
+        assertFalse(invalid.isBusy)
+        assertEquals(0f, invalid.normalizedProgress, 0.001f)
+
+        val over = DownloadState(
+            status = DownloadStatus.COMPLETED,
+            progressPercent = 140f,
+        )
+        assertFalse(over.isBusy)
+        assertEquals(1f, over.normalizedProgress, 0.001f)
     }
 }
