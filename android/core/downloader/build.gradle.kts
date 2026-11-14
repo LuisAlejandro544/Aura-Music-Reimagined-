@@ -57,6 +57,7 @@ chaquopy {
 
 dependencies {
     implementation(project(":core:model"))
+    implementation(project(":core:database"))
     implementation(project(":core:rust"))
     implementation(project(":core:importer"))
     implementation(libs.androidx.core.ktx)

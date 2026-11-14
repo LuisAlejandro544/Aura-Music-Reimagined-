@@ -376,6 +376,7 @@ test('audio downloader integrates lightweight Python 3.11 + yt-dlp + yt-dlp-ejs 
     'utf8',
   );
 
+  assert.match(downloaderGradle, /project\(":core:database"\)/);
   assert.match(downloaderGradle, /version\s*=\s*"3\.11"/);
   assert.match(downloaderGradle, /options\("--no-deps"\)/);
   assert.match(downloaderGradle, /install\("yt-dlp"\)/);
