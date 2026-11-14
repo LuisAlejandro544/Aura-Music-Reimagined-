@@ -379,8 +379,9 @@ test('audio downloader integrates lightweight Python 3.11 + yt-dlp + yt-dlp-ejs 
   );
 
   assert.match(downloaderGradle, /version\s*=\s*"3\.11"/);
-  assert.match(downloaderGradle, /"--no-deps",\s*"yt-dlp"/);
-  assert.match(downloaderGradle, /"--no-deps",\s*"yt-dlp-ejs"/);
+  assert.match(downloaderGradle, /options\("--no-deps"\)/);
+  assert.match(downloaderGradle, /install\("yt-dlp"\)/);
+  assert.match(downloaderGradle, /install\("yt-dlp-ejs"\)/);
   assert.match(downloaderGradle, /extractPackages\("yt_dlp_ejs"\)/);
   assert.match(downloaderGradle, /armeabi-v7a/);
   assert.match(downloaderGradle, /arm64-v8a/);

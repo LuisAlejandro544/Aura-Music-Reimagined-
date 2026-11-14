@@ -45,8 +45,9 @@ chaquopy {
         // Instalación minimalista: sin extras opcionales pesados (mutagen, pycryptodomex, etc.)
         // ni FFmpeg; ExoPlayer reproduce m4a/opus directo y Rust (lofty) gestiona metadatos.
         pip {
-            install("--no-deps", "yt-dlp")
-            install("--no-deps", "yt-dlp-ejs")
+            options("--no-deps")
+            install("yt-dlp")
+            install("yt-dlp-ejs")
         }
 
         // yt_dlp_ejs necesita leer sus assets .js (core.min.js / lib.min.js) desde disco.
