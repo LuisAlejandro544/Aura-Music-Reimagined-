@@ -31,7 +31,12 @@ jobs:
           python-version: "3.11"
 
       - name: Instalar Clang / libclang-dev para bindgen de QuickJS-NG en Rust
-        run: sudo apt-get update && sudo apt-get install -y clang libclang-dev
+        run: |
+          sudo apt-get update && sudo apt-get install -y clang libclang-dev
+          LIBCLANG_FILE="$(find /usr/lib -name 'libclang*.so*' 2>/dev/null | head -n 1)"
+          if [ -n "$LIBCLANG_FILE" ]; then
+            echo "LIBCLANG_PATH=$(dirname "$LIBCLANG_FILE")" >> "$GITHUB_ENV"
+          fi
 
       - name: Configurar Android SDK base
         uses: android-actions/setup-android@v4

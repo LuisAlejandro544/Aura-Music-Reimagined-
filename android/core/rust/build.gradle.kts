@@ -38,10 +38,32 @@ val buildRustAndroidLibs by tasks.registering(Exec::class) {
             val hostDir = prebuiltDir.listFiles()?.firstOrNull { it.isDirectory }
             if (hostDir != null) {
                 val sysroot = File(hostDir, "sysroot").absolutePath
-                val ndkLibDir = listOf(File(hostDir, "lib64"), File(hostDir, "lib"))
-                    .firstOrNull { it.exists() }
-                if (ndkLibDir != null && System.getenv("LIBCLANG_PATH").isNullOrBlank()) {
-                    environment("LIBCLANG_PATH", ndkLibDir.absolutePath)
+                fun hasLibClang(dir: File): Boolean =
+                    dir.isDirectory && (dir.listFiles()?.any { f ->
+                        f.name.startsWith("libclang") &&
+                            (f.name.contains(".so") || f.name.endsWith(".dylib") || f.name.endsWith(".dll"))
+                    } == true)
+
+                val existingLibClang = System.getenv("LIBCLANG_PATH")?.takeIf { it.isNotBlank() }
+                if (existingLibClang == null) {
+                    val systemLlvmDirs = File("/usr/lib").listFiles()
+                        ?.filter { it.isDirectory && it.name.startsWith("llvm-") }
+                        ?.sortedByDescending { it.name }
+                        ?.map { File(it, "lib") }
+                        .orEmpty()
+                    val candidates = listOf(
+                        File(hostDir, "lib64"),
+                        File(hostDir, "lib"),
+                    ) + systemLlvmDirs + listOf(
+                        File("/usr/lib/x86_64-linux-gnu"),
+                        File("/usr/lib/aarch64-linux-gnu"),
+                        File("/usr/lib64"),
+                        File("/usr/lib"),
+                    )
+                    val resolvedLibClang = candidates.firstOrNull(::hasLibClang)
+                    if (resolvedLibClang != null) {
+                        environment("LIBCLANG_PATH", resolvedLibClang.absolutePath)
+                    }
                 }
                 environment(
                     "BINDGEN_EXTRA_CLANG_ARGS_armv7_linux_androideabi",
