@@ -104,6 +104,17 @@ test('GitHub Action apk Debug is manual-only, zero-cache, and uses Gradle 8.14.7
   assert.match(workflow, /cargo fetch/);
   assert.match(workflow, /assembleDebug/);
   assert.match(workflow, /8\.14\.7/);
+  assert.match(workflow, /android-actions\/setup-android@v4/);
+  assert.match(workflow, /platforms;android-35/);
+  assert.doesNotMatch(workflow, /^\s*tools$/m);
   assert.match(wrapperProps, /gradle-8\.14\.7-bin\.zip/);
+});
+
+test('project documentation suite exists at repository root', () => {
+  for (const doc of ['README.md', 'ROADMAP.md', 'STRUCTURE.md', 'AI_CONTEXT.md', 'AGENTS.md', 'README_AI.md']) {
+    const fullPath = path.join(rootDir, doc);
+    assert.ok(fs.existsSync(fullPath), `Missing documentation file: ${doc}`);
+    assert.ok(fs.readFileSync(fullPath, 'utf8').trim().length > 100, `Documentation file too short: ${doc}`);
+  }
 });
 

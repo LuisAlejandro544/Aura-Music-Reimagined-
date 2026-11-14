@@ -25,13 +25,19 @@ jobs:
           distribution: temurin
           java-version: "17"
 
-      - name: Configurar Android SDK y NDK
-        uses: android-actions/setup-android@v3
+      - name: Configurar Android SDK 35 y NDK 27 (sin paquete legado tools)
+        uses: android-actions/setup-android@v4
+        with:
+          packages: |
+            platform-tools
+            platforms;android-35
+            build-tools;35.0.1
+            ndk;27.2.12479018
 
-      - name: Instalar componentes Android SDK y NDK 27
+      - name: Exportar ANDROID_NDK_HOME para cargo-ndk
         run: |
-          yes | sdkmanager --licenses >/dev/null || true
-          sdkmanager --install "platform-tools" "platforms;android-35" "build-tools;35.0.1" "ndk;27.2.12479018"
+          NDK_PATH="$ANDROID_HOME/ndk/27.2.12479018"
+          echo "ANDROID_NDK_HOME=$NDK_PATH" >> "$GITHUB_ENV"
 
       - name: Instalar Rust estable y targets Android (32 y 64 bits)
         uses: dtolnay/rust-toolchain@stable
