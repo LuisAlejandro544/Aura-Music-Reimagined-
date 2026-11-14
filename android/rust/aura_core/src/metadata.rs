@@ -11,6 +11,7 @@ use std::mem::ManuallyDrop;
 
 use lofty::picture::PictureType;
 use lofty::prelude::*;
+use lofty::probe::Probe;
 
 /// Resultado estructurado de metadatos extraídos de un archivo de audio local.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -77,8 +78,11 @@ fn write_opt_str(out: &mut Vec<u8>, value: Option<&str>) {
 
 /// Extrae metadatos de audio desde cualquier lector `Read + Seek` usando `lofty`.
 pub fn extract_metadata_from_reader<R: Read + Seek>(reader: R) -> Result<AudioMetadataResult, String> {
-    let mut buf_reader = BufReader::new(reader);
-    let tagged_file = lofty::read_from(&mut buf_reader)
+    let buf_reader = BufReader::new(reader);
+    let tagged_file = Probe::new(buf_reader)
+        .guess_file_type()
+        .map_err(|err| format!("No se pudo detectar el formato de audio con lofty: {err}"))?
+        .read()
         .map_err(|err| format!("No se pudo leer el archivo de audio con lofty: {err}"))?;
 
     let duration_ms = i64::try_from(tagged_file.properties().duration().as_millis())
