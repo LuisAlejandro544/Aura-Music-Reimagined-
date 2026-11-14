@@ -285,17 +285,18 @@ fn draw_concentric_resonance<R: Rng>(
     palette: &AuraPalette,
     rng: &mut R,
 ) {
-    let cx = w * rng.random_range(0.36..0.64);
-    let cy = h * rng.random_range(0.36..0.64);
+    let cx = w * rng.random_range(0.45..0.55);
+    let cy = h * rng.random_range(0.45..0.55);
 
-    draw_radial_glow(pixmap, cx, cy, w * 0.58, palette.glow_accent, 180, BlendMode::Screen);
+    draw_radial_glow(pixmap, cx, cy, w * 0.62, palette.glow_accent, 190, BlendMode::Screen);
+    draw_radial_glow(pixmap, cx, cy, w * 0.34, palette.glow_primary, 150, BlendMode::Screen);
 
-    let ring_count = rng.random_range(5..9);
+    let ring_count = rng.random_range(5..8);
     for i in 0..ring_count {
         let t = i as f32 / ring_count as f32;
-        let radius = w * (0.10 + t * 0.44);
-        let offset_x = rng.random_range(-0.025 * w..0.025 * w);
-        let offset_y = rng.random_range(-0.025 * h..0.025 * h);
+        let radius = w * (0.11 + t * 0.38);
+        let offset_x = rng.random_range(-0.008 * w..0.008 * w);
+        let offset_y = rng.random_range(-0.008 * h..0.008 * h);
         if let Some(path) = PathBuilder::from_circle(cx + offset_x, cy + offset_y, radius) {
             let color = if i % 2 == 0 {
                 palette.highlight
@@ -308,25 +309,25 @@ fn draw_concentric_resonance<R: Rng>(
                 force_hq_pipeline: true,
                 ..Paint::default()
             };
-            let alpha = ((1.0 - t * 0.65) * 185.0) as u8;
+            let alpha = ((1.0 - t * 0.55) * 200.0) as u8;
             paint.set_color(AuraPalette::color_with_alpha(color, alpha));
             let stroke = Stroke {
-                width: w * rng.random_range(0.008..0.024),
+                width: w * rng.random_range(0.010..0.020),
                 ..Stroke::default()
             };
             pixmap.stroke_path(&path, &paint, &stroke, Transform::identity(), None);
         }
     }
 
-    // Disco central luminoso.
-    if let Some(core) = PathBuilder::from_circle(cx, cy, w * 0.065) {
+    // Disco central luminoso nítido.
+    if let Some(core) = PathBuilder::from_circle(cx, cy, w * 0.068) {
         let mut paint = Paint {
             anti_alias: true,
             blend_mode: BlendMode::Screen,
             force_hq_pipeline: true,
             ..Paint::default()
         };
-        paint.set_color(AuraPalette::color_with_alpha(palette.highlight, 220));
+        paint.set_color(AuraPalette::color_with_alpha(palette.highlight, 235));
         pixmap.fill_path(&core, &paint, FillRule::Winding, Transform::identity(), None);
     }
 }
@@ -479,7 +480,7 @@ fn apply_subtle_vignette_and_grain(pixmap: &mut Pixmap, width: u32, height: u32,
         for x in 0..width {
             let dx = x as f32 - half_w;
             let dist_ratio = (dx * dx + dy * dy) / max_dist_sq;
-            let vignette = (1.0 - dist_ratio * 0.28).clamp(0.70, 1.0);
+            let vignette = (1.0 - dist_ratio * 0.14).clamp(0.86, 1.0);
 
             // PRNG rápido Xorshift32 para dithering sutil sin costo.
             state ^= state << 13;

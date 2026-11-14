@@ -5,14 +5,13 @@ Reproductor de música local para Android construido con **Kotlin (Jetpack Compo
 ## Características actuales
 
 - **Importación manual de música (SAF) con parser en Rust**: Aura Music nunca escanea todo el teléfono. El usuario decide exactamente qué importar:
-  - Una canción individual.
-  - Varias canciones por tandas.
-  - Una carpeta completa (con subcarpetas) manteniendo permisos persistentes.
-  - La lectura de etiquetas (ID3, Vorbis, FLAC, MP4/M4A, WAV, AIFF), duración y carátula embebida se ejecuta en Rust (`lofty`) directamente desde el descriptor de archivo SAF.
-- **Reproductor y Mini Reproductor**: Basados en **AndroidX Media3 ExoPlayer** y `MediaSessionService` para reproducción estable en segundo plano, con carátula cuadrada clásica, controles básicos, aleatorio, repetición y barra de progreso.
+  - Una canción individual, varias por tandas o una carpeta completa (con subcarpetas) manteniendo permisos persistentes.
+  - Procesamiento por lotes optimizado con deduplicación única en Room y concurrencia acotada en segundo plano.
+  - La lectura de etiquetas (ID3, Vorbis, FLAC, MP4/M4A, WAV, AIFF), duración y carátula embebida se ejecuta en Rust (`lofty`) directamente desde el descriptor SAF, guardando la imagen con su extensión real (`.jpg`, `.png`, `.webp`, `.gif`, `.bmp`).
+- **Ecualizador gráfico de 10 bandas en Rust (DSP en tiempo real)**: Filtros IIR biquad en precisión `f64` (`31 Hz` a `16 kHz`) ejecutados in-place desde `aura_core` sobre `DirectByteBuffer` de Media3 ExoPlayer, con 8 perfiles predefinidos, curva de respuesta y persistencia en DataStore.
+- **Reproductor, Mini Reproductor y carátulas personalizadas**: Basados en **AndroidX Media3 ExoPlayer** y `MediaSessionService`, con carátula cuadrada clásica, selector de imagen de galería convertido en segundo plano a **WebP sin pérdida a máxima compresión** y carátulas procedurales deterministas en Rust (`tiny-skia`) cuando no hay portada.
 - **Me gusta y Playlists con migraciones seguras**: Botón de corazón en pistas, mini reproductor y reproductor completo; sección dedicada de *Canciones que te gustan* y playlists personalizadas respaldadas por **Room** con exportación de esquemas (`exportSchema = true`) y migraciones explícitas no destructivas (`AuraMigrations`).
-- **Carátulas procedurales en Rust (sin IA)**: Si una canción importada no contiene imagen embebida, `aura_core` (Rust + `tiny-skia` + `rand_chacha` + `sha2`) genera localmente una carátula cuadrada determinista con 5 estilos geométricos y orgánicos.
-- **Ajustes de apariencia**: Selector de 8 paletas de color dinámicas (Material 3) persistidas con **Jetpack DataStore** y estado del motor nativo Rust.
+- **Ajustes de apariencia y audio**: Selector de 8 paletas de color dinámicas (Material 3) persistidas con **Jetpack DataStore**, acceso al ecualizador de 10 bandas y estado del motor nativo Rust.
 
 ## Requisitos técnicos
 

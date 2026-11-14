@@ -6,11 +6,11 @@ Guía práctica para extender **Aura Music** de forma ordenada usando asistentes
 
 | Qué quieres añadir | Dónde empezar | Qué conectar |
 | :--- | :--- | :--- |
-| Nueva función nativa en Rust (ej. ecualizador, análisis BPM, waveform) | `android/rust/aura_core/src/` (`Cargo.toml` + módulo `.rs` + `lib.rs`) | Añadir `external fun` y wrapper `suspend` en `AuraRustBridge.kt` (`:core:rust`). |
+| Nueva función nativa o DSP en Rust (ej. análisis BPM, waveform) | `android/rust/aura_core/src/` (`Cargo.toml` + módulo `.rs` + `lib.rs`) | Añadir `external fun` y wrapper en `AuraRustBridge.kt` (`:core:rust`); si es audio en tiempo real, integrarlo en `RustEqualizerAudioProcessor` / `DefaultAudioSink` (`:core:player`). |
 | Nuevo campo o tabla en base de datos | `AuraEntities.kt`, `AuraMigrations.kt` y `AuraDatabase.kt` (`:core:database`) | Incrementar `AuraMigrations.CURRENT_DATABASE_VERSION`, añadir `Migration(n, n+1)` en `ALL_MIGRATIONS` (nunca destructiva), exponer en `MusicRepository` y `AuraModels.kt`. |
-| Nueva opción en Ajustes | `SettingsScreen.kt` (`:feature:settings`) + `ThemePreferencesRepository` (`:core:database`) | Exponer `StateFlow` y setter en `AuraViewModel.kt`. |
+| Nueva opción en Ajustes o Ecualizador | `SettingsScreen.kt` (`:feature:settings`), `EqualizerScreen.kt` (`:feature:equalizer`) y DataStore (`:core:database`) | Exponer `StateFlow` y setter en `AuraViewModel.kt`. |
 | Nueva pantalla o subvista | Nuevo composable o módulo `:feature:*` | Registrar ruta en `AuraRoutes` dentro de `AuraAppRoot.kt`. |
-| Nueva acción de reproducción | `AuraPlaybackService.kt` y `AuraPlayerController.kt` (`:core:player`) | Exponer método en `AuraViewModel.kt` y conectarlo a `PlayerScreen` / `MiniPlayerBar`. |
+| Nueva acción de reproducción o carátulas | `AuraPlaybackService.kt`, `AuraPlayerController.kt` (`:core:player`) y `AudioImporter.kt` (`:core:importer`) | Exponer método en `AuraViewModel.kt` y conectarlo a `PlayerScreen` / `MiniPlayerBar` / `LibraryScreen`. |
 
 ## Checklist antes de lanzar el Action `apk Debug`
 1. Verifica que `tests/project-integrity.test.ts` pase al 100% (`npx --yes tsx --test tests/project-integrity.test.ts`).

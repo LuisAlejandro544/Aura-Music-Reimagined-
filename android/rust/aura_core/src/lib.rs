@@ -6,10 +6,11 @@
 //! - Calcular huellas digitales SHA-256 de pistas importadas.
 
 use jni::JNIEnv;
-use jni::objects::{JByteArray, JClass, JString};
-use jni::sys::{jint, jlong, jstring};
+use jni::objects::{JByteArray, JByteBuffer, JClass, JFloatArray, JString};
+use jni::sys::{JNI_FALSE, JNI_TRUE, jboolean, jint, jlong, jstring};
 
 mod artwork;
+mod equalizer;
 mod metadata;
 mod palette;
 
@@ -141,3 +142,106 @@ pub extern "system" fn Java_com_auramusic_core_rust_AuraRustBridge_nativeExtract
         }
     }
 }
+
+/// Actualiza en Rust el estado encendido/apagado y las ganancias (dB) de las 10 bandas del ecualizador.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_com_auramusic_core_rust_AuraRustBridge_nativeSetEqualizerConfig<'local>(
+    env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    enabled: jboolean,
+    gains_db: JFloatArray<'local>,
+) {
+    init_android_logger();
+
+    let len = env.get_array_length(&gains_db).unwrap_or(0).max(0) as usize;
+    let copy_len = len.min(equalizer::BAND_COUNT);
+    let mut bands = [0.0_f32; equalizer::BAND_COUNT];
+    if copy_len > 0 {
+        if let Err(err) = env.get_float_array_region(&gains_db, 0, &mut bands[..copy_len]) {
+            log::error!("Error leyendo bandas del ecualizador desde JNI: {err:?}");
+            return;
+        }
+    }
+
+    equalizer::set_equalizer_config(enabled != JNI_FALSE, &bands);
+}
+
+/// Configura frecuencia de muestreo y número de canales en el procesador DSP del ecualizador.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_com_auramusic_core_rust_AuraRustBridge_nativeConfigureEqualizer(
+    _env: JNIEnv,
+    _class: JClass,
+    sample_rate: jint,
+    channel_count: jint,
+) {
+    init_android_logger();
+    equalizer::configure_global_processor(
+        sample_rate.max(8_000) as u32,
+        channel_count.clamp(1, 8) as usize,
+    );
+}
+
+/// Reinicia las líneas de retardo internas de los filtros biquad al hacer seek o flush.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_com_auramusic_core_rust_AuraRustBridge_nativeResetEqualizerState(
+    _env: JNIEnv,
+    _class: JClass,
+) {
+    equalizer::reset_global_processor();
+}
+
+/// Procesa in-place un DirectByteBuffer PCM de 16 bits little-endian sin copias adicionales.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_com_auramusic_core_rust_AuraRustBridge_nativeProcessEqualizerPcm16<'local>(
+    env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    buffer: JByteBuffer<'local>,
+    byte_length: jint,
+) -> jboolean {
+    process_direct_pcm_buffer(&env, &buffer, byte_length, false)
+}
+
+/// Procesa in-place un DirectByteBuffer PCM de 32 bits flotante little-endian sin copias adicionales.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_com_auramusic_core_rust_AuraRustBridge_nativeProcessEqualizerPcmFloat<'local>(
+    env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    buffer: JByteBuffer<'local>,
+    byte_length: jint,
+) -> jboolean {
+    process_direct_pcm_buffer(&env, &buffer, byte_length, true)
+}
+
+fn process_direct_pcm_buffer(
+    env: &JNIEnv,
+    buffer: &JByteBuffer,
+    byte_length: jint,
+    is_float: bool,
+) -> jboolean {
+    if byte_length <= 0 {
+        return JNI_FALSE;
+    }
+
+    let Ok(ptr) = env.get_direct_buffer_address(buffer) else {
+        return JNI_FALSE;
+    };
+    let Ok(capacity) = env.get_direct_buffer_capacity(buffer) else {
+        return JNI_FALSE;
+    };
+
+    let len = byte_length as usize;
+    if ptr.is_null() || len > capacity {
+        return JNI_FALSE;
+    }
+
+    // SAFETY: `ptr` pertenece a un DirectByteBuffer válido y `len <= capacity` fue verificado.
+    let slice = unsafe { std::slice::from_raw_parts_mut(ptr, len) };
+    let applied = if is_float {
+        equalizer::process_global_pcm_f32_le(slice)
+    } else {
+        equalizer::process_global_pcm16_le(slice)
+    };
+
+    if applied { JNI_TRUE } else { JNI_FALSE }
+}
+

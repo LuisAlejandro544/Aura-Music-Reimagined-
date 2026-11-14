@@ -20,7 +20,9 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.rounded.KeyboardArrowRight
 import androidx.compose.material.icons.rounded.Check
+import androidx.compose.material.icons.rounded.GraphicEq
 import androidx.compose.material.icons.rounded.Memory
 import androidx.compose.material.icons.rounded.Palette
 import androidx.compose.material3.Card
@@ -41,18 +43,21 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.auramusic.core.model.AppAccentColor
+import com.auramusic.core.model.EqualizerState
 
 /**
  * Pantalla de Ajustes de Aura Music.
- * Permite cambiar la paleta de colores principal de toda la aplicación en tiempo real
- * y verifica la presencia del motor nativo Rust compilado para la arquitectura del dispositivo.
+ * Permite cambiar la paleta de colores principal de toda la aplicación en tiempo real,
+ * abrir el ecualizador de 10 bandas en Rust y verificar el estado del motor nativo.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SettingsScreen(
     selectedAccent: AppAccentColor,
     rustEngineInfo: String,
+    equalizerState: EqualizerState,
     onSelectAccent: (AppAccentColor) -> Unit,
+    onOpenEqualizer: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     Scaffold(
@@ -189,6 +194,66 @@ fun SettingsScreen(
 
             item {
                 Spacer(modifier = Modifier.height(6.dp))
+                val eqPresetName = EqualizerState.findPresetById(equalizerState.activePresetId)?.displayName
+                    ?: "Personalizado"
+                Surface(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(16.dp))
+                        .clickable(onClick = onOpenEqualizer),
+                    shape = RoundedCornerShape(16.dp),
+                    color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                    tonalElevation = 2.dp,
+                ) {
+                    Row(
+                        modifier = Modifier.padding(16.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Surface(
+                            modifier = Modifier.size(44.dp),
+                            shape = RoundedCornerShape(12.dp),
+                            color = MaterialTheme.colorScheme.primaryContainer,
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Icon(
+                                    imageVector = Icons.Rounded.GraphicEq,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.primary,
+                                )
+                            }
+                        }
+                        Spacer(modifier = Modifier.width(12.dp))
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "Ecualizador de 10 bandas",
+                                style = MaterialTheme.typography.titleSmall,
+                                fontWeight = FontWeight.SemiBold,
+                            )
+                            Spacer(modifier = Modifier.height(2.dp))
+                            Text(
+                                text = if (equalizerState.isEnabled) {
+                                    "Activo • Perfil: $eqPresetName (Rust DSP)"
+                                } else {
+                                    "Desactivado • Toca para configurar (Rust DSP)"
+                                },
+                                style = MaterialTheme.typography.bodySmall,
+                                color = if (equalizerState.isEnabled) {
+                                    MaterialTheme.colorScheme.primary
+                                } else {
+                                    MaterialTheme.colorScheme.onSurfaceVariant
+                                },
+                            )
+                        }
+                        Icon(
+                            imageVector = Icons.AutoMirrored.Rounded.KeyboardArrowRight,
+                            contentDescription = "Abrir ecualizador",
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
+            }
+
+            item {
                 Surface(
                     modifier = Modifier.fillMaxWidth(),
                     shape = RoundedCornerShape(16.dp),
@@ -206,7 +271,7 @@ fun SettingsScreen(
                         Spacer(modifier = Modifier.width(12.dp))
                         Column {
                             Text(
-                                text = "Motor nativo y futuras funciones",
+                                text = "Motor nativo Rust",
                                 style = MaterialTheme.typography.titleSmall,
                                 fontWeight = FontWeight.SemiBold,
                             )
@@ -218,7 +283,7 @@ fun SettingsScreen(
                             )
                             Spacer(modifier = Modifier.height(4.dp))
                             Text(
-                                text = "Próximamente: ecualizador en Rust, análisis de audio y personalización avanzada.",
+                                text = "Incluye lectura de metadatos, carátulas procedurales y ecualizador de 10 bandas en tiempo real.",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )

@@ -1,13 +1,15 @@
 package com.auramusic.feature.player
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -20,6 +22,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.PlaylistAdd
 import androidx.compose.material.icons.rounded.Favorite
 import androidx.compose.material.icons.rounded.FavoriteBorder
+import androidx.compose.material.icons.rounded.Image
 import androidx.compose.material.icons.rounded.KeyboardArrowDown
 import androidx.compose.material.icons.rounded.MusicNote
 import androidx.compose.material.icons.rounded.Pause
@@ -29,6 +32,7 @@ import androidx.compose.material.icons.rounded.RepeatOne
 import androidx.compose.material.icons.rounded.Shuffle
 import androidx.compose.material.icons.rounded.SkipNext
 import androidx.compose.material.icons.rounded.SkipPrevious
+import androidx.compose.material.icons.rounded.Tune
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.Icon
@@ -52,7 +56,9 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.FilterQuality
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -185,6 +191,8 @@ fun PlayerScreen(
     onCycleRepeat: () -> Unit,
     onToggleLike: (Long) -> Unit,
     onOpenAddToPlaylist: (Track) -> Unit,
+    onChangeCover: (Track) -> Unit,
+    onOpenEqualizer: () -> Unit,
 ) {
     val track = playbackState.currentTrack
 
@@ -218,7 +226,19 @@ fun PlayerScreen(
                     }
                 },
                 actions = {
+                    IconButton(onClick = onOpenEqualizer) {
+                        Icon(
+                            imageVector = Icons.Rounded.Tune,
+                            contentDescription = "Ecualizador",
+                        )
+                    }
                     if (track != null) {
+                        IconButton(onClick = { onChangeCover(track) }) {
+                            Icon(
+                                imageVector = Icons.Rounded.Image,
+                                contentDescription = "Cambiar carátula",
+                            )
+                        }
                         IconButton(onClick = { onOpenAddToPlaylist(track) }) {
                             Icon(
                                 imageVector = Icons.AutoMirrored.Rounded.PlaylistAdd,
@@ -265,22 +285,33 @@ fun PlayerScreen(
             verticalArrangement = Arrangement.SpaceBetween,
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
-            // Carátula normal cuadrada con bordes suavizados y elevación sobria.
-            Surface(
+            // Carátula cuadrada clásica bien enmarcada y proporcionada.
+            BoxWithConstraints(
                 modifier = Modifier
+                    .weight(1f)
                     .fillMaxWidth()
-                    .padding(horizontal = 8.dp)
-                    .aspectRatio(1f),
-                shape = RoundedCornerShape(18.dp),
-                tonalElevation = 8.dp,
-                shadowElevation = 14.dp,
+                    .padding(vertical = 10.dp),
+                contentAlignment = Alignment.Center,
             ) {
-                SquareCoverArt(
-                    coverPath = track.coverFilePath,
-                    contentDescription = "Carátula de ${track.title}",
-                    modifier = Modifier.fillMaxSize(),
-                    cornerRadiusDp = 18,
-                )
+                val squareSize = minOf(maxWidth, maxHeight).coerceAtMost(360.dp)
+                Surface(
+                    modifier = Modifier.size(squareSize),
+                    shape = RoundedCornerShape(22.dp),
+                    color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                    border = BorderStroke(
+                        width = 1.dp,
+                        color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.85f),
+                    ),
+                    tonalElevation = 6.dp,
+                    shadowElevation = 14.dp,
+                ) {
+                    SquareCoverArt(
+                        coverPath = track.coverFilePath,
+                        contentDescription = "Carátula de ${track.title}",
+                        modifier = Modifier.fillMaxSize(),
+                        cornerRadiusDp = 22,
+                    )
+                }
             }
 
             // Bloque de información + corazón de Me gusta.
@@ -345,6 +376,47 @@ fun PlayerScreen(
                         isDragging = false
                     },
                     valueRange = 0f..durationFloat,
+                    thumb = {
+                        val thumbDiameter = if (isDragging) 20.dp else 16.dp
+                        Box(
+                            modifier = Modifier.size(24.dp),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(thumbDiameter)
+                                    .shadow(elevation = 4.dp, shape = CircleShape)
+                                    .background(MaterialTheme.colorScheme.primary, CircleShape)
+                                    .border(
+                                        width = 2.dp,
+                                        color = MaterialTheme.colorScheme.background.copy(alpha = 0.85f),
+                                        shape = CircleShape,
+                                    ),
+                            )
+                        }
+                    },
+                    track = { sliderState ->
+                        val range = (sliderState.valueRange.endInclusive - sliderState.valueRange.start)
+                            .coerceAtLeast(1f)
+                        val fraction = ((sliderState.value - sliderState.valueRange.start) / range)
+                            .coerceIn(0f, 1f)
+
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(6.dp)
+                                .clip(CircleShape)
+                                .background(MaterialTheme.colorScheme.surfaceContainerHighest),
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth(fraction)
+                                    .height(6.dp)
+                                    .clip(CircleShape)
+                                    .background(MaterialTheme.colorScheme.primary),
+                            )
+                        }
+                    },
                     colors = SliderDefaults.colors(
                         thumbColor = MaterialTheme.colorScheme.primary,
                         activeTrackColor = MaterialTheme.colorScheme.primary,
@@ -465,6 +537,7 @@ fun SquareCoverArt(
             model = file,
             contentDescription = contentDescription,
             contentScale = ContentScale.Crop,
+            filterQuality = FilterQuality.High,
             modifier = modifier.clip(shape),
         )
     } else {

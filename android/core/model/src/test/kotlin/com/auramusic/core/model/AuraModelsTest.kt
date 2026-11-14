@@ -33,4 +33,20 @@ class AuraModelsTest {
         assertEquals(AppAccentColor.EMERALD, AppAccentColor.fromName("EMERALD"))
         assertEquals(AppAccentColor.AMETHYST, AppAccentColor.fromName("UNKNOWN"))
     }
+
+    @Test
+    fun `equalizer state normalizes 10 bands and clamps out of range gains`() {
+        val raw = EqualizerState(
+            isEnabled = true,
+            bandGainsDb = listOf(20f, -30f, Float.NaN, 3.5f),
+            activePresetId = EqualizerState.PRESET_CUSTOM_ID,
+        )
+        val normalized = raw.normalized()
+        assertEquals(EqualizerState.BAND_COUNT, normalized.bandGainsDb.size)
+        assertEquals(EqualizerState.MAX_GAIN_DB, normalized.bandGainsDb[0], 0.001f)
+        assertEquals(EqualizerState.MIN_GAIN_DB, normalized.bandGainsDb[1], 0.001f)
+        assertEquals(0f, normalized.bandGainsDb[2], 0.001f)
+        assertEquals(3.5f, normalized.bandGainsDb[3], 0.001f)
+        assertEquals(0f, normalized.bandGainsDb[9], 0.001f)
+    }
 }

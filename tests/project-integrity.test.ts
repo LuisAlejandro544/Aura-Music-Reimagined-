@@ -23,7 +23,8 @@ test('all Gradle modules declared in settings.gradle.kts exist with build script
   const settings = fs.readFileSync(path.join(rootDir, 'android/settings.gradle.kts'), 'utf8');
   const includes = [...settings.matchAll(/include\("([^"]+)"\)/g)].map((m) => m[1]);
 
-  assert.ok(includes.length >= 10, 'Expected full multi-module Gradle structure');
+  assert.ok(includes.length >= 11, 'Expected full multi-module Gradle structure including :feature:equalizer');
+  assert.ok(includes.includes(':feature:equalizer'), 'Expected dedicated :feature:equalizer module');
 
   for (const mod of includes) {
     const relPath = mod.replace(/^:/, '').replace(/:/g, '/');
@@ -159,6 +160,144 @@ test('Room database enables schema export and registers non-destructive migratio
   assert.ok(fs.existsSync(migrationsKt), 'Missing AuraMigrations.kt');
   assert.match(repoKt, /addMigrations\(\*AuraMigrations\.ALL_MIGRATIONS\)/);
   assert.doesNotMatch(repoKt, /fallbackToDestructiveMigration/);
+});
+
+test('cover cleanup deletes unreferenced covers when tracks are removed', () => {
+  const dbKt = fs.readFileSync(
+    path.join(rootDir, 'android/core/database/src/main/kotlin/com/auramusic/core/database/AuraDatabase.kt'),
+    'utf8',
+  );
+  const repoKt = fs.readFileSync(
+    path.join(rootDir, 'android/core/database/src/main/kotlin/com/auramusic/core/database/AuraRepositories.kt'),
+    'utf8',
+  );
+  const importerKt = fs.readFileSync(
+    path.join(rootDir, 'android/core/importer/src/main/kotlin/com/auramusic/core/importer/AudioImporter.kt'),
+    'utf8',
+  );
+
+  assert.match(dbKt, /getCoverFilePathById/);
+  assert.match(dbKt, /countTracksUsingCoverPath/);
+  assert.match(dbKt, /getAllReferencedCoverPaths/);
+  assert.match(repoKt, /countTracksUsingCoverPath\(coverPath\)\s*==\s*0/);
+  assert.match(importerKt, /cleanupOrphanCovers/);
+});
+
+test('player screen uses framed square cover and circular progress thumb', () => {
+  const playerScreenKt = fs.readFileSync(
+    path.join(rootDir, 'android/feature/player/src/main/kotlin/com/auramusic/feature/player/PlayerScreen.kt'),
+    'utf8',
+  );
+
+  assert.match(playerScreenKt, /BoxWithConstraints/);
+  assert.match(playerScreenKt, /thumb\s*=\s*\{/);
+  assert.match(playerScreenKt, /CircleShape/);
+});
+
+test('player controller reconnects after UI recreation and ViewModel does not release singleton controller', () => {
+  const controllerKt = fs.readFileSync(
+    path.join(rootDir, 'android/core/player/src/main/kotlin/com/auramusic/core/player/AuraPlayerController.kt'),
+    'utf8',
+  );
+  const vmKt = fs.readFileSync(
+    path.join(rootDir, 'android/app/src/main/kotlin/com/auramusic/app/AuraViewModel.kt'),
+    'utf8',
+  );
+
+  assert.match(controllerKt, /fun onUiAttached\(\)/);
+  assert.match(controllerKt, /fun onUiDetached\(\)/);
+  assert.match(controllerKt, /rebuildQueueFromPlayer/);
+  assert.match(vmKt, /onUiAttached\(\)/);
+  assert.match(vmKt, /onUiDetached\(\)/);
+  assert.doesNotMatch(vmKt, /playerController\.release\(\)/);
+});
+
+test('startup loading screen waits for initial library load and theme fixes comfortable fontScale', () => {
+  const vmKt = fs.readFileSync(
+    path.join(rootDir, 'android/app/src/main/kotlin/com/auramusic/app/AuraViewModel.kt'),
+    'utf8',
+  );
+  const mainKt = fs.readFileSync(
+    path.join(rootDir, 'android/app/src/main/kotlin/com/auramusic/app/MainActivity.kt'),
+    'utf8',
+  );
+  const rootKt = fs.readFileSync(
+    path.join(rootDir, 'android/app/src/main/kotlin/com/auramusic/app/AuraAppRoot.kt'),
+    'utf8',
+  );
+  const themeKt = fs.readFileSync(
+    path.join(rootDir, 'android/app/src/main/kotlin/com/auramusic/app/AuraTheme.kt'),
+    'utf8',
+  );
+
+  assert.match(vmKt, /val isAppReady: StateFlow<Boolean>/);
+  assert.match(mainKt, /AuraStartupLoadingScreen/);
+  assert.match(rootKt, /fun AuraStartupLoadingScreen\(\)/);
+  assert.match(themeKt, /AuraTypography/);
+  assert.match(themeKt, /fontScale\s*=\s*1\.0f/);
+});
+
+test('embedded cover extraction detects real format and custom gallery covers convert to lossless WebP off main thread', () => {
+  const importerKt = fs.readFileSync(
+    path.join(rootDir, 'android/core/importer/src/main/kotlin/com/auramusic/core/importer/AudioImporter.kt'),
+    'utf8',
+  );
+  const repoKt = fs.readFileSync(
+    path.join(rootDir, 'android/core/database/src/main/kotlin/com/auramusic/core/database/AuraRepositories.kt'),
+    'utf8',
+  );
+
+  assert.match(importerKt, /detectImageExtension\(bytes\)/);
+  assert.doesNotMatch(importerKt, /emb_\$\{fingerprint\.take\(24\)\}\.jpg/);
+  assert.match(importerKt, /saveCustomCoverAsLosslessWebp/);
+  assert.match(importerKt, /WEBP_LOSSLESS/);
+  assert.match(importerKt, /compress\(format,\s*100,\s*out\)/);
+  assert.match(importerKt, /withContext\(Dispatchers\.IO\)/);
+  assert.match(importerKt, /withContext\(Dispatchers\.Default\)/);
+  assert.match(repoKt, /suspend fun updateTrackCover/);
+});
+
+test('batch audio import uses single DB identity query and bounded coroutine concurrency', () => {
+  const importerKt = fs.readFileSync(
+    path.join(rootDir, 'android/core/importer/src/main/kotlin/com/auramusic/core/importer/AudioImporter.kt'),
+    'utf8',
+  );
+  const dbKt = fs.readFileSync(
+    path.join(rootDir, 'android/core/database/src/main/kotlin/com/auramusic/core/database/AuraDatabase.kt'),
+    'utf8',
+  );
+
+  assert.match(dbKt, /getAllTrackIdentities/);
+  assert.match(importerKt, /repository\.getAllTrackIdentities\(\)/);
+  assert.match(importerKt, /Semaphore\(/);
+  assert.match(importerKt, /awaitAll\(\)/);
+});
+
+test('10-band equalizer runs in Rust DSP wired to Media3 AudioSink with dedicated feature screen', () => {
+  const eqRs = path.join(rootDir, 'android/rust/aura_core/src/equalizer.rs');
+  const rustLib = fs.readFileSync(path.join(rootDir, 'android/rust/aura_core/src/lib.rs'), 'utf8');
+  const processorKt = path.join(
+    rootDir,
+    'android/core/player/src/main/kotlin/com/auramusic/core/player/RustEqualizerAudioProcessor.kt',
+  );
+  const serviceKt = fs.readFileSync(
+    path.join(rootDir, 'android/core/player/src/main/kotlin/com/auramusic/core/player/AuraPlaybackService.kt'),
+    'utf8',
+  );
+  const eqScreenKt = path.join(
+    rootDir,
+    'android/feature/equalizer/src/main/kotlin/com/auramusic/feature/equalizer/EqualizerScreen.kt',
+  );
+
+  assert.ok(fs.existsSync(eqRs), 'Missing android/rust/aura_core/src/equalizer.rs');
+  assert.ok(fs.existsSync(processorKt), 'Missing RustEqualizerAudioProcessor.kt');
+  assert.ok(fs.existsSync(eqScreenKt), 'Missing EqualizerScreen.kt');
+  assert.match(rustLib, /mod equalizer;/);
+  assert.match(rustLib, /nativeProcessEqualizerPcm16/);
+  assert.match(rustLib, /nativeProcessEqualizerPcmFloat/);
+  assert.match(serviceKt, /RustEqualizerAudioProcessor/);
+  assert.match(serviceKt, /DefaultAudioSink\.Builder/);
+  assert.doesNotMatch(serviceKt, /android\.media\.audiofx\.Equalizer/);
 });
 
 

@@ -9,6 +9,14 @@ import androidx.room.RoomDatabase
 import kotlinx.coroutines.flow.Flow
 
 /**
+ * Proyección ligera de identidad de pista para verificar duplicados por lote en memoria.
+ */
+data class TrackIdentityRow(
+    val content_uri: String,
+    val track_fingerprint: String,
+)
+
+/**
  * DAO de acceso a pistas locales y estado de "Me gusta".
  */
 @Dao
@@ -23,6 +31,9 @@ interface TrackDao {
     @Query("SELECT COUNT(*) FROM tracks WHERE is_liked = 1")
     fun observeLikedCount(): Flow<Int>
 
+    @Query("SELECT content_uri, track_fingerprint FROM tracks")
+    suspend fun getAllTrackIdentities(): List<TrackIdentityRow>
+
     @Query("SELECT EXISTS(SELECT 1 FROM tracks WHERE content_uri = :uri OR track_fingerprint = :fingerprint)")
     suspend fun existsByUriOrFingerprint(uri: String, fingerprint: String): Boolean
 
@@ -34,6 +45,15 @@ interface TrackDao {
 
     @Query("UPDATE tracks SET cover_file_path = :coverPath, is_procedural_cover = :isProcedural WHERE id = :trackId")
     suspend fun updateCoverPath(trackId: Long, coverPath: String, isProcedural: Boolean)
+
+    @Query("SELECT cover_file_path FROM tracks WHERE id = :trackId LIMIT 1")
+    suspend fun getCoverFilePathById(trackId: Long): String?
+
+    @Query("SELECT COUNT(*) FROM tracks WHERE cover_file_path = :coverPath")
+    suspend fun countTracksUsingCoverPath(coverPath: String): Int
+
+    @Query("SELECT cover_file_path FROM tracks WHERE cover_file_path IS NOT NULL")
+    suspend fun getAllReferencedCoverPaths(): List<String>
 
     @Query("DELETE FROM tracks WHERE id = :trackId")
     suspend fun deleteById(trackId: Long)

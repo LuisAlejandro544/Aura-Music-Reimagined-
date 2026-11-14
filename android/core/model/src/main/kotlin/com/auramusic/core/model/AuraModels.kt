@@ -189,3 +189,99 @@ enum class AppAccentColor(
             entries.firstOrNull { it.name == name } ?: AMETHYST
     }
 }
+
+/**
+ * Preset predefinido del ecualizador gráfico de 10 bandas (frecuencias ISO).
+ */
+data class EqualizerPreset(
+    val id: String,
+    val displayName: String,
+    val gainsDb: List<Float>,
+)
+
+/**
+ * Estado inmutable del ecualizador de 10 bandas procesado en tiempo real por Rust.
+ */
+data class EqualizerState(
+    val isEnabled: Boolean = false,
+    val bandGainsDb: List<Float> = List(BAND_COUNT) { 0f },
+    val activePresetId: String = PRESET_FLAT_ID,
+) {
+    fun normalized(): EqualizerState {
+        val safeGains = List(BAND_COUNT) { idx ->
+            val raw = bandGainsDb.getOrElse(idx) { 0f }
+            if (raw.isFinite()) raw.coerceIn(MIN_GAIN_DB, MAX_GAIN_DB) else 0f
+        }
+        return copy(bandGainsDb = safeGains)
+    }
+
+    companion object {
+        const val BAND_COUNT = 10
+        const val MIN_GAIN_DB = -12f
+        const val MAX_GAIN_DB = 12f
+        const val PRESET_FLAT_ID = "flat"
+        const val PRESET_CUSTOM_ID = "custom"
+
+        val BAND_FREQUENCIES_HZ = listOf(
+            31.25f, 62.5f, 125f, 250f, 500f,
+            1000f, 2000f, 4000f, 8000f, 16000f,
+        )
+
+        val BAND_LABELS = listOf(
+            "31 Hz", "62 Hz", "125 Hz", "250 Hz", "500 Hz",
+            "1 kHz", "2 kHz", "4 kHz", "8 kHz", "16 kHz",
+        )
+
+        val BAND_SHORT_LABELS = listOf(
+            "31", "62", "125", "250", "500",
+            "1k", "2k", "4k", "8k", "16k",
+        )
+
+        val PRESETS = listOf(
+            EqualizerPreset(
+                id = PRESET_FLAT_ID,
+                displayName = "Plano",
+                gainsDb = listOf(0f, 0f, 0f, 0f, 0f, 0f, 0f, 0f, 0f, 0f),
+            ),
+            EqualizerPreset(
+                id = "bass_boost",
+                displayName = "Graves+",
+                gainsDb = listOf(6.5f, 5.5f, 4.0f, 2.0f, 0.5f, 0f, 0f, 0.5f, 1.0f, 1.0f),
+            ),
+            EqualizerPreset(
+                id = "rock",
+                displayName = "Rock",
+                gainsDb = listOf(4.5f, 3.5f, 2.0f, 0.5f, -1.0f, -0.5f, 1.5f, 3.0f, 4.0f, 4.5f),
+            ),
+            EqualizerPreset(
+                id = "pop",
+                displayName = "Pop",
+                gainsDb = listOf(-1.0f, 1.5f, 3.5f, 4.0f, 2.5f, 0f, -1.0f, -1.0f, 1.5f, 2.5f),
+            ),
+            EqualizerPreset(
+                id = "electronic",
+                displayName = "Electrónica",
+                gainsDb = listOf(5.5f, 4.5f, 2.5f, 0f, -1.5f, 1.0f, 2.0f, 3.5f, 4.5f, 5.0f),
+            ),
+            EqualizerPreset(
+                id = "acoustic",
+                displayName = "Acústico",
+                gainsDb = listOf(2.5f, 2.0f, 1.0f, 0.5f, 1.5f, 1.5f, 2.5f, 3.0f, 2.5f, 1.5f),
+            ),
+            EqualizerPreset(
+                id = "vocal",
+                displayName = "Vocal",
+                gainsDb = listOf(-2.5f, -2.0f, -1.0f, 1.5f, 3.5f, 4.5f, 4.0f, 2.5f, 0.5f, -0.5f),
+            ),
+            EqualizerPreset(
+                id = "classical",
+                displayName = "Clásica",
+                gainsDb = listOf(3.0f, 2.0f, 1.0f, 0.5f, -0.5f, -0.5f, 0.5f, 2.0f, 3.0f, 3.5f),
+            ),
+        )
+
+        fun findPresetById(id: String?): EqualizerPreset? =
+            PRESETS.firstOrNull { it.id == id }
+    }
+}
+

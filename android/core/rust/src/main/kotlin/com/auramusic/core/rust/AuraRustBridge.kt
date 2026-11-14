@@ -51,6 +51,16 @@ object AuraRustBridge {
 
     private external fun nativeExtractAudioMetadata(fd: Int): ByteArray
 
+    private external fun nativeSetEqualizerConfig(enabled: Boolean, gainsDb: FloatArray)
+
+    private external fun nativeConfigureEqualizer(sampleRate: Int, channelCount: Int)
+
+    private external fun nativeResetEqualizerState()
+
+    private external fun nativeProcessEqualizerPcm16(buffer: ByteBuffer, byteLength: Int): Boolean
+
+    private external fun nativeProcessEqualizerPcmFloat(buffer: ByteBuffer, byteLength: Int): Boolean
+
     /**
      * Devuelve la información del motor nativo Rust compilado para la arquitectura actual.
      */
@@ -87,7 +97,7 @@ object AuraRustBridge {
         fingerprint: String,
         seedKey: String,
         accentArgb: Int = 0,
-        sizePx: Int = 512,
+        sizePx: Int = 640,
     ): String = withContext(Dispatchers.Default) {
         val coversDir = File(context.filesDir, "covers").apply { mkdirs() }
         val outputFile = File(coversDir, "proc_${fingerprint.take(24)}.png")
@@ -116,5 +126,46 @@ object AuraRustBridge {
         }
 
         outputFile.absolutePath
+    }
+
+    /**
+     * Actualiza la configuración del ecualizador de 10 bandas en el motor nativo Rust.
+     */
+    suspend fun setEqualizerConfig(enabled: Boolean, gainsDb: List<Float>) =
+        withContext(Dispatchers.Default) {
+            val array = FloatArray(10) { idx -> gainsDb.getOrElse(idx) { 0f } }
+            nativeSetEqualizerConfig(enabled, array)
+        }
+
+    /**
+     * Configura el formato de audio en el procesador DSP de Rust (llamado desde ExoPlayer).
+     */
+    fun configureEqualizer(sampleRate: Int, channelCount: Int) {
+        nativeConfigureEqualizer(sampleRate, channelCount)
+    }
+
+    /**
+     * Reinicia el historial interno de los filtros biquad al hacer seek o limpiar el buffer.
+     */
+    fun resetEqualizerState() {
+        nativeResetEqualizerState()
+    }
+
+    /**
+     * Ecualiza un DirectByteBuffer PCM de 16 bits little-endian in-place en Rust.
+     * Solo debe invocarse desde el hilo interno de reproducción de ExoPlayer.
+     */
+    fun processEqualizerPcm16(buffer: ByteBuffer, byteLength: Int): Boolean {
+        if (!buffer.isDirect || byteLength <= 0) return false
+        return nativeProcessEqualizerPcm16(buffer, byteLength)
+    }
+
+    /**
+     * Ecualiza un DirectByteBuffer PCM de 32 bits flotante little-endian in-place en Rust.
+     * Solo debe invocarse desde el hilo interno de reproducción de ExoPlayer.
+     */
+    fun processEqualizerPcmFloat(buffer: ByteBuffer, byteLength: Int): Boolean {
+        if (!buffer.isDirect || byteLength <= 0) return false
+        return nativeProcessEqualizerPcmFloat(buffer, byteLength)
     }
 }

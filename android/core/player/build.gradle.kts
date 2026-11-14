@@ -27,6 +27,7 @@ android {
 
 dependencies {
     implementation(project(":core:model"))
+    implementation(project(":core:rust"))
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.media3.exoplayer)
     implementation(libs.androidx.media3.session)

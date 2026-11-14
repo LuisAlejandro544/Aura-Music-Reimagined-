@@ -9,13 +9,16 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
+import androidx.compose.animation.Crossfade
+import androidx.compose.animation.core.tween
 import androidx.compose.runtime.getValue
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 
 /**
  * Actividad principal de Aura Music.
- * Aplica el tema dinámico elegido por el usuario y monta la navegación modular de Jetpack Compose.
+ * Aplica el tema dinámico elegido por el usuario, muestra una pantalla de carga inicial
+ * mientras se hidratan los datos locales y monta la navegación modular de Jetpack Compose.
  */
 class MainActivity : ComponentActivity() {
 
@@ -34,8 +37,19 @@ class MainActivity : ComponentActivity() {
 
         setContent {
             val accentColor by viewModel.accentColor.collectAsStateWithLifecycle()
+            val isAppReady by viewModel.isAppReady.collectAsStateWithLifecycle()
             AuraMusicTheme(accentColor = accentColor) {
-                AuraAppRoot(viewModel = viewModel)
+                Crossfade(
+                    targetState = isAppReady,
+                    animationSpec = tween(durationMillis = 260),
+                    label = "AuraStartupCrossfade",
+                ) { ready ->
+                    if (ready) {
+                        AuraAppRoot(viewModel = viewModel)
+                    } else {
+                        AuraStartupLoadingScreen()
+                    }
+                }
             }
         }
     }

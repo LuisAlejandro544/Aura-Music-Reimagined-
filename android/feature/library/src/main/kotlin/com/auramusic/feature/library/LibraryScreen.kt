@@ -27,6 +27,7 @@ import androidx.compose.material.icons.rounded.DeleteOutline
 import androidx.compose.material.icons.rounded.Favorite
 import androidx.compose.material.icons.rounded.FavoriteBorder
 import androidx.compose.material.icons.rounded.GraphicEq
+import androidx.compose.material.icons.rounded.Image
 import androidx.compose.material.icons.rounded.LibraryMusic
 import androidx.compose.material.icons.rounded.MoreVert
 import androidx.compose.material.icons.rounded.MusicNote
@@ -88,6 +89,7 @@ fun LibraryScreen(
     onPlayTrack: (List<Track>, Int) -> Unit,
     onToggleLike: (Long) -> Unit,
     onAddToPlaylist: (Track) -> Unit,
+    onChangeCover: (Track) -> Unit,
     onDeleteTrack: (Long) -> Unit,
     onOpenLikedSongs: () -> Unit,
     onDismissImportMessage: () -> Unit,
@@ -216,6 +218,7 @@ fun LibraryScreen(
                             onPlay = { onPlayTrack(filteredTracks, index) },
                             onToggleLike = { onToggleLike(track.id) },
                             onAddToPlaylist = { onAddToPlaylist(track) },
+                            onChangeCover = { onChangeCover(track) },
                             onDelete = { onDeleteTrack(track.id) },
                         )
                     }
@@ -323,6 +326,7 @@ private fun TrackRowCard(
     onPlay: () -> Unit,
     onToggleLike: () -> Unit,
     onAddToPlaylist: () -> Unit,
+    onChangeCover: () -> Unit,
     onDelete: () -> Unit,
 ) {
     var menuExpanded by remember { mutableStateOf(false) }
@@ -427,6 +431,14 @@ private fun TrackRowCard(
                         onClick = {
                             menuExpanded = false
                             onAddToPlaylist()
+                        },
+                    )
+                    DropdownMenuItem(
+                        text = { Text("Cambiar carátula") },
+                        leadingIcon = { Icon(Icons.Rounded.Image, contentDescription = null) },
+                        onClick = {
+                            menuExpanded = false
+                            onChangeCover()
                         },
                     )
                     DropdownMenuItem(
