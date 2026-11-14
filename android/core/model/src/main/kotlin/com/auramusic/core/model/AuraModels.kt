@@ -67,6 +67,7 @@ data class PlaybackState(
     val currentIndex: Int = -1,
     val shuffleEnabled: Boolean = false,
     val repeatMode: RepeatMode = RepeatMode.OFF,
+    val playbackSpeed: Float = PlaybackTuning.DEFAULT_PLAYBACK_SPEED,
 ) {
     val progressFraction: Float
         get() = if (durationMs > 0L) {
@@ -286,6 +287,198 @@ data class EqualizerState(
 }
 
 /**
+ * Representa una playlist generada automáticamente agrupando canciones por el nombre del artista.
+ *
+ * @property artistKey Clave normalizada del artista (minúsculas y espacios colapsados) para agrupar y navegar.
+ * @property artistName Nombre visible del artista elegido entre las pistas del grupo.
+ * @property tracks Lista ordenada de canciones pertenecientes únicamente a este artista.
+ * @property coverFilePath Carátula representativa del artista (prioriza portadas reales sobre procedurales).
+ */
+data class ArtistPlaylist(
+    val artistKey: String,
+    val artistName: String,
+    val tracks: List<Track>,
+    val coverFilePath: String? = null,
+) {
+    val trackCount: Int
+        get() = tracks.size
+
+    val totalDurationMs: Long
+        get() = tracks.sumOf { it.durationMs.coerceAtLeast(0L) }
+}
+
+/**
+ * Constructor puro y determinista de playlists automáticas por artista.
+ */
+object ArtistPlaylistBuilder {
+
+    private val whitespaceRegex = Regex("\\s+")
+
+    /**
+     * Normaliza el nombre del artista para agrupar pistas con distinto uso de mayúsculas o espacios.
+     */
+    fun normalizeArtistKey(rawArtist: String): String {
+        val cleaned = rawArtist.trim().replace(whitespaceRegex, " ")
+        return if (cleaned.isEmpty()) {
+            "artista desconocido"
+        } else {
+            cleaned.lowercase()
+        }
+    }
+
+    /**
+     * Agrupa automáticamente las canciones por nombre de artista.
+     * Si varias canciones comparten el mismo artista, quedan dentro de la misma playlist automática.
+     */
+    fun buildFromTracks(tracks: List<Track>): List<ArtistPlaylist> {
+        if (tracks.isEmpty()) return emptyList()
+
+        return tracks
+            .groupBy { normalizeArtistKey(it.artist) }
+            .map { (key, groupTracks) ->
+                val displayName = resolveDisplayArtistName(groupTracks)
+                val sortedTracks = groupTracks.sortedWith(
+                    compareBy<Track> { it.title.lowercase() }.thenByDescending { it.addedAt },
+                )
+                val cover = sortedTracks.firstOrNull { !it.isProceduralCover && !it.coverFilePath.isNullOrBlank() }
+                    ?.coverFilePath
+                    ?: sortedTracks.firstOrNull { !it.coverFilePath.isNullOrBlank() }?.coverFilePath
+
+                ArtistPlaylist(
+                    artistKey = key,
+                    artistName = displayName,
+                    tracks = sortedTracks,
+                    coverFilePath = cover,
+                )
+            }
+            .sortedWith(
+                compareByDescending<ArtistPlaylist> { it.trackCount }
+                    .thenBy { it.artistName.lowercase() },
+            )
+    }
+
+    fun findByKey(tracks: List<Track>, artistKey: String): ArtistPlaylist? {
+        if (artistKey.isBlank()) return null
+        val targetKey = normalizeArtistKey(artistKey)
+        return buildFromTracks(tracks).firstOrNull { it.artistKey == targetKey }
+    }
+
+    private fun resolveDisplayArtistName(tracks: List<Track>): String {
+        val candidates = tracks
+            .map { it.artist.trim().replace(whitespaceRegex, " ") }
+            .filter { it.isNotEmpty() }
+        if (candidates.isEmpty()) return "Artista desconocido"
+
+        return candidates
+            .groupingBy { it }
+            .eachCount()
+            .entries
+            .sortedWith(compareByDescending<Map.Entry<String, Int>> { it.value }.thenBy { it.key })
+            .first()
+            .key
+    }
+}
+
+/**
+ * Operaciones puras y seguras de índice para manipular la cola de reproducción activa.
+ */
+object PlaybackQueueHelper {
+
+    data class QueueMutationResult(
+        val queue: List<Track>,
+        val currentIndex: Int,
+        val insertedAt: Int = -1,
+    )
+
+    fun insertPlayNext(
+        queue: List<Track>,
+        currentIndex: Int,
+        track: Track,
+    ): QueueMutationResult {
+        if (queue.isEmpty()) {
+            return QueueMutationResult(queue = listOf(track), currentIndex = 0, insertedAt = 0)
+        }
+        val safeCurrent = currentIndex.coerceIn(0, queue.lastIndex)
+        val insertIndex = (safeCurrent + 1).coerceIn(0, queue.size)
+        val updated = queue.toMutableList().apply {
+            add(insertIndex, track)
+        }
+        return QueueMutationResult(queue = updated, currentIndex = safeCurrent, insertedAt = insertIndex)
+    }
+
+    fun appendToQueue(
+        queue: List<Track>,
+        currentIndex: Int,
+        track: Track,
+    ): QueueMutationResult {
+        if (queue.isEmpty()) {
+            return QueueMutationResult(queue = listOf(track), currentIndex = 0, insertedAt = 0)
+        }
+        val safeCurrent = currentIndex.coerceIn(0, queue.lastIndex)
+        val updated = queue + track
+        return QueueMutationResult(queue = updated, currentIndex = safeCurrent, insertedAt = updated.lastIndex)
+    }
+
+    fun moveItem(
+        queue: List<Track>,
+        currentIndex: Int,
+        fromIndex: Int,
+        toIndex: Int,
+    ): QueueMutationResult {
+        if (queue.isEmpty() ||
+            fromIndex !in queue.indices ||
+            toIndex !in queue.indices ||
+            fromIndex == toIndex
+        ) {
+            return QueueMutationResult(queue = queue, currentIndex = currentIndex)
+        }
+
+        val updated = queue.toMutableList()
+        val moved = updated.removeAt(fromIndex)
+        updated.add(toIndex, moved)
+
+        val nextCurrent = when {
+            currentIndex == fromIndex -> toIndex
+            fromIndex < currentIndex && toIndex >= currentIndex -> currentIndex - 1
+            fromIndex > currentIndex && toIndex <= currentIndex -> currentIndex + 1
+            else -> currentIndex
+        }
+
+        return QueueMutationResult(queue = updated, currentIndex = nextCurrent)
+    }
+
+    fun removeItem(
+        queue: List<Track>,
+        currentIndex: Int,
+        removeIndex: Int,
+    ): QueueMutationResult {
+        if (queue.isEmpty() || removeIndex !in queue.indices) {
+            return QueueMutationResult(queue = queue, currentIndex = currentIndex)
+        }
+        val updated = queue.toMutableList().apply { removeAt(removeIndex) }
+        if (updated.isEmpty()) {
+            return QueueMutationResult(queue = emptyList(), currentIndex = -1)
+        }
+        val nextCurrent = when {
+            removeIndex < currentIndex -> (currentIndex - 1).coerceAtLeast(0)
+            removeIndex == currentIndex -> currentIndex.coerceIn(0, updated.lastIndex)
+            else -> currentIndex.coerceIn(0, updated.lastIndex)
+        }
+        return QueueMutationResult(queue = updated, currentIndex = nextCurrent)
+    }
+
+    fun clearUpcoming(
+        queue: List<Track>,
+        currentIndex: Int,
+    ): QueueMutationResult {
+        if (queue.isEmpty()) return QueueMutationResult(emptyList(), -1)
+        val safeCurrent = currentIndex.coerceIn(0, queue.lastIndex)
+        val updated = queue.subList(0, safeCurrent + 1).toList()
+        return QueueMutationResult(queue = updated, currentIndex = safeCurrent)
+    }
+}
+
+/**
  * Estados del ciclo de vida de descarga de audio desde YouTube mediante yt-dlp + QuickJS-NG.
  */
 enum class DownloadStatus {
@@ -297,6 +490,7 @@ enum class DownloadStatus {
     DOWNLOADING,
     IMPORTING,
     COMPLETED,
+    CANCELLED,
     ERROR,
 }
 
@@ -390,5 +584,110 @@ fun interface DeleteEffectFrameRenderer {
         accentArgb: Int,
     ): Boolean
 }
+
+/**
+ * Configuración reactiva y persistente del motor de reproducción:
+ * - Crossfade activado/desactivado.
+ * - Segundos antes de terminar la canción en los que comienza el crossfade.
+ * - Velocidad de reproducción (0.50x a 2.00x).
+ */
+data class PlaybackTuning(
+    val crossfadeEnabled: Boolean = false,
+    val crossfadeSeconds: Int = DEFAULT_CROSSFADE_SECONDS,
+    val playbackSpeed: Float = DEFAULT_PLAYBACK_SPEED,
+) {
+    fun normalized(): PlaybackTuning = copy(
+        crossfadeSeconds = PlaybackTuningHelper.clampCrossfadeSeconds(crossfadeSeconds),
+        playbackSpeed = PlaybackTuningHelper.clampPlaybackSpeed(playbackSpeed),
+    )
+
+    companion object {
+        const val MIN_CROSSFADE_SECONDS = 1
+        const val MAX_CROSSFADE_SECONDS = 12
+        const val DEFAULT_CROSSFADE_SECONDS = 5
+        const val MIN_PLAYBACK_SPEED = 0.5f
+        const val MAX_PLAYBACK_SPEED = 2.0f
+        const val DEFAULT_PLAYBACK_SPEED = 1.0f
+        val SPEED_PRESETS = listOf(0.5f, 0.75f, 1.0f, 1.25f, 1.5f, 2.0f)
+    }
+}
+
+/**
+ * Reglas puras y deterministas para velocidad de reproducción y transición Crossfade.
+ */
+object PlaybackTuningHelper {
+
+    fun clampCrossfadeSeconds(seconds: Int): Int =
+        seconds.coerceIn(PlaybackTuning.MIN_CROSSFADE_SECONDS, PlaybackTuning.MAX_CROSSFADE_SECONDS)
+
+    fun clampPlaybackSpeed(speed: Float): Float {
+        if (!speed.isFinite()) return PlaybackTuning.DEFAULT_PLAYBACK_SPEED
+        val clamped = speed.coerceIn(PlaybackTuning.MIN_PLAYBACK_SPEED, PlaybackTuning.MAX_PLAYBACK_SPEED)
+        return kotlin.math.round(clamped * 100f) / 100f
+    }
+
+    fun formatSpeedLabel(speed: Float): String {
+        val safe = clampPlaybackSpeed(speed)
+        val roundedTwo = kotlin.math.round(safe * 100f).toInt()
+        return if (roundedTwo % 10 == 0) {
+            String.format(java.util.Locale.US, "%.1fx", safe)
+        } else {
+            String.format(java.util.Locale.US, "%.2fx", safe)
+        }
+    }
+
+    /**
+     * Curva equal-power (coseno / seno) para mantener volumen constante durante el crossfade.
+     * Retorna (volumenSaliente, volumenEntrante).
+     */
+    fun computeEqualPowerGains(progress: Float): Pair<Float, Float> {
+        val clamped = if (progress.isFinite()) progress.coerceIn(0f, 1f) else 0f
+        val angle = clamped * (Math.PI / 2.0)
+        val outgoing = kotlin.math.cos(angle).toFloat().coerceIn(0f, 1f)
+        val incoming = kotlin.math.sin(angle).toFloat().coerceIn(0f, 1f)
+        return outgoing to incoming
+    }
+
+    fun remainingWallClockMs(
+        durationMs: Long,
+        positionMs: Long,
+        playbackSpeed: Float,
+    ): Long {
+        if (durationMs <= 0L) return -1L
+        val safeSpeed = clampPlaybackSpeed(playbackSpeed)
+        val trackRemaining = (durationMs - positionMs.coerceAtLeast(0L)).coerceAtLeast(0L)
+        return (trackRemaining / safeSpeed).toLong()
+    }
+
+    fun shouldTriggerCrossfade(
+        crossfadeEnabled: Boolean,
+        isPlaying: Boolean,
+        isAlreadyCrossfading: Boolean,
+        hasNextMediaItem: Boolean,
+        repeatOneEnabled: Boolean,
+        durationMs: Long,
+        positionMs: Long,
+        playbackSpeed: Float,
+        crossfadeSeconds: Int,
+    ): Boolean {
+        if (!crossfadeEnabled || !isPlaying || isAlreadyCrossfading || !hasNextMediaItem || repeatOneEnabled) {
+            return false
+        }
+        if (durationMs <= 0L) return false
+
+        val safeSpeed = clampPlaybackSpeed(playbackSpeed)
+        val safeSeconds = clampCrossfadeSeconds(crossfadeSeconds)
+        val crossfadeWallMs = safeSeconds * 1000L
+        val totalWallDurationMs = (durationMs / safeSpeed).toLong()
+        if (totalWallDurationMs < crossfadeWallMs + 2000L) {
+            return false
+        }
+
+        val wallRemainingMs = remainingWallClockMs(durationMs, positionMs, safeSpeed)
+        return wallRemainingMs in 250L..crossfadeWallMs
+    }
+}
+
+
 
 

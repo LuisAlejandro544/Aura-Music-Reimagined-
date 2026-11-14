@@ -22,12 +22,16 @@ import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
+import androidx.compose.material.icons.automirrored.rounded.PlaylistAdd
 import androidx.compose.material.icons.automirrored.rounded.PlaylistPlay
+import androidx.compose.material.icons.automirrored.rounded.QueueMusic
 import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.DeleteOutline
 import androidx.compose.material.icons.rounded.Favorite
 import androidx.compose.material.icons.rounded.FavoriteBorder
+import androidx.compose.material.icons.rounded.MoreVert
 import androidx.compose.material.icons.rounded.MusicNote
+import androidx.compose.material.icons.rounded.Person
 import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.QueueMusic
 import androidx.compose.material.icons.rounded.RemoveCircleOutline
@@ -35,16 +39,22 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.PrimaryTabRow
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
@@ -53,9 +63,11 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
@@ -77,6 +89,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import coil3.compose.AsyncImage
+import com.auramusic.core.model.ArtistPlaylist
 import com.auramusic.core.model.DeleteAnimationEffect
 import com.auramusic.core.model.DeleteEffectFrameRenderer
 import com.auramusic.core.model.Playlist
@@ -90,20 +103,26 @@ import kotlin.math.roundToInt
 
 /**
  * Pantalla principal de Playlists.
- * Destaca la colección automática "Me gusta" (corazones) y permite crear y explorar playlists personalizadas.
+ * Organiza dos pestañas claras:
+ * - "Mis playlists": colección automática "Me gusta" y playlists creadas por el usuario.
+ * - "Artistas": playlists generadas automáticamente agrupando canciones por nombre de artista.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun PlaylistsScreen(
     playlists: List<Playlist>,
     likedCount: Int,
+    artistPlaylists: List<ArtistPlaylist> = emptyList(),
     onOpenLikedSongs: () -> Unit,
     onOpenPlaylist: (Long) -> Unit,
+    onOpenArtist: (String) -> Unit = {},
+    onPlayArtist: (ArtistPlaylist) -> Unit = {},
     onCreatePlaylist: (String) -> Unit,
     onDeletePlaylist: (Long) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     var showCreateDialog by remember { mutableStateOf(false) }
+    var selectedTab by rememberSaveable { mutableIntStateOf(0) }
 
     Scaffold(
         modifier = modifier,
@@ -112,19 +131,21 @@ fun PlaylistsScreen(
             TopAppBar(
                 title = {
                     Text(
-                        text = "Playlists y Favoritos",
+                        text = "Playlists y Artistas",
                         style = MaterialTheme.typography.titleLarge,
                         fontWeight = FontWeight.Bold,
                     )
                 },
                 actions = {
-                    FilledTonalButton(
-                        onClick = { showCreateDialog = true },
-                        modifier = Modifier.padding(end = 12.dp),
-                    ) {
-                        Icon(Icons.Rounded.Add, contentDescription = null, modifier = Modifier.size(18.dp))
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Text("Nueva")
+                    if (selectedTab == 0) {
+                        FilledTonalButton(
+                            onClick = { showCreateDialog = true },
+                            modifier = Modifier.padding(end = 12.dp),
+                        ) {
+                            Icon(Icons.Rounded.Add, contentDescription = null, modifier = Modifier.size(18.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("Nueva")
+                        }
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
@@ -133,115 +154,212 @@ fun PlaylistsScreen(
             )
         },
     ) { innerPadding ->
-        LazyColumn(
+        Column(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(innerPadding),
-            contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 140.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            item {
-                Card(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clickable(onClick = onOpenLikedSongs),
-                    shape = RoundedCornerShape(18.dp),
-                    colors = CardDefaults.cardColors(
-                        containerColor = MaterialTheme.colorScheme.primaryContainer,
-                    ),
-                ) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .background(
-                                Brush.horizontalGradient(
-                                    listOf(
-                                        MaterialTheme.colorScheme.primaryContainer,
-                                        MaterialTheme.colorScheme.primary.copy(alpha = 0.25f),
-                                    ),
-                                ),
-                            )
-                            .padding(18.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Surface(
-                            modifier = Modifier.size(58.dp),
-                            shape = RoundedCornerShape(14.dp),
-                            color = MaterialTheme.colorScheme.primary,
-                        ) {
-                            Box(contentAlignment = Alignment.Center) {
-                                Icon(
-                                    imageVector = Icons.Rounded.Favorite,
-                                    contentDescription = null,
-                                    tint = MaterialTheme.colorScheme.onPrimary,
-                                    modifier = Modifier.size(30.dp),
-                                )
-                            }
-                        }
-                        Spacer(modifier = Modifier.width(16.dp))
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(
-                                text = "Canciones que te gustan",
-                                style = MaterialTheme.typography.titleMedium,
-                                fontWeight = FontWeight.Bold,
-                                color = MaterialTheme.colorScheme.onPrimaryContainer,
-                            )
-                            Spacer(modifier = Modifier.height(2.dp))
-                            Text(
-                                text = "$likedCount ${if (likedCount == 1) "canción favorita" else "canciones favoritas"}",
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.85f),
-                            )
-                        }
-                    }
-                }
+            PrimaryTabRow(
+                selectedTabIndex = selectedTab,
+                containerColor = MaterialTheme.colorScheme.background,
+            ) {
+                Tab(
+                    selected = selectedTab == 0,
+                    onClick = { selectedTab = 0 },
+                    text = { Text("Mis playlists (${playlists.size})") },
+                )
+                Tab(
+                    selected = selectedTab == 1,
+                    onClick = { selectedTab = 1 },
+                    text = { Text("Artistas (${artistPlaylists.size})") },
+                )
             }
 
-            if (playlists.isEmpty()) {
-                item {
-                    Surface(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(top = 12.dp),
-                        shape = RoundedCornerShape(16.dp),
-                        color = MaterialTheme.colorScheme.surfaceContainerLow,
-                    ) {
-                        Column(
-                            modifier = Modifier.padding(24.dp),
-                            horizontalAlignment = Alignment.CenterHorizontally,
+            if (selectedTab == 0) {
+                LazyColumn(
+                    modifier = Modifier.fillMaxSize(),
+                    contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 140.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    item {
+                        Card(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable(onClick = onOpenLikedSongs),
+                            shape = RoundedCornerShape(18.dp),
+                            colors = CardDefaults.cardColors(
+                                containerColor = MaterialTheme.colorScheme.primaryContainer,
+                            ),
                         ) {
-                            Icon(
-                                imageVector = Icons.Rounded.QueueMusic,
-                                contentDescription = null,
-                                tint = MaterialTheme.colorScheme.primary,
-                                modifier = Modifier.size(40.dp),
-                            )
-                            Spacer(modifier = Modifier.height(10.dp))
-                            Text(
-                                text = "Aún no tienes playlists",
-                                style = MaterialTheme.typography.titleMedium,
-                                fontWeight = FontWeight.SemiBold,
-                            )
-                            Spacer(modifier = Modifier.height(4.dp))
-                            Text(
-                                text = "Organiza tus canciones locales por estado de ánimo, género o momento.",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                            Spacer(modifier = Modifier.height(14.dp))
-                            Button(onClick = { showCreateDialog = true }) {
-                                Text("Crear mi primera playlist")
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .background(
+                                        Brush.horizontalGradient(
+                                            listOf(
+                                                MaterialTheme.colorScheme.primaryContainer,
+                                                MaterialTheme.colorScheme.primary.copy(alpha = 0.25f),
+                                            ),
+                                        ),
+                                    )
+                                    .padding(18.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Surface(
+                                    modifier = Modifier.size(58.dp),
+                                    shape = RoundedCornerShape(14.dp),
+                                    color = MaterialTheme.colorScheme.primary,
+                                ) {
+                                    Box(contentAlignment = Alignment.Center) {
+                                        Icon(
+                                            imageVector = Icons.Rounded.Favorite,
+                                            contentDescription = null,
+                                            tint = MaterialTheme.colorScheme.onPrimary,
+                                            modifier = Modifier.size(30.dp),
+                                        )
+                                    }
+                                }
+                                Spacer(modifier = Modifier.width(16.dp))
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(
+                                        text = "Canciones que te gustan",
+                                        style = MaterialTheme.typography.titleMedium,
+                                        fontWeight = FontWeight.Bold,
+                                        color = MaterialTheme.colorScheme.onPrimaryContainer,
+                                    )
+                                    Spacer(modifier = Modifier.height(2.dp))
+                                    Text(
+                                        text = "$likedCount ${if (likedCount == 1) "canción favorita" else "canciones favoritas"}",
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.85f),
+                                    )
+                                }
                             }
+                        }
+                    }
+
+                    if (playlists.isEmpty()) {
+                        item {
+                            Surface(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(top = 12.dp),
+                                shape = RoundedCornerShape(16.dp),
+                                color = MaterialTheme.colorScheme.surfaceContainerLow,
+                            ) {
+                                Column(
+                                    modifier = Modifier.padding(24.dp),
+                                    horizontalAlignment = Alignment.CenterHorizontally,
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Rounded.QueueMusic,
+                                        contentDescription = null,
+                                        tint = MaterialTheme.colorScheme.primary,
+                                        modifier = Modifier.size(40.dp),
+                                    )
+                                    Spacer(modifier = Modifier.height(10.dp))
+                                    Text(
+                                        text = "Aún no tienes playlists",
+                                        style = MaterialTheme.typography.titleMedium,
+                                        fontWeight = FontWeight.SemiBold,
+                                    )
+                                    Spacer(modifier = Modifier.height(4.dp))
+                                    Text(
+                                        text = "Organiza tus canciones locales por estado de ánimo, género o momento.",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    )
+                                    Spacer(modifier = Modifier.height(14.dp))
+                                    Button(onClick = { showCreateDialog = true }) {
+                                        Text("Crear mi primera playlist")
+                                    }
+                                }
+                            }
+                        }
+                    } else {
+                        items(playlists, key = { it.id }) { playlist ->
+                            PlaylistCard(
+                                playlist = playlist,
+                                onOpen = { onOpenPlaylist(playlist.id) },
+                                onDelete = { onDeletePlaylist(playlist.id) },
+                            )
                         }
                     }
                 }
             } else {
-                items(playlists, key = { it.id }) { playlist ->
-                    PlaylistCard(
-                        playlist = playlist,
-                        onOpen = { onOpenPlaylist(playlist.id) },
-                        onDelete = { onDeletePlaylist(playlist.id) },
-                    )
+                LazyColumn(
+                    modifier = Modifier.fillMaxSize(),
+                    contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 140.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                ) {
+                    item(key = "artist_auto_info") {
+                        Surface(
+                            modifier = Modifier.fillMaxWidth(),
+                            shape = RoundedCornerShape(14.dp),
+                            color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.7f),
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Rounded.Person,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.onSecondaryContainer,
+                                )
+                                Spacer(modifier = Modifier.width(10.dp))
+                                Text(
+                                    text = "Agrupación automática por artista: las canciones del mismo artista se juntan aquí y solo suena ese artista al reproducir su lista.",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSecondaryContainer,
+                                )
+                            }
+                        }
+                    }
+
+                    if (artistPlaylists.isEmpty()) {
+                        item {
+                            Surface(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(top = 12.dp),
+                                shape = RoundedCornerShape(16.dp),
+                                color = MaterialTheme.colorScheme.surfaceContainerLow,
+                            ) {
+                                Column(
+                                    modifier = Modifier.padding(24.dp),
+                                    horizontalAlignment = Alignment.CenterHorizontally,
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Rounded.Person,
+                                        contentDescription = null,
+                                        tint = MaterialTheme.colorScheme.primary,
+                                        modifier = Modifier.size(40.dp),
+                                    )
+                                    Spacer(modifier = Modifier.height(10.dp))
+                                    Text(
+                                        text = "Sin artistas en tu biblioteca",
+                                        style = MaterialTheme.typography.titleMedium,
+                                        fontWeight = FontWeight.SemiBold,
+                                    )
+                                    Spacer(modifier = Modifier.height(4.dp))
+                                    Text(
+                                        text = "Importa o descarga canciones y Aura Music creará automáticamente una playlist por cada artista.",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    )
+                                }
+                            }
+                        }
+                    } else {
+                        items(artistPlaylists, key = { it.artistKey }) { artist ->
+                            ArtistPlaylistCard(
+                                artistPlaylist = artist,
+                                onOpen = { onOpenArtist(artist.artistKey) },
+                                onPlayOnlyArtist = { onPlayArtist(artist) },
+                            )
+                        }
+                    }
                 }
             }
         }
@@ -269,6 +387,9 @@ fun LikedSongsScreen(
     onBack: () -> Unit,
     onPlayTrack: (List<Track>, Int) -> Unit,
     onToggleLike: (Long) -> Unit,
+    onPlayNext: (Track) -> Unit = {},
+    onAddToQueue: (Track) -> Unit = {},
+    onAddToPlaylist: (Track) -> Unit = {},
 ) {
     Scaffold(
         containerColor = MaterialTheme.colorScheme.background,
@@ -343,6 +464,9 @@ fun LikedSongsScreen(
                         isCurrent = track.id == currentPlayingTrackId,
                         onPlay = { onPlayTrack(tracks, index) },
                         onToggleLike = { onToggleLike(track.id) },
+                        onPlayNext = { onPlayNext(track) },
+                        onAddToQueue = { onAddToQueue(track) },
+                        onAddToPlaylist = { onAddToPlaylist(track) },
                         onRemoveFromPlaylist = null,
                     )
                 }
@@ -364,6 +488,8 @@ fun PlaylistDetailScreen(
     onPlayTrack: (List<Track>, Int) -> Unit,
     onToggleLike: (Long) -> Unit,
     onRemoveFromPlaylist: (Long) -> Unit,
+    onPlayNext: (Track) -> Unit = {},
+    onAddToQueue: (Track) -> Unit = {},
     deleteAnimationsEnabled: Boolean = true,
     accentArgb: Int = 0xFFA78BFA.toInt(),
     deleteEffectRenderer: DeleteEffectFrameRenderer? = null,
@@ -446,6 +572,9 @@ fun PlaylistDetailScreen(
                             isCurrent = track.id == currentPlayingTrackId,
                             onPlay = { onPlayTrack(tracks, index) },
                             onToggleLike = { onToggleLike(track.id) },
+                            onPlayNext = { onPlayNext(track) },
+                            onAddToQueue = { onAddToQueue(track) },
+                            onAddToPlaylist = null,
                             onRemoveFromPlaylist = { trackPendingRemove = track },
                         )
                     }
@@ -681,13 +810,100 @@ private fun PlaylistCard(
 }
 
 @Composable
+private fun ArtistPlaylistCard(
+    artistPlaylist: ArtistPlaylist,
+    onOpen: () -> Unit,
+    onPlayOnlyArtist: () -> Unit,
+) {
+    Surface(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onOpen),
+        shape = RoundedCornerShape(14.dp),
+        color = MaterialTheme.colorScheme.surfaceContainerLow,
+        tonalElevation = 2.dp,
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            val coverFile = artistPlaylist.coverFilePath?.let(::File)?.takeIf { it.exists() }
+            if (coverFile != null) {
+                AsyncImage(
+                    model = coverFile,
+                    contentDescription = artistPlaylist.artistName,
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier
+                        .size(56.dp)
+                        .clip(RoundedCornerShape(12.dp)),
+                )
+            } else {
+                Box(
+                    modifier = Modifier
+                        .size(56.dp)
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(MaterialTheme.colorScheme.primaryContainer),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(
+                        imageVector = Icons.Rounded.Person,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.width(12.dp))
+
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = artistPlaylist.artistName,
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Text(
+                    text = "${artistPlaylist.trackCount} ${if (artistPlaylist.trackCount == 1) "canción" else "canciones"} • ${formatArtistTotalDuration(artistPlaylist.totalDurationMs)}",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+
+            FilledIconButton(
+                onClick = onPlayOnlyArtist,
+                modifier = Modifier.size(40.dp),
+                colors = IconButtonDefaults.filledIconButtonColors(
+                    containerColor = MaterialTheme.colorScheme.primaryContainer,
+                    contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+                ),
+            ) {
+                Icon(
+                    imageVector = Icons.Rounded.PlayArrow,
+                    contentDescription = "Reproducir canciones de ${artistPlaylist.artistName}",
+                )
+            }
+        }
+    }
+}
+
+@Composable
 private fun PlaylistTrackRow(
     track: Track,
     isCurrent: Boolean,
     onPlay: () -> Unit,
     onToggleLike: () -> Unit,
+    onPlayNext: () -> Unit,
+    onAddToQueue: () -> Unit,
+    onAddToPlaylist: (() -> Unit)?,
     onRemoveFromPlaylist: (() -> Unit)?,
 ) {
+    var menuExpanded by remember { mutableStateOf(false) }
+
     Surface(
         modifier = Modifier
             .fillMaxWidth()
@@ -754,13 +970,53 @@ private fun PlaylistTrackRow(
                 )
             }
 
-            if (onRemoveFromPlaylist != null) {
-                IconButton(onClick = onRemoveFromPlaylist) {
+            Box {
+                IconButton(onClick = { menuExpanded = true }) {
                     Icon(
-                        imageVector = Icons.Rounded.RemoveCircleOutline,
-                        contentDescription = "Quitar de playlist",
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        imageVector = Icons.Rounded.MoreVert,
+                        contentDescription = "Opciones de ${track.title}",
                     )
+                }
+                DropdownMenu(
+                    expanded = menuExpanded,
+                    onDismissRequest = { menuExpanded = false },
+                ) {
+                    DropdownMenuItem(
+                        text = { Text("Reproducir siguiente") },
+                        leadingIcon = { Icon(Icons.AutoMirrored.Rounded.PlaylistPlay, contentDescription = null) },
+                        onClick = {
+                            menuExpanded = false
+                            onPlayNext()
+                        },
+                    )
+                    DropdownMenuItem(
+                        text = { Text("Añadir a la cola") },
+                        leadingIcon = { Icon(Icons.AutoMirrored.Rounded.QueueMusic, contentDescription = null) },
+                        onClick = {
+                            menuExpanded = false
+                            onAddToQueue()
+                        },
+                    )
+                    if (onAddToPlaylist != null) {
+                        DropdownMenuItem(
+                            text = { Text("Añadir a playlist") },
+                            leadingIcon = { Icon(Icons.AutoMirrored.Rounded.PlaylistAdd, contentDescription = null) },
+                            onClick = {
+                                menuExpanded = false
+                                onAddToPlaylist()
+                            },
+                        )
+                    }
+                    if (onRemoveFromPlaylist != null) {
+                        DropdownMenuItem(
+                            text = { Text("Quitar de la playlist") },
+                            leadingIcon = { Icon(Icons.Rounded.RemoveCircleOutline, contentDescription = null) },
+                            onClick = {
+                                menuExpanded = false
+                                onRemoveFromPlaylist()
+                            },
+                        )
+                    }
                 }
             }
         }

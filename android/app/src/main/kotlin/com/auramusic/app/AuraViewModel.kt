@@ -5,12 +5,16 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import com.auramusic.core.model.AppAccentColor
+import com.auramusic.core.model.ArtistPlaylist
+import com.auramusic.core.model.ArtistPlaylistBuilder
 import com.auramusic.core.model.DownloadState
 import com.auramusic.core.model.DownloaderEngineStatus
 import com.auramusic.core.model.EqualizerPreset
 import com.auramusic.core.model.EqualizerState
 import com.auramusic.core.model.ImportProgress
 import com.auramusic.core.model.PlaybackState
+import com.auramusic.core.model.PlaybackTuning
+import com.auramusic.core.model.PlaybackTuningHelper
 import com.auramusic.core.model.Playlist
 import com.auramusic.core.model.Track
 import com.auramusic.core.rust.AuraRustBridge
@@ -18,11 +22,15 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
@@ -67,6 +75,13 @@ class AuraViewModel(
             initialValue = EqualizerState(),
         )
 
+    val playbackTuning: StateFlow<PlaybackTuning> = container.playbackPreferencesRepository.playbackTuning
+        .stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.Eagerly,
+            initialValue = PlaybackTuning(),
+        )
+
     val tracks: StateFlow<List<Track>> = container.musicRepository.observeAllTracks()
         .onEach { updated -> container.playerController.refreshTrackSnapshots(updated) }
         .stateIn(
@@ -96,6 +111,17 @@ class AuraViewModel(
             initialValue = emptyList(),
         )
 
+    /**
+     * Playlists generadas automáticamente agrupando las canciones por el nombre de su artista.
+     */
+    val artistPlaylists: StateFlow<List<ArtistPlaylist>> = tracks
+        .map { currentTracks -> ArtistPlaylistBuilder.buildFromTracks(currentTracks) }
+        .stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.Eagerly,
+            initialValue = emptyList(),
+        )
+
     val playbackState: StateFlow<PlaybackState> = container.playerController.playbackState
 
     val importProgress: StateFlow<ImportProgress> = container.audioImporter.progress
@@ -111,6 +137,12 @@ class AuraViewModel(
     private val _isAppReady = MutableStateFlow(false)
     val isAppReady: StateFlow<Boolean> = _isAppReady.asStateFlow()
 
+    private val _openPlayerEvents = MutableSharedFlow<Unit>(extraBufferCapacity = 1)
+    val openPlayerEvents: SharedFlow<Unit> = _openPlayerEvents.asSharedFlow()
+
+    private val _uiMessages = MutableSharedFlow<String>(extraBufferCapacity = 4)
+    val uiMessages: SharedFlow<String> = _uiMessages.asSharedFlow()
+
     init {
         container.playerController.onUiAttached()
 
@@ -120,6 +152,7 @@ class AuraViewModel(
             val coverColorsJob = async { container.themePreferencesRepository.dynamicCoverColorsEnabled.first() }
             val deleteFxJob = async { container.themePreferencesRepository.deleteAnimationsEnabled.first() }
             val eqJob = async { container.equalizerPreferencesRepository.equalizerState.first() }
+            val tuningJob = async { container.playbackPreferencesRepository.playbackTuning.first() }
             val tracksJob = async { container.musicRepository.observeAllTracks().first() }
             val playlistsJob = async { container.musicRepository.observePlaylists().first() }
             val rustJob = async {
@@ -133,6 +166,8 @@ class AuraViewModel(
             deleteFxJob.await()
             val savedEq = eqJob.await()
             AuraRustBridge.setEqualizerConfig(savedEq.isEnabled, savedEq.bandGainsDb)
+            val savedTuning = tuningJob.await()
+            container.playerController.setPlaybackSpeed(savedTuning.playbackSpeed)
             tracksJob.await()
             playlistsJob.await()
             _rustEngineInfo.value = rustJob.await()
@@ -151,6 +186,11 @@ class AuraViewModel(
 
     fun observeTracksForPlaylist(playlistId: Long): Flow<List<Track>> =
         container.musicRepository.observeTracksForPlaylist(playlistId)
+
+    fun observeArtistPlaylist(artistKey: String): Flow<ArtistPlaylist?> {
+        val targetKey = ArtistPlaylistBuilder.normalizeArtistKey(artistKey)
+        return artistPlaylists.map { list -> list.firstOrNull { it.artistKey == targetKey } }
+    }
 
     fun importFiles(uris: List<Uri>) {
         viewModelScope.launch {
@@ -181,20 +221,20 @@ class AuraViewModel(
     }
 
     fun confirmPendingDownload() {
-        viewModelScope.launch {
-            container.ytDlpAudioDownloader.confirmPendingDownload(
-                accentArgb = accentColor.value.primaryArgb.toInt(),
-            )
-        }
+        container.ytDlpAudioDownloader.startBackgroundConfirmedDownload(
+            accentArgb = accentColor.value.primaryArgb.toInt(),
+        )
     }
 
     fun downloadAudioFromUrl(url: String) {
-        viewModelScope.launch {
-            container.ytDlpAudioDownloader.downloadAudio(
-                rawUrl = url,
-                accentArgb = accentColor.value.primaryArgb.toInt(),
-            )
-        }
+        container.ytDlpAudioDownloader.startBackgroundUrlDownload(
+            rawUrl = url,
+            accentArgb = accentColor.value.primaryArgb.toInt(),
+        )
+    }
+
+    fun cancelActiveDownload() {
+        container.ytDlpAudioDownloader.requestCancelDownload()
     }
 
     fun checkDownloaderUpdates() {
@@ -222,6 +262,34 @@ class AuraViewModel(
         container.playerController.playQueue(tracks, startIndex)
     }
 
+    fun playShuffled(tracks: List<Track>) {
+        container.playerController.playShuffled(tracks)
+    }
+
+    fun playNext(track: Track) {
+        container.playerController.playNext(track)
+    }
+
+    fun addToQueue(track: Track) {
+        container.playerController.addToQueue(track)
+    }
+
+    fun playQueueItemAt(index: Int) {
+        container.playerController.playQueueItemAt(index)
+    }
+
+    fun moveQueueItem(fromIndex: Int, toIndex: Int) {
+        container.playerController.moveQueueItem(fromIndex, toIndex)
+    }
+
+    fun removeFromQueue(index: Int) {
+        container.playerController.removeFromQueue(index)
+    }
+
+    fun clearUpcomingQueue() {
+        container.playerController.clearUpcomingQueue()
+    }
+
     fun togglePlayPause() = container.playerController.togglePlayPause()
 
     fun seekTo(positionMs: Long) = container.playerController.seekTo(positionMs)
@@ -233,6 +301,54 @@ class AuraViewModel(
     fun toggleShuffle() = container.playerController.toggleShuffle()
 
     fun cycleRepeat() = container.playerController.cycleRepeatMode()
+
+    fun setCrossfadeEnabled(enabled: Boolean) {
+        viewModelScope.launch {
+            container.playbackPreferencesRepository.setCrossfadeEnabled(enabled)
+        }
+    }
+
+    fun setCrossfadeSeconds(seconds: Int) {
+        val clamped = PlaybackTuningHelper.clampCrossfadeSeconds(seconds)
+        viewModelScope.launch {
+            container.playbackPreferencesRepository.setCrossfadeSeconds(clamped)
+        }
+    }
+
+    fun setPlaybackSpeed(speed: Float) {
+        val clamped = PlaybackTuningHelper.clampPlaybackSpeed(speed)
+        container.playerController.setPlaybackSpeed(clamped)
+        viewModelScope.launch {
+            container.playbackPreferencesRepository.setPlaybackSpeed(clamped)
+        }
+    }
+
+    /**
+     * Abre e importa de forma segura una canción seleccionada desde otra app ("Abrir con")
+     * y la reproduce al instante abriendo la pantalla del reproductor.
+     */
+    fun openExternalAudioUri(uri: Uri) {
+        viewModelScope.launch {
+            val importedTrack = container.audioImporter.importExternalAudioUri(
+                uri = uri,
+                accentArgb = accentColor.value.primaryArgb.toInt(),
+            )
+            if (importedTrack != null) {
+                val currentTracks = container.musicRepository.observeAllTracks().first()
+                val queue = if (currentTracks.any { it.id == importedTrack.id }) {
+                    currentTracks
+                } else {
+                    listOf(importedTrack) + currentTracks
+                }
+                val startIndex = queue.indexOfFirst { it.id == importedTrack.id }.coerceAtLeast(0)
+                container.playerController.playQueue(queue, startIndex)
+                _openPlayerEvents.tryEmit(Unit)
+                _uiMessages.tryEmit("Abriendo en Aura Music: ${importedTrack.title}")
+            } else {
+                _uiMessages.tryEmit("No se pudo abrir el archivo de audio seleccionado.")
+            }
+        }
+    }
 
     fun toggleLike(trackId: Long) {
         viewModelScope.launch {

@@ -18,27 +18,27 @@
 │   ├── app/                           # Módulo ejecutable principal (:app)
 │   │   ├── build.gradle.kts           # minSdk 26, targetSdk 35, ABIs 32/64 bits, useLegacyPackaging = true
 │   │   └── src/main/
-│   │       ├── AndroidManifest.xml    # Permisos de red (INTERNET), servicio multimedia y MainActivity
+│   │       ├── AndroidManifest.xml    # Permisos de red (INTERNET), foreground service (mediaPlayback/dataSync), WAKE_LOCK e intent-filter ACTION_VIEW ("Abrir con")
 │   │       ├── res/                   # Icono adaptativo, strings y tema base
 │   │       └── kotlin/com/auramusic/app/
-│   │           ├── AuraApplication.kt # Contenedor modular de dependencias (incluye YtDlpAudioDownloader)
+│   │           ├── AuraApplication.kt # Contenedor modular de dependencias (implementa AuraDownloadHost y AuraPlaybackTuningProvider)
 │   │           ├── AuraTheme.kt       # Esquema de color Material 3 dinámico
-│   │           ├── AuraViewModel.kt     # Coordinador StateFlow de UI, descargas y casos de uso
-│   │           ├── AuraAppRoot.kt     # Navegación, barra inferior, MiniPlayer y launchers SAF/galería
-│   │           └── MainActivity.kt    # Punto de entrada edge-to-edge
+│   │           ├── AuraViewModel.kt     # Coordinador StateFlow de biblioteca, artistas automáticos, descargas, cola, velocidad, crossfade y "Abrir con"
+│   │           ├── AuraAppRoot.kt     # Navegación (incluye QueueScreen y ArtistDetailScreen), apertura automática desde intents externos, barra inferior, MiniPlayer y Snackbars
+│   │           └── MainActivity.kt    # Punto de entrada edge-to-edge y receptor onCreate/onNewIntent para ACTION_VIEW
 │   ├── core/
-│   │   ├── model/                     # Entidades puras de dominio (Track, Playlist, DownloadState, DeleteAnimationEffect, EqualizerState, etc.)
+│   │   ├── model/                     # Entidades y lógica pura (Track, Playlist, ArtistPlaylistBuilder, PlaybackQueueHelper, PlaybackTuningHelper, DownloadState, EqualizerState, etc.)
 │   │   ├── rust/                      # Puente JNI (AuraRustBridge), códec y tarea cargo-ndk (--lib --bin aura_qjs)
-│   │   ├── database/                  # Room (DAOs, entidades, AuraMigrations) y DataStore (tema, EQ, animaciones y auto-update)
-│   │   ├── importer/                  # Importador SAF + importación de audio descargado vía Rust fd y WebP sin pérdida
-│   │   ├── downloader/                # Chaquopy Python 3.11 (.pyc) + aura_ytdlp.py (yt-dlp, yt-dlp-ejs, PyPI SHA-256)
-│   │   └── player/                    # Media3 ExoPlayer, AuraPlaybackService y RustEqualizerAudioProcessor
+│   │   ├── database/                  # Room (DAOs, entidades, AuraMigrations) y DataStore (tema, EQ, animaciones, crossfade/velocidad y auto-update)
+│   │   ├── importer/                  # Importador SAF, receptor seguro "Abrir con" (opened_audio/), importación de audio descargado vía Rust fd y WebP sin pérdida
+│   │   ├── downloader/                # Chaquopy Python 3.11 (.pyc), aura_ytdlp.py, AuraDownloadForegroundService (dataSync) y AndroidManifest.xml
+│   │   └── player/                    # Media3 ExoPlayer, AuraPlaybackService (Crossfade + Velocidad + AuraPlaybackTuningProvider), AuraPlayerController y RustEqualizerAudioProcessor
 │   ├── feature/
-│   │   ├── library/                   # Pantalla Biblioteca + buscador + hoja de importación / enlace a descargas + host de animación Rust
-│   │   ├── downloader/                # Pantalla dedicada Descargar audio + vista previa + auto-actualizador (sin WebView)
-│   │   ├── playlists/                 # Pantallas Playlists, Favoritos, Detalle y host de animación Rust al quitar pistas
-│   │   ├── player/                    # MiniPlayerBar, PlayerScreen y CoverDynamicTheme (Palette + MaterialKolor)
-│   │   ├── settings/                  # Pantalla Ajustes (color global, toggles carátula dinámica/animaciones Rust y estado Rust)
+│   │   ├── library/                   # Pantalla Biblioteca + buscador + menú de cola + hoja de importación / enlace a descargas + animación Rust
+│   │   ├── downloader/                # Pantalla dedicada Descargar audio + vista previa + cancelación + auto-actualizador (sin WebView)
+│   │   ├── playlists/                 # PlaylistsScreen (pestañas Mis playlists y Artistas), LikedSongsScreen, PlaylistDetailScreen y ArtistDetailScreen
+│   │   ├── player/                    # MiniPlayerBar, PlayerScreen (hoja modal Velocidad y Crossfade), QueueScreen (cola de reproducción) y CoverDynamicTheme (Palette + MaterialKolor)
+│   │   ├── settings/                  # Pantalla Ajustes (color global, toggles carátula dinámica/animaciones Rust, Crossfade y velocidad, estado Rust)
 │   │   └── equalizer/                 # Pantalla dedicada del ecualizador de 10 bandas (abierta desde PlayerScreen)
 │   └── rust/aura_core/                # Crate Rust (Edition 2024)
 │       ├── .cargo/config.toml         # Flags NDK (-latomic para armv7-linux-androideabi)

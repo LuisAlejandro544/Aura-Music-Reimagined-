@@ -17,16 +17,19 @@ Plan de evolución por fases para convertir Aura Music en un reproductor local m
 - [x] Importación paralela acotada con consulta única de identidades en Room y carátulas personalizadas desde galería convertidas en segundo plano a WebP sin pérdida a máxima compresión.
 - [x] Ecualizador gráfico de 10 bandas en Rust (`aura_core::equalizer`) conectado en tiempo real a Media3 ExoPlayer y configurable exclusivamente desde el reproductor.
 - [x] Colores dinámicos animados desde la carátula para `MiniPlayerBar` y `PlayerScreen` (`androidx.palette:palette` + `MaterialKolor`) compatibles desde Android 8.0 y configurables desde Ajustes.
-- [x] Descarga de solo audio con **Python 3.11 ligero (Chaquopy)** + **`yt-dlp`** + **`yt-dlp-ejs`** + **QuickJS-NG compilado en Rust (`libaura_qjs.so`)**, con auto-actualización verificada por SHA-256 desde PyPI sin WebView ni FFmpeg.
+- [x] Descarga de solo audio en segundo plano (`AuraDownloadForegroundService`) con **Python 3.11 ligero (Chaquopy)** + **`yt-dlp`** + **`yt-dlp-ejs`** + **QuickJS-NG compilado en Rust (`libaura_qjs.so`)**, con notificación de progreso/cancelación y auto-actualización verificada por SHA-256 desde PyPI sin WebView ni FFmpeg.
 - [x] Animaciones creativas de eliminación en **Rust** (`aura_core::delete_fx`): al confirmar borrar o quitar una canción, ejecuta aleatoriamente *Cenizas*, *Papel quemándose* o *Aura extraña* sobre `DirectByteBuffer` RGBA8888, con interruptor persistido en *Ajustes*.
 - [ ] Análisis de ganancia (ReplayGain) y extracción de forma de onda (waveform) en Rust para previsualización de pistas.
 
-## Fase 3 — Gestión avanzada de biblioteca y playlists
-- Cola de reproducción interactiva ("Reproducir siguiente", añadir a cola, reordenar canciones mediante arrastre).
-- Edición de metadatos básicos de pistas dentro de la base de datos local.
-- Soporte para letras locales (`.lrc` embebidas o externas).
-- Exportación e importación de playlists en formato `.m3u8`.
-- Temporizador de apagado automático (*Sleep Timer*).
+## Fase 3 — Gestión avanzada de biblioteca, reproducción e integración del sistema (En curso)
+- [x] Playlists automáticas por nombre de artista (`ArtistPlaylistBuilder` + `ArtistDetailScreen`) que agrupan canciones del mismo artista y reproducen únicamente sus temas al entrar en su lista.
+- [x] Cola de reproducción interactiva (`QueueScreen` + `PlaybackQueueHelper`: "Reproducir siguiente", "Añadir a la cola", saltar a pista, reordenar posiciones, quitar elementos y limpiar siguientes).
+- [x] Sistema **"Abrir con Aura Music"** (`Intent.ACTION_VIEW` para `content://` y `file://`), con deduplicación en Room, copia segura de grants temporales en `filesDir/opened_audio/` y reproducción directa en `PlayerScreen`.
+- [x] **Crossfade entre canciones** en segundo plano (`AuraPlaybackService`) con selector de activación y de cuántos segundos antes del final empieza (`1 s – 12 s`), más **control de velocidad de reproducción** (`0.50x – 2.00x`) en `PlayerScreen` y `SettingsScreen` persistidos en DataStore.
+- [ ] Edición de metadatos básicos de pistas dentro de la base de datos local.
+- [ ] Soporte para letras locales (`.lrc` embebidas o externas).
+- [ ] Exportación e importación de playlists en formato `.m3u8`.
+- [ ] Temporizador de apagado automático (*Sleep Timer*).
 
 ## Fase 4 — Pulido, personalización y distribución
 - Opciones ampliadas en Ajustes (estilo de carátulas procedurales, comportamiento al conectar auriculares/Bluetooth, gestión de caché).

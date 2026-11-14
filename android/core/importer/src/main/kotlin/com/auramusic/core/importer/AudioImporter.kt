@@ -7,6 +7,7 @@ import android.graphics.BitmapFactory
 import android.graphics.ImageDecoder
 import android.net.Uri
 import android.os.Build
+import android.webkit.MimeTypeMap
 import androidx.documentfile.provider.DocumentFile
 import com.auramusic.core.database.MusicRepository
 import com.auramusic.core.model.ImportProgress
@@ -238,17 +239,150 @@ class AudioImporter(
     }
 
     /**
-     * Elimina el archivo descargado si pertenece al directorio interno `filesDir/downloads`.
+     * Importa o recupera una canción abierta desde otra aplicación mediante "Abrir con"
+     * (`Intent.ACTION_VIEW`) con soporte para esquemas `content://` y `file://`.
+     *
+     * Si el proveedor entrega un permiso temporal (`content://` sin permiso persistible),
+     * copia el audio al directorio privado `filesDir/opened_audio/` para evitar `SecurityException`
+     * cuando el Activity externo cierre el grant, evitando siempre duplicados en Room.
+     */
+    suspend fun importExternalAudioUri(
+        uri: Uri,
+        accentArgb: Int,
+    ): Track? = withContext(Dispatchers.IO) {
+        var resolvedUri = uri
+        var copiedLocalFile: File? = null
+
+        val hasPersistableGrant = if (uri.scheme == "content") {
+            runCatching {
+                context.contentResolver.takePersistableUriPermission(
+                    uri,
+                    Intent.FLAG_GRANT_READ_URI_PERMISSION,
+                )
+            }
+            context.contentResolver.persistedUriPermissions.any { it.uri == uri && it.isReadPermission }
+        } else {
+            true
+        }
+
+        if (uri.scheme == "content" && !hasPersistableGrant) {
+            copiedLocalFile = copyExternalUriToOpenedAudio(uri)
+            if (copiedLocalFile != null) {
+                resolvedUri = Uri.fromFile(copiedLocalFile)
+            }
+        }
+
+        val parsed = extractTrackWithCover(resolvedUri, accentArgb)
+        if (parsed == null) {
+            if (copiedLocalFile != null && copiedLocalFile.exists()) {
+                runCatching { copiedLocalFile.delete() }
+            }
+            return@withContext null
+        }
+
+        val existing = repository.findTrackByUriOrFingerprint(
+            uri = parsed.contentUri,
+            fingerprint = parsed.trackFingerprint,
+        ) ?: repository.findTrackByUriOrFingerprint(
+            uri = uri.toString(),
+            fingerprint = parsed.trackFingerprint,
+        )
+
+        if (existing != null) {
+            if (copiedLocalFile != null &&
+                copiedLocalFile.exists() &&
+                existing.contentUri != Uri.fromFile(copiedLocalFile).toString()
+            ) {
+                runCatching { copiedLocalFile.delete() }
+            }
+            return@withContext existing
+        }
+
+        val finalizedFile = if (copiedLocalFile != null && copiedLocalFile.exists()) {
+            val ext = copiedLocalFile.extension.ifBlank { "audio" }
+            val stableFile = File(
+                File(context.filesDir, "opened_audio").apply { mkdirs() },
+                "open_${parsed.trackFingerprint.take(24)}.$ext",
+            )
+            if (stableFile != copiedLocalFile) {
+                if (stableFile.exists() || copiedLocalFile.renameTo(stableFile)) {
+                    if (copiedLocalFile.exists() && copiedLocalFile != stableFile) {
+                        runCatching { copiedLocalFile.delete() }
+                    }
+                    stableFile
+                } else {
+                    copiedLocalFile
+                }
+            } else {
+                copiedLocalFile
+            }
+        } else {
+            null
+        }
+
+        val trackToSave = if (finalizedFile != null) {
+            parsed.copy(contentUri = Uri.fromFile(finalizedFile).toString())
+        } else {
+            parsed
+        }
+
+        repository.insertTrackAndGet(trackToSave)
+    }
+
+    private fun copyExternalUriToOpenedAudio(uri: Uri): File? {
+        val openedDir = File(context.filesDir, "opened_audio").apply { mkdirs() }
+        val docFile = DocumentFile.fromSingleUri(context, uri)
+        val mime = context.contentResolver.getType(uri).orEmpty()
+        val extFromName = docFile?.name?.substringAfterLast('.', "")?.lowercase().orEmpty()
+        val extFromMime = if (mime.isNotBlank()) {
+            MimeTypeMap.getSingleton().getExtensionFromMimeType(mime).orEmpty()
+        } else {
+            ""
+        }
+        val extension = (extFromName.ifBlank { extFromMime }.ifBlank { "mp3" })
+            .takeIf { it.length in 2..6 && it.all(Char::isLetterOrDigit) }
+            ?: "mp3"
+
+        val tempFile = File(openedDir, "tmp_${System.currentTimeMillis()}.$extension")
+        return runCatching {
+            val copiedBytes = context.contentResolver.openInputStream(uri)?.use { input ->
+                FileOutputStream(tempFile).use { output ->
+                    input.copyTo(output, bufferSize = 32 * 1024)
+                }
+            } ?: 0L
+
+            if (copiedBytes <= 0L) {
+                runCatching { tempFile.delete() }
+                null
+            } else {
+                tempFile
+            }
+        }.getOrElse {
+            runCatching { tempFile.delete() }
+            null
+        }
+    }
+
+    /**
+     * Elimina el archivo de audio si pertenece a los directorios internos administrados
+     * (`filesDir/downloads` o `filesDir/opened_audio`).
      */
     suspend fun deleteOwnedDownloadFileIfExists(contentUri: String) = withContext(Dispatchers.IO) {
         val parsed = runCatching { Uri.parse(contentUri) }.getOrNull() ?: return@withContext
         if (parsed.scheme != "file") return@withContext
         val path = parsed.path ?: return@withContext
-        val downloadsDir = File(context.filesDir, "downloads")
         val target = File(path)
-        val canonicalDir = runCatching { downloadsDir.canonicalPath }.getOrNull() ?: return@withContext
         val canonicalTarget = runCatching { target.canonicalPath }.getOrNull() ?: return@withContext
-        if (canonicalTarget.startsWith(canonicalDir + File.separator) && target.exists()) {
+
+        val ownedDirs = listOf(
+            File(context.filesDir, "downloads"),
+            File(context.filesDir, "opened_audio"),
+        )
+        val belongsToAppStorage = ownedDirs.any { dir ->
+            val canonicalDir = runCatching { dir.canonicalPath }.getOrNull()
+            canonicalDir != null && canonicalTarget.startsWith(canonicalDir + File.separator)
+        }
+        if (belongsToAppStorage && target.exists()) {
             runCatching { target.delete() }
         }
     }
@@ -465,12 +599,13 @@ class AudioImporter(
     }
 
     private suspend fun extractTrackWithCover(uri: Uri, accentArgb: Int): Track? {
-        val docFile = DocumentFile.fromSingleUri(context, uri)
-        val fallbackName = docFile?.name
-            ?.substringBeforeLast('.')
+        val localFile = if (uri.scheme == "file") uri.path?.let(::File) else null
+        val docFile = if (localFile == null) DocumentFile.fromSingleUri(context, uri) else null
+        val fallbackName = (localFile?.nameWithoutExtension
+            ?: docFile?.name?.substringBeforeLast('.'))
             ?.takeIf { it.isNotBlank() }
             ?: "Pista local"
-        val sizeBytes = docFile?.length() ?: 0L
+        val sizeBytes = localFile?.length() ?: docFile?.length() ?: 0L
 
         return try {
             // Rust lee el audio directamente desde el descriptor POSIX sin copiar el archivo en RAM.

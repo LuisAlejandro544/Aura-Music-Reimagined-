@@ -2,17 +2,23 @@ package com.auramusic.app
 
 import android.app.Application
 import android.content.Context
+import android.content.Intent
 import com.auramusic.core.database.DownloaderPreferencesRepository
 import com.auramusic.core.database.EqualizerPreferencesRepository
 import com.auramusic.core.database.MusicRepository
+import com.auramusic.core.database.PlaybackPreferencesRepository
 import com.auramusic.core.database.ThemePreferencesRepository
+import com.auramusic.core.downloader.AuraDownloadHost
 import com.auramusic.core.downloader.YtDlpAudioDownloader
 import com.auramusic.core.importer.AudioImporter
+import com.auramusic.core.model.PlaybackTuning
+import com.auramusic.core.player.AuraPlaybackTuningProvider
 import com.auramusic.core.player.AuraPlayerController
 import com.auramusic.core.rust.AuraRustBridge
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 
@@ -45,6 +51,10 @@ class AuraAppContainer(context: Context) {
         DownloaderPreferencesRepository(appContext)
     }
 
+    val playbackPreferencesRepository: PlaybackPreferencesRepository by lazy {
+        PlaybackPreferencesRepository(appContext)
+    }
+
     val audioImporter: AudioImporter by lazy {
         AudioImporter(
             context = appContext,
@@ -71,8 +81,10 @@ class AuraAppContainer(context: Context) {
 
 /**
  * Clase Application de Aura Music.
+ * Implementa [AuraDownloadHost] para que [com.auramusic.core.downloader.AuraDownloadForegroundService]
+ * pueda ejecutar descargas en segundo plano aunque el usuario salga de la app.
  */
-class AuraApplication : Application() {
+class AuraApplication : Application(), AuraDownloadHost, AuraPlaybackTuningProvider {
     lateinit var container: AuraAppContainer
         private set
 
@@ -88,4 +100,14 @@ class AuraApplication : Application() {
             }
         }
     }
+
+    override fun provideAudioDownloader(): YtDlpAudioDownloader = container.ytDlpAudioDownloader
+
+    override fun createDownloaderNotificationIntent(): Intent =
+        Intent(this, MainActivity::class.java).apply {
+            flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
+        }
+
+    override fun observePlaybackTuning(): Flow<PlaybackTuning> =
+        container.playbackPreferencesRepository.playbackTuning
 }

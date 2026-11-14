@@ -523,5 +523,264 @@ test('creative delete animations (ashes, burning paper, strange aura) run random
   assert.match(rootKt, /AuraRustBridge\.renderDeleteEffectFrame/);
 });
 
+test('yt-dlp downloads run in background foreground service (dataSync) with cancellation and ProGuard rules', () => {
+  const serviceKt = path.join(
+    rootDir,
+    'android/core/downloader/src/main/kotlin/com/auramusic/core/downloader/AuraDownloadForegroundService.kt',
+  );
+  const downloaderManifest = fs.readFileSync(
+    path.join(rootDir, 'android/core/downloader/src/main/AndroidManifest.xml'),
+    'utf8',
+  );
+  const appManifest = fs.readFileSync(
+    path.join(rootDir, 'android/app/src/main/AndroidManifest.xml'),
+    'utf8',
+  );
+  const consumerRules = fs.readFileSync(
+    path.join(rootDir, 'android/core/downloader/consumer-rules.pro'),
+    'utf8',
+  );
+  const downloaderKt = fs.readFileSync(
+    path.join(rootDir, 'android/core/downloader/src/main/kotlin/com/auramusic/core/downloader/YtDlpAudioDownloader.kt'),
+    'utf8',
+  );
+  const pyScript = fs.readFileSync(
+    path.join(rootDir, 'android/core/downloader/src/main/python/aura_ytdlp.py'),
+    'utf8',
+  );
+  const appKt = fs.readFileSync(
+    path.join(rootDir, 'android/app/src/main/kotlin/com/auramusic/app/AuraApplication.kt'),
+    'utf8',
+  );
+  const vmKt = fs.readFileSync(
+    path.join(rootDir, 'android/app/src/main/kotlin/com/auramusic/app/AuraViewModel.kt'),
+    'utf8',
+  );
+  const downloaderScreenKt = fs.readFileSync(
+    path.join(rootDir, 'android/feature/downloader/src/main/kotlin/com/auramusic/feature/downloader/DownloaderScreen.kt'),
+    'utf8',
+  );
+
+  assert.ok(fs.existsSync(serviceKt), 'Missing AuraDownloadForegroundService.kt');
+  const serviceCode = fs.readFileSync(serviceKt, 'utf8');
+  assert.match(serviceCode, /FOREGROUND_SERVICE_TYPE_DATA_SYNC/);
+  assert.match(serviceCode, /interface AuraDownloadHost/);
+  assert.match(serviceCode, /ACTION_CANCEL_DOWNLOAD/);
+
+  assert.match(downloaderManifest, /AuraDownloadForegroundService/);
+  assert.match(downloaderManifest, /foregroundServiceType="dataSync"/);
+  assert.match(appManifest, /FOREGROUND_SERVICE_DATA_SYNC/);
+  assert.match(appManifest, /WAKE_LOCK/);
+
+  assert.match(consumerRules, /PyProgressBridge/);
+  assert.match(consumerRules, /PyCancelBridge/);
+  assert.match(downloaderKt, /startBackgroundConfirmedDownload/);
+  assert.match(downloaderKt, /requestCancelDownload/);
+  assert.match(pyScript, /DownloadCancelledError/);
+  assert.match(pyScript, /cancel_check/);
+
+  assert.match(appKt, /AuraDownloadHost/);
+  assert.match(vmKt, /startBackgroundConfirmedDownload/);
+  assert.match(vmKt, /cancelActiveDownload/);
+  assert.match(downloaderScreenKt, /onCancelDownload/);
+  assert.match(downloaderScreenKt, /DownloadStatus\.CANCELLED/);
+});
+
+test('automatic artist playlists group tracks by artist and isolate playback to that artist', () => {
+  const modelsKt = fs.readFileSync(
+    path.join(rootDir, 'android/core/model/src/main/kotlin/com/auramusic/core/model/AuraModels.kt'),
+    'utf8',
+  );
+  const artistDetailKt = path.join(
+    rootDir,
+    'android/feature/playlists/src/main/kotlin/com/auramusic/feature/playlists/ArtistDetailScreen.kt',
+  );
+  const playlistsKt = fs.readFileSync(
+    path.join(rootDir, 'android/feature/playlists/src/main/kotlin/com/auramusic/feature/playlists/PlaylistsScreen.kt'),
+    'utf8',
+  );
+  const vmKt = fs.readFileSync(
+    path.join(rootDir, 'android/app/src/main/kotlin/com/auramusic/app/AuraViewModel.kt'),
+    'utf8',
+  );
+  const rootKt = fs.readFileSync(
+    path.join(rootDir, 'android/app/src/main/kotlin/com/auramusic/app/AuraAppRoot.kt'),
+    'utf8',
+  );
+
+  assert.match(modelsKt, /data class ArtistPlaylist/);
+  assert.match(modelsKt, /object ArtistPlaylistBuilder/);
+  assert.match(modelsKt, /fun buildFromTracks/);
+  assert.ok(fs.existsSync(artistDetailKt), 'Missing ArtistDetailScreen.kt');
+  const artistDetailCode = fs.readFileSync(artistDetailKt, 'utf8');
+  assert.match(artistDetailCode, /onPlayTrack\(tracks, index\)/);
+  assert.match(artistDetailCode, /onPlayShuffled\(tracks\)/);
+
+  assert.match(playlistsKt, /artistPlaylists:\s*List<ArtistPlaylist>/);
+  assert.match(playlistsKt, /Artistas \(\$\{artistPlaylists\.size\}\)/);
+  assert.match(vmKt, /val artistPlaylists:\s*StateFlow<List<ArtistPlaylist>>/);
+  assert.match(vmKt, /fun observeArtistPlaylist/);
+  assert.match(rootKt, /ARTIST_DETAIL/);
+  assert.match(rootKt, /ArtistDetailScreen\(/);
+});
+
+test('interactive playback queue supports play-next, append, reorder, remove, clear, and QueueScreen', () => {
+  const modelsKt = fs.readFileSync(
+    path.join(rootDir, 'android/core/model/src/main/kotlin/com/auramusic/core/model/AuraModels.kt'),
+    'utf8',
+  );
+  const controllerKt = fs.readFileSync(
+    path.join(rootDir, 'android/core/player/src/main/kotlin/com/auramusic/core/player/AuraPlayerController.kt'),
+    'utf8',
+  );
+  const queueScreenKt = path.join(
+    rootDir,
+    'android/feature/player/src/main/kotlin/com/auramusic/feature/player/QueueScreen.kt',
+  );
+  const playerScreenKt = fs.readFileSync(
+    path.join(rootDir, 'android/feature/player/src/main/kotlin/com/auramusic/feature/player/PlayerScreen.kt'),
+    'utf8',
+  );
+  const libraryScreenKt = fs.readFileSync(
+    path.join(rootDir, 'android/feature/library/src/main/kotlin/com/auramusic/feature/library/LibraryScreen.kt'),
+    'utf8',
+  );
+  const vmKt = fs.readFileSync(
+    path.join(rootDir, 'android/app/src/main/kotlin/com/auramusic/app/AuraViewModel.kt'),
+    'utf8',
+  );
+  const rootKt = fs.readFileSync(
+    path.join(rootDir, 'android/app/src/main/kotlin/com/auramusic/app/AuraAppRoot.kt'),
+    'utf8',
+  );
+
+  assert.match(modelsKt, /object PlaybackQueueHelper/);
+  assert.match(modelsKt, /fun insertPlayNext/);
+  assert.match(modelsKt, /fun appendToQueue/);
+  assert.match(modelsKt, /fun moveItem/);
+  assert.match(modelsKt, /fun removeItem/);
+  assert.match(modelsKt, /fun clearUpcoming/);
+
+  assert.match(controllerKt, /fun playNext\(/);
+  assert.match(controllerKt, /fun addToQueue\(/);
+  assert.match(controllerKt, /fun playQueueItemAt\(/);
+  assert.match(controllerKt, /fun moveQueueItem\(/);
+  assert.match(controllerKt, /fun removeFromQueue\(/);
+  assert.match(controllerKt, /fun clearUpcomingQueue\(/);
+
+  assert.ok(fs.existsSync(queueScreenKt), 'Missing QueueScreen.kt');
+  assert.match(playerScreenKt, /onOpenQueue/);
+  assert.match(libraryScreenKt, /Reproducir siguiente/);
+  assert.match(libraryScreenKt, /Añadir a la cola/);
+  assert.match(vmKt, /fun clearUpcomingQueue/);
+  assert.match(rootKt, /AuraRoutes\.QUEUE/);
+  assert.match(rootKt, /QueueScreen\(/);
+});
+
+test('Open-with ("Abrir con") ACTION_VIEW handles content/file URIs safely and opens PlayerScreen', () => {
+  const manifest = fs.readFileSync(path.join(rootDir, 'android/app/src/main/AndroidManifest.xml'), 'utf8');
+  const mainKt = fs.readFileSync(
+    path.join(rootDir, 'android/app/src/main/kotlin/com/auramusic/app/MainActivity.kt'),
+    'utf8',
+  );
+  const importerKt = fs.readFileSync(
+    path.join(rootDir, 'android/core/importer/src/main/kotlin/com/auramusic/core/importer/AudioImporter.kt'),
+    'utf8',
+  );
+  const dbKt = fs.readFileSync(
+    path.join(rootDir, 'android/core/database/src/main/kotlin/com/auramusic/core/database/AuraDatabase.kt'),
+    'utf8',
+  );
+  const vmKt = fs.readFileSync(
+    path.join(rootDir, 'android/app/src/main/kotlin/com/auramusic/app/AuraViewModel.kt'),
+    'utf8',
+  );
+  const rootKt = fs.readFileSync(
+    path.join(rootDir, 'android/app/src/main/kotlin/com/auramusic/app/AuraAppRoot.kt'),
+    'utf8',
+  );
+
+  assert.match(manifest, /android\.intent\.action\.VIEW/);
+  assert.match(manifest, /android:mimeType="audio\/\*"/);
+  assert.match(manifest, /android:scheme="content"/);
+  assert.match(manifest, /android:scheme="file"/);
+
+  assert.match(mainKt, /override fun onNewIntent\(intent:\s*Intent\)/);
+  assert.match(mainKt, /Intent\.ACTION_VIEW/);
+  assert.match(mainKt, /openExternalAudioUri/);
+
+  assert.match(importerKt, /suspend fun importExternalAudioUri/);
+  assert.match(importerKt, /opened_audio/);
+  assert.match(dbKt, /fun findByUriOrFingerprint/);
+
+  assert.match(vmKt, /fun openExternalAudioUri\(uri:\s*Uri\)/);
+  assert.match(vmKt, /val openPlayerEvents:\s*SharedFlow<Unit>/);
+  assert.match(rootKt, /viewModel\.openPlayerEvents\.collect/);
+  assert.match(rootKt, /AuraRoutes\.PLAYER/);
+});
+
+test('configurable Crossfade (seconds before end) and playback speed work in background service, DataStore, PlayerScreen, and SettingsScreen', () => {
+  const modelsKt = fs.readFileSync(
+    path.join(rootDir, 'android/core/model/src/main/kotlin/com/auramusic/core/model/AuraModels.kt'),
+    'utf8',
+  );
+  const reposKt = fs.readFileSync(
+    path.join(rootDir, 'android/core/database/src/main/kotlin/com/auramusic/core/database/AuraRepositories.kt'),
+    'utf8',
+  );
+  const serviceKt = fs.readFileSync(
+    path.join(rootDir, 'android/core/player/src/main/kotlin/com/auramusic/core/player/AuraPlaybackService.kt'),
+    'utf8',
+  );
+  const controllerKt = fs.readFileSync(
+    path.join(rootDir, 'android/core/player/src/main/kotlin/com/auramusic/core/player/AuraPlayerController.kt'),
+    'utf8',
+  );
+  const appKt = fs.readFileSync(
+    path.join(rootDir, 'android/app/src/main/kotlin/com/auramusic/app/AuraApplication.kt'),
+    'utf8',
+  );
+  const vmKt = fs.readFileSync(
+    path.join(rootDir, 'android/app/src/main/kotlin/com/auramusic/app/AuraViewModel.kt'),
+    'utf8',
+  );
+  const playerScreenKt = fs.readFileSync(
+    path.join(rootDir, 'android/feature/player/src/main/kotlin/com/auramusic/feature/player/PlayerScreen.kt'),
+    'utf8',
+  );
+  const settingsScreenKt = fs.readFileSync(
+    path.join(rootDir, 'android/feature/settings/src/main/kotlin/com/auramusic/feature/settings/SettingsScreen.kt'),
+    'utf8',
+  );
+
+  assert.match(modelsKt, /data class PlaybackTuning/);
+  assert.match(modelsKt, /object PlaybackTuningHelper/);
+  assert.match(modelsKt, /fun computeEqualPowerGains/);
+  assert.match(modelsKt, /fun shouldTriggerCrossfade/);
+
+  assert.match(reposKt, /class PlaybackPreferencesRepository/);
+  assert.match(reposKt, /playback_crossfade_enabled/);
+  assert.match(reposKt, /playback_crossfade_seconds/);
+  assert.match(reposKt, /playback_speed/);
+
+  assert.match(serviceKt, /interface AuraPlaybackTuningProvider/);
+  assert.match(serviceKt, /outgoingFadePlayer/);
+  assert.match(serviceKt, /launchOverlapCrossfade/);
+  assert.match(serviceKt, /PlaybackParameters\(/);
+
+  assert.match(controllerKt, /fun setPlaybackSpeed\(speed:\s*Float\)/);
+  assert.match(appKt, /AuraPlaybackTuningProvider/);
+  assert.match(vmKt, /val playbackTuning:\s*StateFlow<PlaybackTuning>/);
+  assert.match(vmKt, /fun setCrossfadeEnabled/);
+  assert.match(vmKt, /fun setCrossfadeSeconds/);
+  assert.match(vmKt, /fun setPlaybackSpeed/);
+
+  assert.match(playerScreenKt, /PlaybackTuningBottomSheet/);
+  assert.match(playerScreenKt, /Velocidad y Crossfade/);
+  assert.match(settingsScreenKt, /Crossfade entre canciones/);
+  assert.match(settingsScreenKt, /Velocidad de reproducción/);
+});
+
+
 
 

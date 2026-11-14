@@ -95,6 +95,7 @@ fun DownloaderScreen(
     onInspectUrl: (String) -> Unit,
     onConfirmDownload: () -> Unit,
     onCancelPreview: () -> Unit,
+    onCancelDownload: () -> Unit = {},
     onPlayDownloadedTrack: (Track) -> Unit,
     onCheckUpdates: () -> Unit,
     onToggleAutoUpdate: (Boolean) -> Unit,
@@ -180,7 +181,7 @@ fun DownloaderScreen(
                                 color = MaterialTheme.colorScheme.onPrimaryContainer,
                             )
                             Text(
-                                text = "Analiza el vídeo antes de descargar para confirmar título, duración y peso sin WebView ni FFmpeg.",
+                                text = "Analiza el enlace antes de descargar. Al confirmar, la descarga sigue en segundo plano con notificación incluso si sales de Aura Music.",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.85f),
                             )
@@ -310,6 +311,7 @@ fun DownloaderScreen(
                     DownloadStatusCard(
                         downloadState = downloadState,
                         onPlayDownloadedTrack = onPlayDownloadedTrack,
+                        onCancelDownload = onCancelDownload,
                         onDismiss = onDismissDownloadStatus,
                     )
                 }
@@ -505,11 +507,13 @@ private fun PreviewMetaBadge(
 private fun DownloadStatusCard(
     downloadState: DownloadState,
     onPlayDownloadedTrack: (Track) -> Unit,
+    onCancelDownload: () -> Unit,
     onDismiss: () -> Unit,
 ) {
     val containerColor = when (downloadState.status) {
         DownloadStatus.ERROR -> MaterialTheme.colorScheme.errorContainer
         DownloadStatus.COMPLETED -> MaterialTheme.colorScheme.secondaryContainer
+        DownloadStatus.CANCELLED -> MaterialTheme.colorScheme.surfaceContainerHighest
         else -> MaterialTheme.colorScheme.surfaceContainerHigh
     }
     val contentColor = when (downloadState.status) {
@@ -523,9 +527,10 @@ private fun DownloadStatusCard(
         DownloadStatus.CHECKING_UPDATES -> "Comprobando actualizaciones..."
         DownloadStatus.FETCHING_INFO -> "Analizando información del vídeo..."
         DownloadStatus.RESOLVING -> "Resolviendo enlace con QuickJS-NG..."
-        DownloadStatus.DOWNLOADING -> "Descargando flujo de audio"
+        DownloadStatus.DOWNLOADING -> "Descargando en segundo plano"
         DownloadStatus.IMPORTING -> "Importando a Aura Music..."
         DownloadStatus.COMPLETED -> "Descarga completada"
+        DownloadStatus.CANCELLED -> "Descarga cancelada"
         DownloadStatus.ERROR -> "Error en la descarga"
     }
 
@@ -546,6 +551,7 @@ private fun DownloadStatusCard(
                 val icon = when (downloadState.status) {
                     DownloadStatus.ERROR -> Icons.Rounded.ErrorOutline
                     DownloadStatus.COMPLETED -> Icons.Rounded.CheckCircle
+                    DownloadStatus.CANCELLED -> Icons.Rounded.Close
                     else -> Icons.Rounded.CloudDownload
                 }
                 Icon(
@@ -620,6 +626,24 @@ private fun DownloadStatusCard(
                     style = MaterialTheme.typography.bodySmall,
                     color = contentColor.copy(alpha = 0.9f),
                 )
+            }
+
+            if (downloadState.status == DownloadStatus.RESOLVING ||
+                downloadState.status == DownloadStatus.DOWNLOADING
+            ) {
+                OutlinedButton(
+                    onClick = onCancelDownload,
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(12.dp),
+                ) {
+                    Icon(
+                        imageVector = Icons.Rounded.Close,
+                        contentDescription = null,
+                        modifier = Modifier.size(18.dp),
+                    )
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text("Cancelar descarga")
+                }
             }
 
             val completedTrack = downloadState.lastCompletedTrack

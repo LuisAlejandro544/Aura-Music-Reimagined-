@@ -6,10 +6,13 @@ import android.net.Uri
 import androidx.core.net.toUri
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
+import androidx.media3.common.PlaybackParameters
 import androidx.media3.common.Player
 import androidx.media3.session.MediaController
 import androidx.media3.session.SessionToken
+import com.auramusic.core.model.PlaybackQueueHelper
 import com.auramusic.core.model.PlaybackState
+import com.auramusic.core.model.PlaybackTuningHelper
 import com.auramusic.core.model.RepeatMode
 import com.auramusic.core.model.Track
 import kotlinx.coroutines.CoroutineScope
@@ -25,6 +28,7 @@ import kotlinx.coroutines.guava.await
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import java.io.File
+import kotlin.random.Random
 
 /**
  * Controlador reactivo de reproducción que conecta la UI de Jetpack Compose
@@ -66,6 +70,10 @@ class AuraPlayerController(
         }
 
         override fun onRepeatModeChanged(repeatMode: Int) {
+            syncStateFromPlayer()
+        }
+
+        override fun onPlaybackParametersChanged(playbackParameters: PlaybackParameters) {
             syncStateFromPlayer()
         }
 
@@ -180,6 +188,170 @@ class AuraPlayerController(
         applyQueueToPlayer(player, tracks, safeIndex)
     }
 
+    /**
+     * Carga una lista (por ejemplo de un artista) con modo aleatorio activado y empieza
+     * desde una canción aleatoria perteneciente únicamente a esa lista.
+     */
+    fun playShuffled(tracks: List<Track>) {
+        if (tracks.isEmpty()) return
+        val startIndex = Random.nextInt(tracks.size)
+        playQueue(tracks, startIndex)
+        withConnectedPlayer { player ->
+            player.shuffleModeEnabled = true
+            syncStateFromPlayer()
+        }
+    }
+
+    /**
+     * Inserta una canción inmediatamente después de la pista que está sonando.
+     * Si no hay cola activa, comienza a reproducirla al instante.
+     */
+    fun playNext(track: Track) {
+        val currentPlayer = controller
+        if (activeQueue.isEmpty() && (currentPlayer == null || !currentPlayer.isConnected || currentPlayer.mediaItemCount == 0)) {
+            playQueue(listOf(track), 0)
+            return
+        }
+
+        withConnectedPlayer { player ->
+            if (activeQueue.isEmpty() && player.mediaItemCount > 0) {
+                activeQueue = rebuildQueueFromPlayer(player)
+            }
+            if (activeQueue.isEmpty()) {
+                applyQueueToPlayer(player, listOf(track), 0)
+                return@withConnectedPlayer
+            }
+
+            val result = PlaybackQueueHelper.insertPlayNext(
+                queue = activeQueue,
+                currentIndex = player.currentMediaItemIndex,
+                track = track,
+            )
+            activeQueue = result.queue
+            player.addMediaItem(result.insertedAt.coerceIn(0, player.mediaItemCount), track.toMediaItem())
+            syncStateFromPlayer()
+        }
+    }
+
+    /**
+     * Añade una canción al final de la cola de reproducción actual.
+     * Si la cola está vacía, comienza a reproducirla al instante.
+     */
+    fun addToQueue(track: Track) {
+        val currentPlayer = controller
+        if (activeQueue.isEmpty() && (currentPlayer == null || !currentPlayer.isConnected || currentPlayer.mediaItemCount == 0)) {
+            playQueue(listOf(track), 0)
+            return
+        }
+
+        withConnectedPlayer { player ->
+            if (activeQueue.isEmpty() && player.mediaItemCount > 0) {
+                activeQueue = rebuildQueueFromPlayer(player)
+            }
+            if (activeQueue.isEmpty()) {
+                applyQueueToPlayer(player, listOf(track), 0)
+                return@withConnectedPlayer
+            }
+
+            val result = PlaybackQueueHelper.appendToQueue(
+                queue = activeQueue,
+                currentIndex = player.currentMediaItemIndex,
+                track = track,
+            )
+            activeQueue = result.queue
+            player.addMediaItem(track.toMediaItem())
+            syncStateFromPlayer()
+        }
+    }
+
+    /**
+     * Salta directamente a un índice concreto dentro de la cola de reproducción activa.
+     */
+    fun playQueueItemAt(index: Int) {
+        withConnectedPlayer { player ->
+            if (activeQueue.isEmpty() && player.mediaItemCount > 0) {
+                activeQueue = rebuildQueueFromPlayer(player)
+            }
+            if (index !in 0 until player.mediaItemCount) return@withConnectedPlayer
+            player.seekToDefaultPosition(index)
+            if (player.playbackState == Player.STATE_IDLE) {
+                player.prepare()
+            }
+            player.play()
+            syncStateFromPlayer()
+        }
+    }
+
+    /**
+     * Reordena una canción dentro de la cola activa sin interrumpir el audio actual.
+     */
+    fun moveQueueItem(fromIndex: Int, toIndex: Int) {
+        withConnectedPlayer { player ->
+            if (activeQueue.isEmpty() && player.mediaItemCount > 0) {
+                activeQueue = rebuildQueueFromPlayer(player)
+            }
+            if (fromIndex !in activeQueue.indices ||
+                toIndex !in activeQueue.indices ||
+                fromIndex == toIndex
+            ) {
+                return@withConnectedPlayer
+            }
+            val result = PlaybackQueueHelper.moveItem(
+                queue = activeQueue,
+                currentIndex = player.currentMediaItemIndex,
+                fromIndex = fromIndex,
+                toIndex = toIndex,
+            )
+            activeQueue = result.queue
+            player.moveMediaItem(fromIndex, toIndex)
+            syncStateFromPlayer()
+        }
+    }
+
+    /**
+     * Quita una pista de la cola de reproducción actual.
+     */
+    fun removeFromQueue(index: Int) {
+        withConnectedPlayer { player ->
+            if (activeQueue.isEmpty() && player.mediaItemCount > 0) {
+                activeQueue = rebuildQueueFromPlayer(player)
+            }
+            if (index !in activeQueue.indices || index !in 0 until player.mediaItemCount) {
+                return@withConnectedPlayer
+            }
+            val result = PlaybackQueueHelper.removeItem(
+                queue = activeQueue,
+                currentIndex = player.currentMediaItemIndex,
+                removeIndex = index,
+            )
+            activeQueue = result.queue
+            player.removeMediaItem(index)
+            if (activeQueue.isEmpty()) {
+                player.stop()
+            }
+            syncStateFromPlayer()
+        }
+    }
+
+    /**
+     * Elimina todas las canciones programadas después de la pista actual.
+     */
+    fun clearUpcomingQueue() {
+        withConnectedPlayer { player ->
+            if (activeQueue.isEmpty() && player.mediaItemCount > 0) {
+                activeQueue = rebuildQueueFromPlayer(player)
+            }
+            if (activeQueue.isEmpty() || player.mediaItemCount <= 1) return@withConnectedPlayer
+            val currentIdx = player.currentMediaItemIndex.coerceIn(0, player.mediaItemCount - 1)
+            val removeStart = currentIdx + 1
+            if (removeStart < player.mediaItemCount) {
+                player.removeMediaItems(removeStart, player.mediaItemCount)
+            }
+            activeQueue = PlaybackQueueHelper.clearUpcoming(activeQueue, currentIdx).queue
+            syncStateFromPlayer()
+        }
+    }
+
     private fun applyQueueToPlayer(
         player: MediaController,
         tracks: List<Track>,
@@ -259,6 +431,18 @@ class AuraPlayerController(
     }
 
     /**
+     * Ajusta en tiempo real la velocidad de reproducción del servicio Media3 (0.50x a 2.00x).
+     */
+    fun setPlaybackSpeed(speed: Float) {
+        val safeSpeed = PlaybackTuningHelper.clampPlaybackSpeed(speed)
+        _playbackState.update { it.copy(playbackSpeed = safeSpeed) }
+        withConnectedPlayer { player ->
+            player.setPlaybackSpeed(safeSpeed)
+            syncStateFromPlayer()
+        }
+    }
+
+    /**
      * Mantiene sincronizados cambios de metadata en caliente (por ejemplo, marcar Me gusta)
      * y permite reconstruir pistas si el servicio siguió sonando tras reiniciar la UI.
      */
@@ -275,6 +459,29 @@ class AuraPlayerController(
 
     private fun syncStateFromPlayer() {
         val player = controller?.takeIf { it.isConnected } ?: return
+        val speed = PlaybackTuningHelper.clampPlaybackSpeed(player.playbackParameters.speed)
+
+        if (player.mediaItemCount == 0) {
+            activeQueue = emptyList()
+            _playbackState.update {
+                PlaybackState(
+                    currentTrack = null,
+                    isPlaying = false,
+                    positionMs = 0L,
+                    durationMs = 0L,
+                    queue = emptyList(),
+                    currentIndex = -1,
+                    shuffleEnabled = player.shuffleModeEnabled,
+                    repeatMode = when (player.repeatMode) {
+                        Player.REPEAT_MODE_ALL -> RepeatMode.ALL
+                        Player.REPEAT_MODE_ONE -> RepeatMode.ONE
+                        else -> RepeatMode.OFF
+                    },
+                    playbackSpeed = speed,
+                )
+            }
+            return
+        }
 
         if (activeQueue.isEmpty() && player.mediaItemCount > 0) {
             activeQueue = rebuildQueueFromPlayer(player)
@@ -299,6 +506,7 @@ class AuraPlayerController(
                     Player.REPEAT_MODE_ONE -> RepeatMode.ONE
                     else -> RepeatMode.OFF
                 },
+                playbackSpeed = speed,
             )
         }
     }

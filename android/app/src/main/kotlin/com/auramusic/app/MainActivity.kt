@@ -1,7 +1,9 @@
 package com.auramusic.app
 
 import android.Manifest
+import android.content.Intent
 import android.content.pm.PackageManager
+import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
@@ -17,8 +19,9 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 
 /**
  * Actividad principal de Aura Music.
- * Aplica el tema dinámico elegido por el usuario, muestra una pantalla de carga inicial
- * mientras se hidratan los datos locales y monta la navegación modular de Jetpack Compose.
+ * Aplica el tema dinámico elegido por el usuario, procesa archivos externos abiertos mediante
+ * "Abrir con" (`ACTION_VIEW`), muestra una pantalla de carga inicial mientras se hidratan los
+ * datos locales y monta la navegación modular de Jetpack Compose.
  */
 class MainActivity : ComponentActivity() {
 
@@ -34,6 +37,10 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         requestNotificationPermissionIfNeeded()
+
+        if (savedInstanceState == null) {
+            handleIncomingViewIntent(intent)
+        }
 
         setContent {
             val accentColor by viewModel.accentColor.collectAsStateWithLifecycle()
@@ -54,6 +61,20 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        handleIncomingViewIntent(intent)
+    }
+
+    private fun handleIncomingViewIntent(incoming: Intent?) {
+        if (incoming?.action != Intent.ACTION_VIEW) return
+        val targetUri: Uri = incoming.data
+            ?: incoming.clipData?.takeIf { it.itemCount > 0 }?.getItemAt(0)?.uri
+            ?: return
+        viewModel.openExternalAudioUri(targetUri)
+    }
+
     private fun requestNotificationPermissionIfNeeded() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             val granted = ContextCompat.checkSelfPermission(
@@ -66,3 +87,4 @@ class MainActivity : ComponentActivity() {
         }
     }
 }
+

@@ -5,11 +5,15 @@ import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
+import androidx.datastore.preferences.core.floatPreferencesKey
+import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import androidx.room.Room
 import com.auramusic.core.model.AppAccentColor
 import com.auramusic.core.model.EqualizerState
+import com.auramusic.core.model.PlaybackTuning
+import com.auramusic.core.model.PlaybackTuningHelper
 import com.auramusic.core.model.Playlist
 import com.auramusic.core.model.Track
 import kotlinx.coroutines.Dispatchers
@@ -73,6 +77,37 @@ class MusicRepository(
         withContext(Dispatchers.IO) {
             trackDao.existsByUriOrFingerprint(uri, fingerprint)
         }
+
+    suspend fun findTrackByUriOrFingerprint(uri: String, fingerprint: String): Track? =
+        withContext(Dispatchers.IO) {
+            trackDao.findByUriOrFingerprint(uri, fingerprint)?.toDomain()
+        }
+
+    suspend fun insertTrackAndGet(track: Track): Track = withContext(Dispatchers.IO) {
+        val insertedIds = trackDao.insertAll(
+            listOf(
+                TrackEntity(
+                    contentUri = track.contentUri,
+                    title = track.title,
+                    artist = track.artist,
+                    album = track.album,
+                    durationMs = track.durationMs,
+                    coverFilePath = track.coverFilePath,
+                    isProceduralCover = track.isProceduralCover,
+                    isLiked = track.isLiked,
+                    trackFingerprint = track.trackFingerprint,
+                    addedAt = track.addedAt,
+                ),
+            ),
+        )
+        val rowId = insertedIds.firstOrNull() ?: -1L
+        if (rowId > 0L) {
+            trackDao.getById(rowId)?.toDomain() ?: track.copy(id = rowId)
+        } else {
+            trackDao.findByUriOrFingerprint(track.contentUri, track.trackFingerprint)?.toDomain()
+                ?: track
+        }
+    }
 
     suspend fun insertTracks(tracks: List<Track>): Unit = withContext(Dispatchers.IO) {
         if (tracks.isEmpty()) return@withContext
@@ -300,3 +335,49 @@ class DownloaderPreferencesRepository(
         }
     }
 }
+
+/**
+ * Repositorio de preferencias de transición Crossfade y velocidad de reproducción en DataStore.
+ */
+class PlaybackPreferencesRepository(
+    private val context: Context,
+) {
+    private val crossfadeEnabledKey = booleanPreferencesKey("playback_crossfade_enabled")
+    private val crossfadeSecondsKey = intPreferencesKey("playback_crossfade_seconds")
+    private val playbackSpeedKey = floatPreferencesKey("playback_speed")
+
+    val playbackTuning: Flow<PlaybackTuning> = context.auraSettingsDataStore.data.map { prefs ->
+        PlaybackTuning(
+            crossfadeEnabled = prefs[crossfadeEnabledKey] ?: false,
+            crossfadeSeconds = prefs[crossfadeSecondsKey] ?: PlaybackTuning.DEFAULT_CROSSFADE_SECONDS,
+            playbackSpeed = prefs[playbackSpeedKey] ?: PlaybackTuning.DEFAULT_PLAYBACK_SPEED,
+        ).normalized()
+    }
+
+    suspend fun setCrossfadeEnabled(enabled: Boolean) {
+        withContext(Dispatchers.IO) {
+            context.auraSettingsDataStore.edit { prefs ->
+                prefs[crossfadeEnabledKey] = enabled
+            }
+        }
+    }
+
+    suspend fun setCrossfadeSeconds(seconds: Int) {
+        val safeSeconds = PlaybackTuningHelper.clampCrossfadeSeconds(seconds)
+        withContext(Dispatchers.IO) {
+            context.auraSettingsDataStore.edit { prefs ->
+                prefs[crossfadeSecondsKey] = safeSeconds
+            }
+        }
+    }
+
+    suspend fun setPlaybackSpeed(speed: Float) {
+        val safeSpeed = PlaybackTuningHelper.clampPlaybackSpeed(speed)
+        withContext(Dispatchers.IO) {
+            context.auraSettingsDataStore.edit { prefs ->
+                prefs[playbackSpeedKey] = safeSpeed
+            }
+        }
+    }
+}
+

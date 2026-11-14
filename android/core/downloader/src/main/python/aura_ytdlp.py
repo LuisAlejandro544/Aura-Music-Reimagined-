@@ -398,12 +398,17 @@ def inspect_audio_preview(
         )
 
 
+class DownloadCancelledError(RuntimeError):
+    """Excepción controlada lanzada cuando el usuario cancela la descarga en segundo plano."""
+
+
 def download_audio(
     url: str,
     output_dir: str,
     updates_dir: str,
     qjs_binary_path: Optional[str],
     progress_callback: Optional[Callable[[str], None]] = None,
+    cancel_check: Optional[Callable[[], bool]] = None,
 ) -> str:
     """Descarga solo el flujo de audio compatible con ExoPlayer usando yt-dlp + yt-dlp-ejs + QuickJS-NG."""
     ensure_updates_in_sys_path(updates_dir)
@@ -415,6 +420,16 @@ def download_audio(
     last_speed_ts = [time.monotonic()]
     last_speed_bytes = [0]
     smoothed_speed = [0.0]
+
+    def check_cancelled() -> None:
+        if cancel_check is not None:
+            try:
+                if bool(cancel_check()):
+                    raise DownloadCancelledError("Descarga cancelada por el usuario.")
+            except DownloadCancelledError:
+                raise
+            except Exception:
+                pass
 
     def emit(
         stage: str,
@@ -449,6 +464,7 @@ def download_audio(
     captured_title = [None]
 
     def progress_hook(status_dict: dict) -> None:
+        check_cancelled()
         status = status_dict.get("status")
         info = status_dict.get("info_dict") or {}
         title = info.get("title") or captured_title[0]
@@ -508,10 +524,12 @@ def download_audio(
             }
         }
 
+    check_cancelled()
     emit("resolving", percent=0.0)
 
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
         info = ydl.extract_info(url, download=True)
+        check_cancelled()
         if info is None:
             raise RuntimeError("yt-dlp no devolvió información de la pista.")
 

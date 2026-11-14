@@ -37,6 +37,12 @@ interface TrackDao {
     @Query("SELECT EXISTS(SELECT 1 FROM tracks WHERE content_uri = :uri OR track_fingerprint = :fingerprint)")
     suspend fun existsByUriOrFingerprint(uri: String, fingerprint: String): Boolean
 
+    @Query("SELECT * FROM tracks WHERE content_uri = :uri OR track_fingerprint = :fingerprint LIMIT 1")
+    suspend fun findByUriOrFingerprint(uri: String, fingerprint: String): TrackEntity?
+
+    @Query("SELECT * FROM tracks WHERE id = :trackId LIMIT 1")
+    suspend fun getById(trackId: Long): TrackEntity?
+
     @Insert(onConflict = OnConflictStrategy.IGNORE)
     suspend fun insertAll(tracks: List<TrackEntity>): List<Long>
 

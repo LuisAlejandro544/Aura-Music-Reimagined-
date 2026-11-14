@@ -21,6 +21,8 @@ import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.PlaylistAdd
+import androidx.compose.material.icons.automirrored.rounded.PlaylistPlay
+import androidx.compose.material.icons.automirrored.rounded.QueueMusic
 import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.AudioFile
 import androidx.compose.material.icons.rounded.Close
@@ -114,6 +116,8 @@ fun LibraryScreen(
     onImportFolder: () -> Unit,
     onPlayTrack: (List<Track>, Int) -> Unit,
     onToggleLike: (Long) -> Unit,
+    onPlayNext: (Track) -> Unit = {},
+    onAddToQueue: (Track) -> Unit = {},
     onAddToPlaylist: (Track) -> Unit,
     onChangeCover: (Track) -> Unit,
     onDeleteTrack: (Long) -> Unit,
@@ -260,6 +264,8 @@ fun LibraryScreen(
                                 isCurrent = track.id == currentPlayingTrackId,
                                 onPlay = { onPlayTrack(filteredTracks, index) },
                                 onToggleLike = { onToggleLike(track.id) },
+                                onPlayNext = { onPlayNext(track) },
+                                onAddToQueue = { onAddToQueue(track) },
                                 onAddToPlaylist = { onAddToPlaylist(track) },
                                 onChangeCover = { onChangeCover(track) },
                                 onDelete = { trackPendingDelete = track },
@@ -415,6 +421,8 @@ private fun TrackRowCard(
     isCurrent: Boolean,
     onPlay: () -> Unit,
     onToggleLike: () -> Unit,
+    onPlayNext: () -> Unit,
+    onAddToQueue: () -> Unit,
     onAddToPlaylist: () -> Unit,
     onChangeCover: () -> Unit,
     onDelete: () -> Unit,
@@ -515,6 +523,22 @@ private fun TrackRowCard(
                     expanded = menuExpanded,
                     onDismissRequest = { menuExpanded = false },
                 ) {
+                    DropdownMenuItem(
+                        text = { Text("Reproducir siguiente") },
+                        leadingIcon = { Icon(Icons.AutoMirrored.Rounded.PlaylistPlay, contentDescription = null) },
+                        onClick = {
+                            menuExpanded = false
+                            onPlayNext()
+                        },
+                    )
+                    DropdownMenuItem(
+                        text = { Text("Añadir a la cola") },
+                        leadingIcon = { Icon(Icons.AutoMirrored.Rounded.QueueMusic, contentDescription = null) },
+                        onClick = {
+                            menuExpanded = false
+                            onAddToQueue()
+                        },
+                    )
                     DropdownMenuItem(
                         text = { Text("Añadir a playlist") },
                         leadingIcon = { Icon(Icons.AutoMirrored.Rounded.PlaylistAdd, contentDescription = null) },

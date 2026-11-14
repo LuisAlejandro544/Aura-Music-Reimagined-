@@ -16,10 +16,13 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.PlaylistAdd
+import androidx.compose.material.icons.automirrored.rounded.QueueMusic
 import androidx.compose.material.icons.rounded.Favorite
 import androidx.compose.material.icons.rounded.FavoriteBorder
 import androidx.compose.material.icons.rounded.Image
@@ -32,19 +35,26 @@ import androidx.compose.material.icons.rounded.RepeatOne
 import androidx.compose.material.icons.rounded.Shuffle
 import androidx.compose.material.icons.rounded.SkipNext
 import androidx.compose.material.icons.rounded.SkipPrevious
+import androidx.compose.material.icons.rounded.Speed
 import androidx.compose.material.icons.rounded.Tune
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledIconButton
+import androidx.compose.material3.FilledTonalButton
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
@@ -65,10 +75,13 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import coil3.compose.AsyncImage
 import com.auramusic.core.model.PlaybackState
+import com.auramusic.core.model.PlaybackTuning
+import com.auramusic.core.model.PlaybackTuningHelper
 import com.auramusic.core.model.RepeatMode
 import com.auramusic.core.model.Track
 import java.io.File
 import java.util.Locale
+import kotlin.math.roundToInt
 
 /**
  * Mini reproductor persistente anclado sobre la barra de navegación inferior.
@@ -194,6 +207,7 @@ fun MiniPlayerBar(
 @Composable
 fun PlayerScreen(
     playbackState: PlaybackState,
+    playbackTuning: PlaybackTuning = PlaybackTuning(),
     dynamicCoverColorsEnabled: Boolean = true,
     onCollapse: () -> Unit,
     onTogglePlayPause: () -> Unit,
@@ -206,8 +220,13 @@ fun PlayerScreen(
     onOpenAddToPlaylist: (Track) -> Unit,
     onChangeCover: (Track) -> Unit,
     onOpenEqualizer: () -> Unit,
+    onOpenQueue: () -> Unit = {},
+    onSetPlaybackSpeed: (Float) -> Unit = {},
+    onSetCrossfadeEnabled: (Boolean) -> Unit = {},
+    onSetCrossfadeSeconds: (Int) -> Unit = {},
 ) {
     val track = playbackState.currentTrack
+    var showTuningSheet by remember { mutableStateOf(false) }
 
     CoverDynamicTheme(
         coverPath = track?.coverFilePath,
@@ -243,6 +262,26 @@ fun PlayerScreen(
                     }
                 },
                 actions = {
+                    IconButton(onClick = { showTuningSheet = true }) {
+                        Icon(
+                            imageVector = Icons.Rounded.Speed,
+                            contentDescription = "Velocidad y Crossfade",
+                            tint = if (
+                                kotlin.math.abs(playbackTuning.playbackSpeed - 1.0f) > 0.01f ||
+                                playbackTuning.crossfadeEnabled
+                            ) {
+                                MaterialTheme.colorScheme.primary
+                            } else {
+                                MaterialTheme.colorScheme.onSurface
+                            },
+                        )
+                    }
+                    IconButton(onClick = onOpenQueue) {
+                        Icon(
+                            imageVector = Icons.AutoMirrored.Rounded.QueueMusic,
+                            contentDescription = "Cola de reproducción",
+                        )
+                    }
                     IconButton(onClick = onOpenEqualizer) {
                         Icon(
                             imageVector = Icons.Rounded.Tune,
@@ -446,12 +485,32 @@ fun PlayerScreen(
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Text(
                         text = formatPlaybackTime(sliderValue.toLong()),
                         style = MaterialTheme.typography.labelMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
+                    if (kotlin.math.abs(playbackTuning.playbackSpeed - 1.0f) > 0.01f ||
+                        playbackTuning.crossfadeEnabled
+                    ) {
+                        val activeSummary = buildList {
+                            if (kotlin.math.abs(playbackTuning.playbackSpeed - 1.0f) > 0.01f) {
+                                add(PlaybackTuningHelper.formatSpeedLabel(playbackTuning.playbackSpeed))
+                            }
+                            if (playbackTuning.crossfadeEnabled) {
+                                add("Crossfade ${playbackTuning.crossfadeSeconds}s")
+                            }
+                        }.joinToString(" • ")
+                        Text(
+                            text = activeSummary,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.primary,
+                            fontWeight = FontWeight.SemiBold,
+                            modifier = Modifier.clickable { showTuningSheet = true },
+                        )
+                    }
                     Text(
                         text = formatPlaybackTime(playbackState.durationMs),
                         style = MaterialTheme.typography.labelMedium,
@@ -535,6 +594,211 @@ fun PlayerScreen(
                 }
             }
         }
+        }
+
+        if (showTuningSheet) {
+            PlaybackTuningBottomSheet(
+                playbackTuning = playbackTuning,
+                onDismiss = { showTuningSheet = false },
+                onSetPlaybackSpeed = onSetPlaybackSpeed,
+                onSetCrossfadeEnabled = onSetCrossfadeEnabled,
+                onSetCrossfadeSeconds = onSetCrossfadeSeconds,
+            )
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun PlaybackTuningBottomSheet(
+    playbackTuning: PlaybackTuning,
+    onDismiss: () -> Unit,
+    onSetPlaybackSpeed: (Float) -> Unit,
+    onSetCrossfadeEnabled: (Boolean) -> Unit,
+    onSetCrossfadeSeconds: (Int) -> Unit,
+) {
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .verticalScroll(rememberScrollState())
+                .padding(horizontal = 20.dp)
+                .padding(bottom = 28.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp),
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween,
+            ) {
+                Column {
+                    Text(
+                        text = "Velocidad y Crossfade",
+                        style = MaterialTheme.typography.titleLarge,
+                        fontWeight = FontWeight.Bold,
+                    )
+                    Text(
+                        text = "Ajusta el ritmo y el fundido entre pistas",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                TextButton(
+                    onClick = { onSetPlaybackSpeed(PlaybackTuning.DEFAULT_PLAYBACK_SPEED) },
+                ) {
+                    Text("Normal 1.0x")
+                }
+            }
+
+            Surface(
+                shape = RoundedCornerShape(16.dp),
+                color = MaterialTheme.colorScheme.surfaceContainerHigh,
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(
+                            text = "Velocidad de reproducción",
+                            style = MaterialTheme.typography.titleSmall,
+                            fontWeight = FontWeight.SemiBold,
+                        )
+                        Text(
+                            text = PlaybackTuningHelper.formatSpeedLabel(playbackTuning.playbackSpeed),
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.primary,
+                        )
+                    }
+
+                    Slider(
+                        value = playbackTuning.playbackSpeed,
+                        onValueChange = { raw ->
+                            val snapped = ((raw * 20f).roundToInt() / 20f)
+                            onSetPlaybackSpeed(snapped)
+                        },
+                        valueRange = PlaybackTuning.MIN_PLAYBACK_SPEED..PlaybackTuning.MAX_PLAYBACK_SPEED,
+                    )
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    ) {
+                        PlaybackTuning.SPEED_PRESETS.forEach { preset ->
+                            val selected = kotlin.math.abs(playbackTuning.playbackSpeed - preset) < 0.02f
+                            if (selected) {
+                                FilledTonalButton(
+                                    onClick = { onSetPlaybackSpeed(preset) },
+                                    modifier = Modifier.weight(1f),
+                                    contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 2.dp),
+                                ) {
+                                    Text(
+                                        text = PlaybackTuningHelper.formatSpeedLabel(preset),
+                                        style = MaterialTheme.typography.labelSmall,
+                                        maxLines = 1,
+                                    )
+                                }
+                            } else {
+                                OutlinedButton(
+                                    onClick = { onSetPlaybackSpeed(preset) },
+                                    modifier = Modifier.weight(1f),
+                                    contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 2.dp),
+                                ) {
+                                    Text(
+                                        text = PlaybackTuningHelper.formatSpeedLabel(preset),
+                                        style = MaterialTheme.typography.labelSmall,
+                                        maxLines = 1,
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+
+            Surface(
+                shape = RoundedCornerShape(16.dp),
+                color = MaterialTheme.colorScheme.surfaceContainerHigh,
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "Crossfade entre canciones",
+                                style = MaterialTheme.typography.titleSmall,
+                                fontWeight = FontWeight.SemiBold,
+                            )
+                            Text(
+                                text = if (playbackTuning.crossfadeEnabled) {
+                                    "Empieza ${playbackTuning.crossfadeSeconds} s antes de terminar"
+                                } else {
+                                    "Desactivado • Cambio normal entre pistas"
+                                },
+                                style = MaterialTheme.typography.bodySmall,
+                                color = if (playbackTuning.crossfadeEnabled) {
+                                    MaterialTheme.colorScheme.primary
+                                } else {
+                                    MaterialTheme.colorScheme.onSurfaceVariant
+                                },
+                            )
+                        }
+                        Switch(
+                            checked = playbackTuning.crossfadeEnabled,
+                            onCheckedChange = onSetCrossfadeEnabled,
+                        )
+                    }
+
+                    Text(
+                        text = "Inicio del crossfade: ${playbackTuning.crossfadeSeconds} s antes del final",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+
+                    Slider(
+                        value = playbackTuning.crossfadeSeconds.toFloat(),
+                        onValueChange = { value -> onSetCrossfadeSeconds(value.roundToInt()) },
+                        valueRange = PlaybackTuning.MIN_CROSSFADE_SECONDS.toFloat()..PlaybackTuning.MAX_CROSSFADE_SECONDS.toFloat(),
+                        steps = PlaybackTuning.MAX_CROSSFADE_SECONDS - PlaybackTuning.MIN_CROSSFADE_SECONDS - 1,
+                    )
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                    ) {
+                        Text(
+                            text = "${PlaybackTuning.MIN_CROSSFADE_SECONDS} s",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        Text(
+                            text = "${PlaybackTuning.MAX_CROSSFADE_SECONDS} s",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
+            }
         }
     }
 }

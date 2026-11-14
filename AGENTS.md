@@ -5,11 +5,12 @@ Reglas operativas para cualquier agente que modifique o amplíe **Aura Music**.
 ## Reglas de oro antes de editar
 1. **No romper lo existente**: No cambiar el diseño, iconos o lógica de pantallas que ya funcionan a menos que el usuario lo solicite expresamente.
 2. **Modularidad estricta**:
-   - Nuevas entidades o modelos compartidos -> `:core:model`.
+   - Nuevas entidades, modelos o helpers puros compartidos -> `:core:model` (ej. `ArtistPlaylistBuilder`, `PlaybackQueueHelper`, `PlaybackTuningHelper`).
    - Nuevos algoritmos DSP / gráficos / hashing / JS runtime -> `android/rust/aura_core/src/` + puente JNI en `:core:rust`.
-   - Persistencia y migraciones -> `:core:database` (`AuraDatabase`, `AuraMigrations` sin `fallbackToDestructiveMigration`).
-   - Lógica de descargas Python/`yt-dlp` -> `:core:downloader` (`YtDlpAudioDownloader` + `aura_ytdlp.py`), manteniendo Chaquopy encapsulado en este único módulo Gradle.
-   - Nuevas vistas -> módulo `:feature:*` dedicado (sin meter toda la app en un solo archivo ni una sola pantalla).
+   - Persistencia y migraciones -> `:core:database` (`AuraDatabase`, `AuraMigrations` sin `fallbackToDestructiveMigration`, `PlaybackPreferencesRepository`).
+   - Lógica de descargas Python/`yt-dlp` y servicio `dataSync` -> `:core:downloader` (`YtDlpAudioDownloader`, `AuraDownloadForegroundService` vía `AuraDownloadHost` + `aura_ytdlp.py`), manteniendo Chaquopy encapsulado en este único módulo Gradle.
+   - Reproducción, Crossfade y Velocidad -> `:core:player` (`AuraPlaybackService` vía `AuraPlaybackTuningProvider`, `AuraPlayerController`), manteniendo el ecualizador Rust DSP exclusivamente en el reproductor principal para no corromper las líneas de retardo IIR durante el crossfade.
+   - Nuevas vistas -> módulo `:feature:*` dedicado dependiendo solo de `:core:model` (sin meter toda la app en un solo archivo ni una sola pantalla).
 3. **Sincronía JNI Kotlin ↔ Rust**:
    - Cada método `private external fun nombre(...)` en `com.auramusic.core.rust.AuraRustBridge` debe corresponder exactamente a `#[unsafe(no_mangle)] pub extern "system" fn Java_com_auramusic_core_rust_AuraRustBridge_nombre` en `android/rust/aura_core/src/lib.rs`.
    - El binario CLI `aura_qjs` (`android/rust/aura_core/src/bin/aura_qjs.rs`) debe seguir copiándose como `jniLibs/<abi>/libaura_qjs.so` en `:core:rust` con `useLegacyPackaging = true` en `:app`.

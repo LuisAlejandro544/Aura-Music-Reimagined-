@@ -1,5 +1,6 @@
 package com.auramusic.app
 
+import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
@@ -27,12 +28,16 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -54,11 +59,14 @@ import com.auramusic.feature.equalizer.EqualizerScreen
 import com.auramusic.feature.library.LibraryScreen
 import com.auramusic.feature.player.MiniPlayerBar
 import com.auramusic.feature.player.PlayerScreen
+import com.auramusic.feature.player.QueueScreen
 import com.auramusic.feature.playlists.AddToPlaylistBottomSheet
+import com.auramusic.feature.playlists.ArtistDetailScreen
 import com.auramusic.feature.playlists.LikedSongsScreen
 import com.auramusic.feature.playlists.PlaylistDetailScreen
 import com.auramusic.feature.playlists.PlaylistsScreen
 import com.auramusic.feature.settings.SettingsScreen
+import kotlinx.coroutines.launch
 
 private object AuraRoutes {
     const val LIBRARY = "library"
@@ -68,9 +76,12 @@ private object AuraRoutes {
     const val DOWNLOADER = "downloader"
     const val LIKED = "liked"
     const val PLAYER = "player"
+    const val QUEUE = "queue"
     const val PLAYLIST_DETAIL = "playlist/{playlistId}"
+    const val ARTIST_DETAIL = "artist/{artistKey}"
 
     fun playlistDetail(playlistId: Long): String = "playlist/$playlistId"
+    fun artistDetail(artistKey: String): String = "artist/${Uri.encode(artistKey)}"
 }
 
 /**
@@ -88,6 +99,7 @@ fun AuraAppRoot(viewModel: AuraViewModel) {
     val likedTracks by viewModel.likedTracks.collectAsStateWithLifecycle()
     val likedCount by viewModel.likedCount.collectAsStateWithLifecycle()
     val playlists by viewModel.playlists.collectAsStateWithLifecycle()
+    val artistPlaylists by viewModel.artistPlaylists.collectAsStateWithLifecycle()
     val playbackState by viewModel.playbackState.collectAsStateWithLifecycle()
     val importProgress by viewModel.importProgress.collectAsStateWithLifecycle()
     val downloadState by viewModel.downloadState.collectAsStateWithLifecycle()
@@ -96,7 +108,32 @@ fun AuraAppRoot(viewModel: AuraViewModel) {
     val dynamicCoverColorsEnabled by viewModel.dynamicCoverColorsEnabled.collectAsStateWithLifecycle()
     val deleteAnimationsEnabled by viewModel.deleteAnimationsEnabled.collectAsStateWithLifecycle()
     val equalizerState by viewModel.equalizerState.collectAsStateWithLifecycle()
+    val playbackTuning by viewModel.playbackTuning.collectAsStateWithLifecycle()
     val rustEngineInfo by viewModel.rustEngineInfo.collectAsStateWithLifecycle()
+
+    val snackbarHostState = remember { SnackbarHostState() }
+    val uiScope = rememberCoroutineScope()
+    val showQueueFeedback: (String) -> Unit = { message ->
+        uiScope.launch {
+            snackbarHostState.currentSnackbarData?.dismiss()
+            snackbarHostState.showSnackbar(message)
+        }
+    }
+
+    LaunchedEffect(viewModel) {
+        viewModel.openPlayerEvents.collect {
+            navController.navigate(AuraRoutes.PLAYER) {
+                launchSingleTop = true
+            }
+        }
+    }
+
+    LaunchedEffect(viewModel) {
+        viewModel.uiMessages.collect { message ->
+            snackbarHostState.currentSnackbarData?.dismiss()
+            snackbarHostState.showSnackbar(message)
+        }
+    }
 
     // Puente desacoplado hacia el renderizador nativo de animaciones de eliminación en Rust.
     val deleteEffectRenderer = remember {
@@ -148,10 +185,12 @@ fun AuraAppRoot(viewModel: AuraViewModel) {
 
     val showBottomChrome = currentRoute != AuraRoutes.PLAYER &&
         currentRoute != AuraRoutes.EQUALIZER &&
-        currentRoute != AuraRoutes.DOWNLOADER
+        currentRoute != AuraRoutes.DOWNLOADER &&
+        currentRoute != AuraRoutes.QUEUE
 
     Scaffold(
         containerColor = MaterialTheme.colorScheme.background,
+        snackbarHost = { SnackbarHost(hostState = snackbarHostState) },
         bottomBar = {
             if (showBottomChrome) {
                 Column(modifier = Modifier.navigationBarsPadding()) {
@@ -194,7 +233,8 @@ fun AuraAppRoot(viewModel: AuraViewModel) {
                         NavigationBarItem(
                             selected = currentRoute == AuraRoutes.PLAYLISTS ||
                                 currentRoute == AuraRoutes.LIKED ||
-                                currentRoute == AuraRoutes.PLAYLIST_DETAIL,
+                                currentRoute == AuraRoutes.PLAYLIST_DETAIL ||
+                                currentRoute == AuraRoutes.ARTIST_DETAIL,
                             onClick = {
                                 navController.navigate(AuraRoutes.PLAYLISTS) {
                                     popUpTo(navController.graph.findStartDestination().id) {
@@ -247,6 +287,14 @@ fun AuraAppRoot(viewModel: AuraViewModel) {
                         onImportFolder = { folderTreeLauncher.launch(null) },
                         onPlayTrack = viewModel::playQueue,
                         onToggleLike = viewModel::toggleLike,
+                        onPlayNext = { track ->
+                            viewModel.playNext(track)
+                            showQueueFeedback("Se reproducirá a continuación: ${track.title}")
+                        },
+                        onAddToQueue = { track ->
+                            viewModel.addToQueue(track)
+                            showQueueFeedback("Añadida a la cola: ${track.title}")
+                        },
                         onAddToPlaylist = { track -> trackForPlaylistSheet = track },
                         onChangeCover = { track ->
                             pendingCoverTrackId = track.id
@@ -270,9 +318,16 @@ fun AuraAppRoot(viewModel: AuraViewModel) {
                     PlaylistsScreen(
                         playlists = playlists,
                         likedCount = likedCount,
+                        artistPlaylists = artistPlaylists,
                         onOpenLikedSongs = { navController.navigate(AuraRoutes.LIKED) },
                         onOpenPlaylist = { playlistId ->
                             navController.navigate(AuraRoutes.playlistDetail(playlistId))
+                        },
+                        onOpenArtist = { artistKey ->
+                            navController.navigate(AuraRoutes.artistDetail(artistKey))
+                        },
+                        onPlayArtist = { artistPlaylist ->
+                            viewModel.playQueue(artistPlaylist.tracks, 0)
                         },
                         onCreatePlaylist = viewModel::createPlaylist,
                         onDeletePlaylist = viewModel::deletePlaylist,
@@ -286,6 +341,15 @@ fun AuraAppRoot(viewModel: AuraViewModel) {
                         onBack = { navController.popBackStack() },
                         onPlayTrack = viewModel::playQueue,
                         onToggleLike = viewModel::toggleLike,
+                        onPlayNext = { track ->
+                            viewModel.playNext(track)
+                            showQueueFeedback("Se reproducirá a continuación: ${track.title}")
+                        },
+                        onAddToQueue = { track ->
+                            viewModel.addToQueue(track)
+                            showQueueFeedback("Añadida a la cola: ${track.title}")
+                        },
+                        onAddToPlaylist = { track -> trackForPlaylistSheet = track },
                     )
                 }
 
@@ -309,9 +373,45 @@ fun AuraAppRoot(viewModel: AuraViewModel) {
                         onRemoveFromPlaylist = { trackId ->
                             viewModel.removeTrackFromPlaylist(playlistId, trackId)
                         },
+                        onPlayNext = { track ->
+                            viewModel.playNext(track)
+                            showQueueFeedback("Se reproducirá a continuación: ${track.title}")
+                        },
+                        onAddToQueue = { track ->
+                            viewModel.addToQueue(track)
+                            showQueueFeedback("Añadida a la cola: ${track.title}")
+                        },
                         deleteAnimationsEnabled = deleteAnimationsEnabled,
                         accentArgb = accentColor.primaryArgb.toInt(),
                         deleteEffectRenderer = deleteEffectRenderer,
+                    )
+                }
+
+                composable(
+                    route = AuraRoutes.ARTIST_DETAIL,
+                    arguments = listOf(navArgument("artistKey") { type = NavType.StringType }),
+                ) { entry ->
+                    val encodedKey = entry.arguments?.getString("artistKey").orEmpty()
+                    val artistKey = Uri.decode(encodedKey)
+                    val artistPlaylist by viewModel.observeArtistPlaylist(artistKey)
+                        .collectAsStateWithLifecycle(initialValue = null)
+
+                    ArtistDetailScreen(
+                        artistPlaylist = artistPlaylist,
+                        currentPlayingTrackId = playbackState.currentTrack?.id,
+                        onBack = { navController.popBackStack() },
+                        onPlayTrack = viewModel::playQueue,
+                        onPlayShuffled = viewModel::playShuffled,
+                        onToggleLike = viewModel::toggleLike,
+                        onPlayNext = { track ->
+                            viewModel.playNext(track)
+                            showQueueFeedback("Se reproducirá a continuación: ${track.title}")
+                        },
+                        onAddToQueue = { track ->
+                            viewModel.addToQueue(track)
+                            showQueueFeedback("Añadida a la cola: ${track.title}")
+                        },
+                        onAddToPlaylist = { track -> trackForPlaylistSheet = track },
                     )
                 }
 
@@ -320,10 +420,14 @@ fun AuraAppRoot(viewModel: AuraViewModel) {
                         selectedAccent = accentColor,
                         dynamicCoverColorsEnabled = dynamicCoverColorsEnabled,
                         deleteAnimationsEnabled = deleteAnimationsEnabled,
+                        playbackTuning = playbackTuning,
                         rustEngineInfo = rustEngineInfo,
                         onSelectAccent = viewModel::selectAccentColor,
                         onToggleDynamicCoverColors = viewModel::setDynamicCoverColorsEnabled,
                         onToggleDeleteAnimations = viewModel::setDeleteAnimationsEnabled,
+                        onToggleCrossfade = viewModel::setCrossfadeEnabled,
+                        onChangeCrossfadeSeconds = viewModel::setCrossfadeSeconds,
+                        onChangePlaybackSpeed = viewModel::setPlaybackSpeed,
                     )
                 }
 
@@ -335,6 +439,7 @@ fun AuraAppRoot(viewModel: AuraViewModel) {
                         onInspectUrl = viewModel::inspectDownloadUrl,
                         onConfirmDownload = viewModel::confirmPendingDownload,
                         onCancelPreview = viewModel::dismissDownloadStatus,
+                        onCancelDownload = viewModel::cancelActiveDownload,
                         onPlayDownloadedTrack = { track ->
                             viewModel.playQueue(listOf(track), 0)
                             navController.navigate(AuraRoutes.PLAYER) {
@@ -362,6 +467,7 @@ fun AuraAppRoot(viewModel: AuraViewModel) {
                 composable(AuraRoutes.PLAYER) {
                     PlayerScreen(
                         playbackState = playbackState,
+                        playbackTuning = playbackTuning,
                         dynamicCoverColorsEnabled = dynamicCoverColorsEnabled,
                         onCollapse = { navController.popBackStack() },
                         onTogglePlayPause = viewModel::togglePlayPause,
@@ -381,6 +487,26 @@ fun AuraAppRoot(viewModel: AuraViewModel) {
                                 launchSingleTop = true
                             }
                         },
+                        onOpenQueue = {
+                            navController.navigate(AuraRoutes.QUEUE) {
+                                launchSingleTop = true
+                            }
+                        },
+                        onSetPlaybackSpeed = viewModel::setPlaybackSpeed,
+                        onSetCrossfadeEnabled = viewModel::setCrossfadeEnabled,
+                        onSetCrossfadeSeconds = viewModel::setCrossfadeSeconds,
+                    )
+                }
+
+                composable(AuraRoutes.QUEUE) {
+                    QueueScreen(
+                        playbackState = playbackState,
+                        dynamicCoverColorsEnabled = dynamicCoverColorsEnabled,
+                        onBack = { navController.popBackStack() },
+                        onPlayQueueItemAt = viewModel::playQueueItemAt,
+                        onMoveQueueItem = viewModel::moveQueueItem,
+                        onRemoveFromQueue = viewModel::removeFromQueue,
+                        onClearUpcoming = viewModel::clearUpcomingQueue,
                     )
                 }
             }

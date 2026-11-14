@@ -21,6 +21,7 @@ import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
 import java.io.File
+import java.util.concurrent.atomic.AtomicBoolean
 
 /**
  * Coordinador Kotlin del motor de descargas de audio de Aura Music.
@@ -29,6 +30,7 @@ import java.io.File
  * - Chaquopy 17 (Python 3.11 ligero compilado a bytecode .pyc).
  * - `yt-dlp` y `yt-dlp-ejs` con auto-actualización en runtime desde PyPI + verificación SHA-256.
  * - `libaura_qjs.so` (QuickJS-NG compilado en Rust para 32 y 64 bits).
+ * - [AuraDownloadForegroundService] para mantener descargas activas en segundo plano.
  * - [AudioImporter] + Rust (`lofty`) para indexar automáticamente el audio en Room.
  */
 class YtDlpAudioDownloader(
@@ -43,6 +45,7 @@ class YtDlpAudioDownloader(
     val engineStatus: StateFlow<DownloaderEngineStatus> = _engineStatus.asStateFlow()
 
     private val pythonMutex = Mutex()
+    private val cancelRequested = AtomicBoolean(false)
 
     private val updatesDir: File
         get() = File(context.filesDir, "py_updates").apply { mkdirs() }
@@ -222,6 +225,46 @@ class YtDlpAudioDownloader(
     }
 
     /**
+     * Inicia la descarga confirmada dentro del servicio en primer plano ([AuraDownloadForegroundService]),
+     * permitiendo al usuario salir de Aura Music sin interrumpir la descarga.
+     */
+    fun startBackgroundConfirmedDownload(accentArgb: Int) {
+        val current = _downloadState.value
+        if (current.preview == null || current.isBusy) return
+        cancelRequested.set(false)
+        AuraDownloadForegroundService.startConfirmedDownload(context, accentArgb)
+    }
+
+    /**
+     * Inicia una descarga directa por URL dentro del servicio en primer plano ([AuraDownloadForegroundService]).
+     */
+    fun startBackgroundUrlDownload(rawUrl: String, accentArgb: Int) {
+        val cleanUrl = normalizeAndValidateUrl(rawUrl)
+        if (cleanUrl == null) {
+            _downloadState.value = DownloadState(
+                status = DownloadStatus.ERROR,
+                sourceUrl = rawUrl,
+                errorMessage = "Ingresa una URL válida que empiece por http:// o https://",
+            )
+            return
+        }
+        if (_downloadState.value.isBusy) return
+        cancelRequested.set(false)
+        AuraDownloadForegroundService.startUrlDownload(context, cleanUrl, accentArgb)
+    }
+
+    /**
+     * Solicita cancelar la descarga en curso de forma segura tanto desde la app como desde la notificación.
+     */
+    fun requestCancelDownload() {
+        if (!_downloadState.value.isBusy) return
+        cancelRequested.set(true)
+        _downloadState.value = _downloadState.value.copy(
+            statusMessage = "Cancelando descarga en curso...",
+        )
+    }
+
+    /**
      * Inicia la descarga del audio previamente previsualizado y confirmado por el usuario.
      */
     suspend fun confirmPendingDownload(accentArgb: Int) {
@@ -235,7 +278,7 @@ class YtDlpAudioDownloader(
     }
 
     /**
-     * Descarga solo el audio de una URL compatible (YouTube, etc.) usando yt-dlp + yt-dlp-ejs +
+     * Descarga solo el flujo de audio de una URL compatible (YouTube, etc.) usando yt-dlp + yt-dlp-ejs +
      * QuickJS-NG (`libaura_qjs.so`) e importa automáticamente la pista a la biblioteca local.
      */
     suspend fun downloadAudio(
@@ -254,6 +297,7 @@ class YtDlpAudioDownloader(
         }
 
         if (_downloadState.value.isBusy) return@withContext
+        cancelRequested.set(false)
 
         if (preview == null && preferencesRepository.autoUpdateEnabled.first()) {
             _downloadState.value = DownloadState(
@@ -262,6 +306,16 @@ class YtDlpAudioDownloader(
                 statusMessage = "Verificando actualizaciones de yt-dlp y yt-dlp-ejs...",
             )
             checkAndUpdateEngines(force = false)
+        }
+
+        if (cancelRequested.get()) {
+            _downloadState.value = DownloadState(
+                status = DownloadStatus.CANCELLED,
+                sourceUrl = cleanUrl,
+                title = preview?.title,
+                statusMessage = "Descarga cancelada por el usuario.",
+            )
+            return@withContext
         }
 
         _downloadState.value = DownloadState(
@@ -282,6 +336,7 @@ class YtDlpAudioDownloader(
                 val callback = PyProgressBridge { payloadJson ->
                     onPythonProgress(payloadJson, preview?.estimatedSizeBytes ?: 0L)
                 }
+                val cancelBridge = PyCancelBridge { cancelRequested.get() }
                 val resultJson = mod.callAttr(
                     "download_audio",
                     cleanUrl,
@@ -289,18 +344,34 @@ class YtDlpAudioDownloader(
                     updatesDir.absolutePath,
                     qjsPath,
                     callback,
+                    cancelBridge,
                 ).toString()
                 JSONObject(resultJson)
             }
         }
 
         val info = downloadResult.getOrElse { err ->
-            _downloadState.value = DownloadState(
-                status = DownloadStatus.ERROR,
-                sourceUrl = cleanUrl,
-                title = preview?.title,
-                errorMessage = humanizeDownloadError(err.message),
-            )
+            val rawMsg = err.message.orEmpty()
+            val wasCancelled = cancelRequested.get() ||
+                rawMsg.contains("DownloadCancelledError", ignoreCase = true) ||
+                rawMsg.contains("cancelada por el usuario", ignoreCase = true)
+
+            if (wasCancelled) {
+                cleanupPartialDownloadFiles()
+                _downloadState.value = DownloadState(
+                    status = DownloadStatus.CANCELLED,
+                    sourceUrl = cleanUrl,
+                    title = preview?.title,
+                    statusMessage = "Descarga cancelada por el usuario.",
+                )
+            } else {
+                _downloadState.value = DownloadState(
+                    status = DownloadStatus.ERROR,
+                    sourceUrl = cleanUrl,
+                    title = preview?.title,
+                    errorMessage = humanizeDownloadError(err.message),
+                )
+            }
             return@withContext
         }
 
@@ -355,6 +426,7 @@ class YtDlpAudioDownloader(
 
     fun clearDownloadStatus() {
         if (!_downloadState.value.isBusy) {
+            cancelRequested.set(false)
             cleanupPreviewThumbs()
             _downloadState.value = DownloadState()
         }
@@ -372,6 +444,16 @@ class YtDlpAudioDownloader(
         }
     }
 
+    private fun cleanupPartialDownloadFiles() {
+        runCatching {
+            downloadsDir.listFiles()?.forEach { file ->
+                if (file.isFile && (file.name.endsWith(".part") || file.name.endsWith(".ytdl"))) {
+                    file.delete()
+                }
+            }
+        }
+    }
+
     private fun ensurePythonStarted(): Python {
         if (!Python.isStarted()) {
             Python.start(AndroidPlatform(context.applicationContext))
@@ -380,6 +462,7 @@ class YtDlpAudioDownloader(
     }
 
     private fun onPythonProgress(payloadJson: String, fallbackTotalBytes: Long) {
+        if (cancelRequested.get()) return
         val json = runCatching { JSONObject(payloadJson) }.getOrNull() ?: return
         val stage = json.optString("stage")
         val percent = json.optDouble("percent", 0.0).toFloat()
@@ -434,6 +517,16 @@ class YtDlpAudioDownloader(
         }
     }
 
+    /**
+     * Puente invocable desde Python (`cancel_check()`) para abortar la descarga al instante.
+     */
+    class PyCancelBridge(
+        private val isCancelled: () -> Boolean,
+    ) {
+        @Suppress("unused")
+        fun __call__(): Boolean = isCancelled()
+    }
+
     companion object {
         /**
          * Valida y normaliza una URL HTTP/HTTPS antes de enviarla a yt-dlp.
@@ -466,3 +559,4 @@ class YtDlpAudioDownloader(
         }
     }
 }
+
