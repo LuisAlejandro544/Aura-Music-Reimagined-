@@ -10,6 +10,7 @@ use jni::objects::{JByteArray, JClass, JString};
 use jni::sys::{jint, jlong, jstring};
 
 mod artwork;
+mod metadata;
 mod palette;
 
 /// Inicializa el logger nativo de Android la primera vez que se invoca el puente.
@@ -112,5 +113,31 @@ pub extern "system" fn Java_com_auramusic_core_rust_AuraRustBridge_nativeCompute
     match env.new_string(fp) {
         Ok(s) => s.into_raw(),
         Err(_) => std::ptr::null_mut(),
+    }
+}
+
+/// Extrae título, artista, álbum, duración y carátula embebida desde un file descriptor SAF en Rust.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_com_auramusic_core_rust_AuraRustBridge_nativeExtractAudioMetadata<'local>(
+    env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    fd: jint,
+) -> JByteArray<'local> {
+    init_android_logger();
+
+    let payload = match metadata::extract_metadata_from_fd(fd) {
+        Ok(meta) => meta.to_jni_bytes(),
+        Err(err) => {
+            log::warn!("No se pudieron extraer metadatos de audio desde fd {fd}: {err}");
+            metadata::AudioMetadataResult::error_jni_bytes()
+        }
+    };
+
+    match env.byte_array_from_slice(&payload) {
+        Ok(arr) => arr,
+        Err(err) => {
+            log::error!("Error serializando metadatos hacia JByteArray: {err:?}");
+            JByteArray::default()
+        }
     }
 }

@@ -8,13 +8,14 @@ Plan de evolución por fases para convertir Aura Music en un reproductor local m
 - Importación manual con Storage Access Framework (1 canción, selección múltiple y carpeta completa).
 - Reproductor Media3 ExoPlayer con `MediaSessionService`, mini reproductor y reproductor completo con carátula cuadrada clásica.
 - Sistema de "Me gusta" (corazones) y playlists en Room.
+- Infraestructura de migraciones no destructivas en Room (`AuraMigrations` + `exportSchema = true` en KSP) lista antes de ampliar tablas.
 - Generación procedural determinista de carátulas en Rust sin IA (`tiny-skia`).
 - Apartado de Ajustes con cambio de paleta de color en tiempo real vía DataStore.
 
-## Fase 2 — Procesamiento de audio y metadatos en Rust
-- Lectura rápida de etiquetas (ID3, Vorbis, FLAC, MP4) directamente desde Rust para acelerar importaciones masivas.
-- Análisis de ganancia (ReplayGain) y extracción de forma de onda (waveform) en Rust para previsualización de pistas.
-- Ecualizador multibanda y refuerzo de graves configurables desde Ajustes.
+## Fase 2 — Procesamiento de audio y metadatos en Rust (En curso)
+- [x] Lectura rápida de etiquetas (ID3, Vorbis, FLAC, MP4, WAV, AIFF), duración y carátulas embebidas directamente desde Rust (`lofty`) vía descriptor de archivo SAF (`ParcelFileDescriptor`).
+- [ ] Análisis de ganancia (ReplayGain) y extracción de forma de onda (waveform) en Rust para previsualización de pistas.
+- [ ] Ecualizador multibanda y refuerzo de graves configurables desde Ajustes.
 
 ## Fase 3 — Gestión avanzada de biblioteca y playlists
 - Cola de reproducción interactiva ("Reproducir siguiente", añadir a cola, reordenar canciones mediante arrastre).

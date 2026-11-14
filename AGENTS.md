@@ -7,12 +7,13 @@ Reglas operativas para cualquier agente que modifique o amplíe **Aura Music**.
 2. **Modularidad estricta**:
    - Nuevas entidades o modelos compartidos -> `:core:model`.
    - Nuevos algoritmos DSP / gráficos / hashing -> `android/rust/aura_core/src/` + puente JNI en `:core:rust`.
-   - Persistencia -> `:core:database`.
+   - Persistencia y migraciones -> `:core:database` (`AuraDatabase`, `AuraMigrations` sin `fallbackToDestructiveMigration`).
    - Nuevas vistas -> módulo `:feature:*` dedicado (sin meter toda la app en un solo archivo ni una sola pantalla).
 3. **Sincronía JNI Kotlin ↔ Rust**:
    - Cada método `private external fun nombre(...)` en `com.auramusic.core.rust.AuraRustBridge` debe corresponder exactamente a `#[unsafe(no_mangle)] pub extern "system" fn Java_com_auramusic_core_rust_AuraRustBridge_nombre` en `android/rust/aura_core/src/lib.rs`.
-4. **Uso de hilos**:
-   - Prohibido ejecutar `MediaMetadataRetriever`, `DocumentFile`, Room o llamadas JNI pesadas en `Dispatchers.Main`.
+4. **Uso de hilos y parser nativo**:
+   - Prohibido ejecutar `ParcelFileDescriptor`, `DocumentFile`, Room o llamadas JNI (`extractAudioMetadata`, carátulas, hashing) en `Dispatchers.Main`.
+   - No reintroducir `MediaMetadataRetriever` en Kotlin; la lectura de metadatos pertenece a Rust (`aura_core::metadata`).
 5. **Documentación en código**:
    - Incluir comentarios explicativos claros en español en archivos nuevos o modificados.
 6. **Prohibiciones**:

@@ -89,11 +89,12 @@ interface PlaylistDao {
 
 /**
  * Base de datos local Room de Aura Music.
+ * Exporta esquemas JSON para auditar cambios entre versiones y asegurar migraciones no destructivas.
  */
 @Database(
     entities = [TrackEntity::class, PlaylistEntity::class, PlaylistTrackCrossRef::class],
-    version = 1,
-    exportSchema = false,
+    version = AuraMigrations.CURRENT_DATABASE_VERSION,
+    exportSchema = true,
 )
 abstract class AuraDatabase : RoomDatabase() {
     abstract fun trackDao(): TrackDao

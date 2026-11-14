@@ -28,9 +28,9 @@
 │   │           └── MainActivity.kt    # Punto de entrada edge-to-edge
 │   ├── core/
 │   │   ├── model/                     # Entidades puras de dominio (Track, Playlist, etc.)
-│   │   ├── rust/                      # Puente JNI (AuraRustBridge) + tarea cargo-ndk en Gradle
-│   │   ├── database/                  # Room (DAOs, entidades) y DataStore de tema
-│   │   ├── importer/                  # Importador manual SAF (individual, tanda, carpeta)
+│   │   ├── rust/                      # Puente JNI (AuraRustBridge), códec y tarea cargo-ndk en Gradle
+│   │   ├── database/                  # Room (DAOs, entidades, AuraMigrations) y DataStore de tema
+│   │   ├── importer/                  # Importador manual SAF (individual, tanda, carpeta) vía Rust fd
 │   │   └── player/                    # Media3 ExoPlayer + AuraPlaybackService
 │   ├── feature/
 │   │   ├── library/                   # Pantalla Biblioteca + buscador + hoja de importación
@@ -42,6 +42,7 @@
 │       ├── rust-toolchain.toml        # Targets armv7, arm64 y x86_64
 │       └── src/
 │           ├── lib.rs                 # Exportaciones JNI para AuraRustBridge
+│           ├── metadata.rs            # Lector nativo de tags y carátulas embebidas (lofty)
 │           ├── artwork.rs             # Motor procedural de carátulas (tiny-skia) y SHA-256
 │           └── palette.rs             # Generador armónico de paletas cromáticas
 ├── src/                               # Entorno web mínimo ("Hello World") para previsualización

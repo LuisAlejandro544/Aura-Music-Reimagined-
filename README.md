@@ -4,12 +4,13 @@ Reproductor de música local para Android construido con **Kotlin (Jetpack Compo
 
 ## Características actuales
 
-- **Importación manual de música (SAF)**: Aura Music nunca escanea todo el teléfono. El usuario decide exactamente qué importar:
+- **Importación manual de música (SAF) con parser en Rust**: Aura Music nunca escanea todo el teléfono. El usuario decide exactamente qué importar:
   - Una canción individual.
   - Varias canciones por tandas.
   - Una carpeta completa (con subcarpetas) manteniendo permisos persistentes.
+  - La lectura de etiquetas (ID3, Vorbis, FLAC, MP4/M4A, WAV, AIFF), duración y carátula embebida se ejecuta en Rust (`lofty`) directamente desde el descriptor de archivo SAF.
 - **Reproductor y Mini Reproductor**: Basados en **AndroidX Media3 ExoPlayer** y `MediaSessionService` para reproducción estable en segundo plano, con carátula cuadrada clásica, controles básicos, aleatorio, repetición y barra de progreso.
-- **Me gusta y Playlists**: Botón de corazón en pistas, mini reproductor y reproductor completo; sección dedicada de *Canciones que te gustan* y playlists personalizadas respaldadas por **Room**.
+- **Me gusta y Playlists con migraciones seguras**: Botón de corazón en pistas, mini reproductor y reproductor completo; sección dedicada de *Canciones que te gustan* y playlists personalizadas respaldadas por **Room** con exportación de esquemas (`exportSchema = true`) y migraciones explícitas no destructivas (`AuraMigrations`).
 - **Carátulas procedurales en Rust (sin IA)**: Si una canción importada no contiene imagen embebida, `aura_core` (Rust + `tiny-skia` + `rand_chacha` + `sha2`) genera localmente una carátula cuadrada determinista con 5 estilos geométricos y orgánicos.
 - **Ajustes de apariencia**: Selector de 8 paletas de color dinámicas (Material 3) persistidas con **Jetpack DataStore** y estado del motor nativo Rust.
 
@@ -17,7 +18,7 @@ Reproductor de música local para Android construido con **Kotlin (Jetpack Compo
 
 - **Android**: `minSdk = 26` (Android 8.0) • `targetSdk = 35` • `compileSdk = 35`.
 - **Arquitecturas nativas**: 32 bits (`armeabi-v7a`) y 64 bits (`arm64-v8a`, `x86_64`) compiladas en APK universal para instalación directa o distribución en Uptodown.
-- **Rust**: Toolchain `stable` (Edition 2024) + `cargo-ndk`.
+- **Rust**: Toolchain `stable` (Edition 2024) + `cargo-ndk` + crate `lofty` (MIT/Apache-2.0).
 - **Gradle Wrapper**: `8.14.7` (AGP `8.9.1`, Kotlin `2.1.20`).
 
 ## Cómo compilar el APK Debug

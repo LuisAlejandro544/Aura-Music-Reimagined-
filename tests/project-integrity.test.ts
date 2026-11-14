@@ -122,3 +122,42 @@ test('project documentation suite exists at repository root', () => {
   }
 });
 
+test('audio metadata extraction runs in Rust (lofty) without MediaMetadataRetriever fallback', () => {
+  const cargoToml = fs.readFileSync(path.join(rootDir, 'android/rust/aura_core/Cargo.toml'), 'utf8');
+  const rustLib = fs.readFileSync(path.join(rootDir, 'android/rust/aura_core/src/lib.rs'), 'utf8');
+  const metadataRs = path.join(rootDir, 'android/rust/aura_core/src/metadata.rs');
+  const importerKt = fs.readFileSync(
+    path.join(rootDir, 'android/core/importer/src/main/kotlin/com/auramusic/core/importer/AudioImporter.kt'),
+    'utf8',
+  );
+
+  assert.match(cargoToml, /lofty\s*=/);
+  assert.ok(fs.existsSync(metadataRs), 'Missing android/rust/aura_core/src/metadata.rs');
+  assert.match(rustLib, /nativeExtractAudioMetadata/);
+  assert.doesNotMatch(importerKt, /MediaMetadataRetriever/);
+  assert.match(importerKt, /AuraRustBridge\.extractAudioMetadata/);
+});
+
+test('Room database enables schema export and registers non-destructive migrations', () => {
+  const dbGradle = fs.readFileSync(path.join(rootDir, 'android/core/database/build.gradle.kts'), 'utf8');
+  const dbKt = fs.readFileSync(
+    path.join(rootDir, 'android/core/database/src/main/kotlin/com/auramusic/core/database/AuraDatabase.kt'),
+    'utf8',
+  );
+  const migrationsKt = path.join(
+    rootDir,
+    'android/core/database/src/main/kotlin/com/auramusic/core/database/AuraMigrations.kt',
+  );
+  const repoKt = fs.readFileSync(
+    path.join(rootDir, 'android/core/database/src/main/kotlin/com/auramusic/core/database/AuraRepositories.kt'),
+    'utf8',
+  );
+
+  assert.match(dbGradle, /room\.schemaLocation/);
+  assert.match(dbKt, /exportSchema\s*=\s*true/);
+  assert.ok(fs.existsSync(migrationsKt), 'Missing AuraMigrations.kt');
+  assert.match(repoKt, /addMigrations\(\*AuraMigrations\.ALL_MIGRATIONS\)/);
+  assert.doesNotMatch(repoKt, /fallbackToDestructiveMigration/);
+});
+
+

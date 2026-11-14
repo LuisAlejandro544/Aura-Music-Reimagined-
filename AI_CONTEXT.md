@@ -10,7 +10,8 @@ Este archivo resume las decisiones de arquitectura, restricciones técnicas y re
 - **Versiones objetivo**: `minSdk = 26` (Android 8.0), `targetSdk = 35`, `compileSdk = 35`, Gradle `8.14.7`, AGP `8.9.1`, Kotlin `2.1.20`.
 - **Arquitecturas obligatorias**: Soporte completo para **32 bits (`armeabi-v7a`)** y **64 bits (`arm64-v8a`, `x86_64`)**.
 - **Distribución**: La app está pensada para instalarse vía APK directo o **Uptodown** (no Google Play). No introducir dependencias ligadas a servicios exclusivos de Google Play.
-- **Rust sin fallbacks**: Toda funcionalidad delegada a Rust (actualmente generación de carátulas procedurales y fingerprinting SHA-256) debe compilarse en `gradlew` vía `cargo-ndk` (`:core:rust:buildRustAndroidLibs`) y ejecutarse en `libaura_core.so`. Nunca reemplazar lógica Rust con fallbacks en Kotlin.
+- **Rust sin fallbacks**: Toda funcionalidad delegada a Rust (lectura de metadatos y carátulas embebidas vía `lofty` desde descriptor SAF, generación de carátulas procedurales y fingerprinting SHA-256) debe compilarse en `gradlew` vía `cargo-ndk` (`:core:rust:buildRustAndroidLibs`) y ejecutarse en `libaura_core.so`. Nunca reemplazar lógica Rust con fallbacks en Kotlin (como `MediaMetadataRetriever`).
+- **Migraciones Room seguras**: `AuraDatabase` debe mantener `exportSchema = true` (esquemas exportados vía KSP en `android/core/database/schemas`) y registrar toda evolución de esquema en `AuraMigrations.ALL_MIGRATIONS` sin usar `fallbackToDestructiveMigration`.
 - **Licencias**: Usar exclusivamente librerías y crates con licencias permisivas (**Apache-2.0, MIT, BSD**). Prohibido agregar dependencias GPL/LGPL/AGPL/CC-BY que obliguen a liberar código fuente o mostrar créditos obligatorios.
 - **Propiedad intelectual**: Prohibido nombrar archivos, paquetes o identificadores con marcas registradas de terceros.
 

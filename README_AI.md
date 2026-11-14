@@ -7,7 +7,7 @@ Guía práctica para extender **Aura Music** de forma ordenada usando asistentes
 | Qué quieres añadir | Dónde empezar | Qué conectar |
 | :--- | :--- | :--- |
 | Nueva función nativa en Rust (ej. ecualizador, análisis BPM, waveform) | `android/rust/aura_core/src/` (`Cargo.toml` + módulo `.rs` + `lib.rs`) | Añadir `external fun` y wrapper `suspend` en `AuraRustBridge.kt` (`:core:rust`). |
-| Nuevo campo o tabla en base de datos | `AuraEntities.kt` y `AuraDatabase.kt` (`:core:database`) | Incrementar versión de Room o añadir migración, exponer en `MusicRepository` y `AuraModels.kt`. |
+| Nuevo campo o tabla en base de datos | `AuraEntities.kt`, `AuraMigrations.kt` y `AuraDatabase.kt` (`:core:database`) | Incrementar `AuraMigrations.CURRENT_DATABASE_VERSION`, añadir `Migration(n, n+1)` en `ALL_MIGRATIONS` (nunca destructiva), exponer en `MusicRepository` y `AuraModels.kt`. |
 | Nueva opción en Ajustes | `SettingsScreen.kt` (`:feature:settings`) + `ThemePreferencesRepository` (`:core:database`) | Exponer `StateFlow` y setter en `AuraViewModel.kt`. |
 | Nueva pantalla o subvista | Nuevo composable o módulo `:feature:*` | Registrar ruta en `AuraRoutes` dentro de `AuraAppRoot.kt`. |
 | Nueva acción de reproducción | `AuraPlaybackService.kt` y `AuraPlayerController.kt` (`:core:player`) | Exponer método en `AuraViewModel.kt` y conectarlo a `PlayerScreen` / `MiniPlayerBar`. |

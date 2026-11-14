@@ -2,7 +2,6 @@ package com.auramusic.core.importer
 
 import android.content.Context
 import android.content.Intent
-import android.media.MediaMetadataRetriever
 import android.net.Uri
 import androidx.documentfile.provider.DocumentFile
 import com.auramusic.core.database.MusicRepository
@@ -25,8 +24,9 @@ import java.io.FileOutputStream
  * 2. Importación por tandas (selección múltiple de canciones).
  * 3. Importación de una carpeta completa (recorrido recursivo con DocumentFile).
  *
- * Todo el recorrido de archivos, lectura de etiquetas ID3/Vorbis y generación procedural
- * de carátulas en Rust se ejecuta fuera del hilo principal ([Dispatchers.IO] / [Dispatchers.Default]).
+ * Todo el recorrido de archivos, lectura de etiquetas ID3/Vorbis/FLAC/MP4 en Rust (`lofty`),
+ * extracción de carátulas embebidas y generación procedural se ejecuta fuera del hilo principal
+ * ([Dispatchers.IO] / [Dispatchers.Default]).
  */
 class AudioImporter(
     private val context: Context,
@@ -36,7 +36,7 @@ class AudioImporter(
     val progress: StateFlow<ImportProgress> = _progress.asStateFlow()
 
     private val audioExtensions = setOf(
-        "mp3", "flac", "m4a", "aac", "ogg", "opus", "wav", "wma", "alac", "aiff",
+        "mp3", "flac", "m4a", "aac", "ogg", "opus", "wav", "alac", "aiff",
     )
 
     /**
@@ -190,33 +190,16 @@ class AudioImporter(
             ?: "Pista local"
         val sizeBytes = docFile?.length() ?: 0L
 
-        val retriever = MediaMetadataRetriever()
         return try {
-            retriever.setDataSource(context, uri)
+            // Rust lee el audio directamente desde el descriptor POSIX sin copiar el archivo en RAM.
+            val metadata = context.contentResolver.openFileDescriptor(uri, "r")?.use { pfd ->
+                AuraRustBridge.extractAudioMetadata(pfd.fd)
+            } ?: return null
 
-            val title = retriever
-                .extractMetadata(MediaMetadataRetriever.METADATA_KEY_TITLE)
-                ?.trim()
-                ?.takeIf { it.isNotBlank() }
-                ?: fallbackName
-
-            val artist = retriever
-                .extractMetadata(MediaMetadataRetriever.METADATA_KEY_ARTIST)
-                ?.trim()
-                ?.takeIf { it.isNotBlank() }
-                ?: "Artista desconocido"
-
-            val album = retriever
-                .extractMetadata(MediaMetadataRetriever.METADATA_KEY_ALBUM)
-                ?.trim()
-                ?.takeIf { it.isNotBlank() }
-                ?: "Biblioteca local"
-
-            val durationMs = retriever
-                .extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)
-                ?.toLongOrNull()
-                ?.coerceAtLeast(0L)
-                ?: 0L
+            val title = metadata.title?.takeIf { it.isNotBlank() } ?: fallbackName
+            val artist = metadata.artist?.takeIf { it.isNotBlank() } ?: "Artista desconocido"
+            val album = metadata.album?.takeIf { it.isNotBlank() } ?: "Biblioteca local"
+            val durationMs = metadata.durationMs.coerceAtLeast(0L)
 
             // Huella determinista calculada en Rust.
             val fingerprint = AuraRustBridge.computeTrackFingerprint(
@@ -226,7 +209,7 @@ class AudioImporter(
                 sizeBytes = sizeBytes,
             )
 
-            val embeddedBytes = retriever.embeddedPicture
+            val embeddedBytes = metadata.embeddedCoverBytes
             val (coverPath, isProcedural) = if (embeddedBytes != null && embeddedBytes.isNotEmpty()) {
                 saveEmbeddedCover(fingerprint, embeddedBytes) to false
             } else {
@@ -254,8 +237,6 @@ class AudioImporter(
             )
         } catch (_: Exception) {
             null
-        } finally {
-            runCatching { retriever.release() }
         }
     }
 

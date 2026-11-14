@@ -122,7 +122,9 @@ class MusicRepository(
             context.applicationContext,
             AuraDatabase::class.java,
             "aura_music.db",
-        ).build()
+        )
+            .addMigrations(*AuraMigrations.ALL_MIGRATIONS)
+            .build()
     }
 }
 
