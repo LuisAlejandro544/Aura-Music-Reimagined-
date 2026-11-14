@@ -49,17 +49,7 @@ pub fn eval_script_with_args(script: &str, args: &[String]) -> Result<JsExecutio
             .map_err(|e| format!("Error registrando scriptArgs: {e}"))?;
 
         // Función `print(...)` estilo QuickJS CLI.
-        let out_for_print = Arc::clone(&stdout_buf);
-        let print_fn = Function::new(ctx.clone(), move |msg: rquickjs::Ctx, args: rquickjs::function::Rest<rquickjs::Value>| {
-            let line = format_js_args(&msg, &args);
-            if let Ok(mut buf) = out_for_print.lock() {
-                if !buf.is_empty() {
-                    buf.push('\n');
-                }
-                buf.push_str(&line);
-            }
-        })
-        .map_err(|e| format!("Error creando print(): {e}"))?;
+        let print_fn = make_capture_fn(ctx.clone(), Arc::clone(&stdout_buf))?;
         globals
             .set("print", print_fn)
             .map_err(|e| format!("Error registrando print(): {e}"))?;
@@ -68,29 +58,8 @@ pub fn eval_script_with_args(script: &str, args: &[String]) -> Result<JsExecutio
         let console_obj = Object::new(ctx.clone())
             .map_err(|e| format!("Error creando objeto console: {e}"))?;
 
-        let out_for_log = Arc::clone(&stdout_buf);
-        let log_fn = Function::new(ctx.clone(), move |msg: rquickjs::Ctx, args: rquickjs::function::Rest<rquickjs::Value>| {
-            let line = format_js_args(&msg, &args);
-            if let Ok(mut buf) = out_for_log.lock() {
-                if !buf.is_empty() {
-                    buf.push('\n');
-                }
-                buf.push_str(&line);
-            }
-        })
-        .map_err(|e| format!("Error creando console.log: {e}"))?;
-
-        let err_for_warn = Arc::clone(&stderr_buf);
-        let warn_fn = Function::new(ctx.clone(), move |msg: rquickjs::Ctx, args: rquickjs::function::Rest<rquickjs::Value>| {
-            let line = format_js_args(&msg, &args);
-            if let Ok(mut buf) = err_for_warn.lock() {
-                if !buf.is_empty() {
-                    buf.push('\n');
-                }
-                buf.push_str(&line);
-            }
-        })
-        .map_err(|e| format!("Error creando console.error: {e}"))?;
+        let log_fn = make_capture_fn(ctx.clone(), Arc::clone(&stdout_buf))?;
+        let warn_fn = make_capture_fn(ctx.clone(), Arc::clone(&stderr_buf))?;
 
         console_obj.set("log", log_fn.clone()).map_err(|e| e.to_string())?;
         console_obj.set("info", log_fn.clone()).map_err(|e| e.to_string())?;
@@ -128,6 +97,27 @@ pub fn eval_script_with_args(script: &str, args: &[String]) -> Result<JsExecutio
         .unwrap_or_default();
 
     Ok(JsExecutionResult { stdout, stderr })
+}
+
+/// Registra un callback variádico JS (`print` / `console.*`) compartiendo el mismo lifetime `'js`
+/// entre `Ctx<'js>` y `Rest<Value<'js>>` para cumplir la invarianza exigida por `rquickjs`.
+fn make_capture_fn<'js>(
+    ctx: rquickjs::Ctx<'js>,
+    target: Arc<Mutex<String>>,
+) -> Result<Function<'js>, String> {
+    Function::new(
+        ctx,
+        move |call_ctx: rquickjs::Ctx<'js>, args: rquickjs::function::Rest<rquickjs::Value<'js>>| {
+            let line = format_js_args(&call_ctx, &args);
+            if let Ok(mut buf) = target.lock() {
+                if !buf.is_empty() {
+                    buf.push('\n');
+                }
+                buf.push_str(&line);
+            }
+        },
+    )
+    .map_err(|e| format!("Error creando función de salida JS: {e}"))
 }
 
 fn format_js_args<'js>(
