@@ -108,6 +108,10 @@ test('GitHub Action apk Debug is manual-only, zero-cache, and uses Gradle 8.14.7
   assert.match(workflow, /platforms;android-35/);
   assert.doesNotMatch(workflow, /^\s*tools$/m);
   assert.match(wrapperProps, /gradle-8\.14\.7-bin\.zip/);
+  assert.ok(
+    fs.existsSync(path.join(rootDir, 'android/gradle/wrapper/gradle-wrapper.jar')),
+    'gradle-wrapper.jar must be committed so gradlew works everywhere',
+  );
 });
 
 test('project documentation suite exists at repository root', () => {

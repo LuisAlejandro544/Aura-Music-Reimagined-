@@ -8,7 +8,7 @@ use rand::{Rng, SeedableRng};
 use rand_chacha::ChaCha8Rng;
 use sha2::{Digest, Sha256};
 use tiny_skia::{
-    BlendMode, Color, FillRule, GradientStop, LinearGradient, Paint, PathBuilder, Pixmap, Point,
+    BlendMode, FillRule, GradientStop, LinearGradient, Paint, PathBuilder, Pixmap, Point,
     RadialGradient, Rect, SpreadMode, Stroke, Transform,
 };
 
@@ -132,6 +132,7 @@ fn draw_base_gradient<R: Rng>(
         let paint = Paint {
             shader,
             anti_alias: true,
+            force_hq_pipeline: true,
             ..Paint::default()
         };
         pixmap.fill_rect(rect, &paint, Transform::identity(), None);
@@ -166,6 +167,7 @@ fn draw_radial_glow(
             shader,
             blend_mode,
             anti_alias: true,
+            force_hq_pipeline: true,
             ..Paint::default()
         };
         pixmap.fill_path(&path, &paint, FillRule::Winding, Transform::identity(), None);
@@ -197,6 +199,7 @@ fn draw_aura_orbs<R: Rng>(
         let mut paint = Paint {
             anti_alias: true,
             blend_mode: BlendMode::Overlay,
+            force_hq_pipeline: true,
             ..Paint::default()
         };
         paint.set_color(AuraPalette::color_with_alpha(palette.highlight, 145));
@@ -265,6 +268,7 @@ fn draw_prism_horizon<R: Rng>(
                         BlendMode::SoftLight
                     },
                     anti_alias: true,
+                    force_hq_pipeline: true,
                     ..Paint::default()
                 };
                 pixmap.fill_path(&path, &paint, FillRule::Winding, Transform::identity(), None);
@@ -300,6 +304,7 @@ fn draw_concentric_resonance<R: Rng>(
             let mut paint = Paint {
                 anti_alias: true,
                 blend_mode: BlendMode::Screen,
+                force_hq_pipeline: true,
                 ..Paint::default()
             };
             let alpha = ((1.0 - t * 0.65) * 185.0) as u8;
@@ -317,6 +322,7 @@ fn draw_concentric_resonance<R: Rng>(
         let mut paint = Paint {
             anti_alias: true,
             blend_mode: BlendMode::Screen,
+            force_hq_pipeline: true,
             ..Paint::default()
         };
         paint.set_color(AuraPalette::color_with_alpha(palette.highlight, 220));
@@ -382,6 +388,7 @@ fn draw_topographic_waves<R: Rng>(
                     shader,
                     blend_mode: BlendMode::Screen,
                     anti_alias: true,
+                    force_hq_pipeline: true,
                     ..Paint::default()
                 };
                 pixmap.fill_path(&path, &paint, FillRule::Winding, Transform::identity(), None);
@@ -422,6 +429,7 @@ fn draw_bauhaus_geometry<R: Rng>(
                 } else {
                     BlendMode::Overlay
                 },
+                force_hq_pipeline: true,
                 ..Paint::default()
             };
             paint.set_color(AuraPalette::color_with_alpha(shapes[i % shapes.len()], 135));
@@ -447,6 +455,7 @@ fn draw_bauhaus_geometry<R: Rng>(
                 shader,
                 blend_mode: BlendMode::Screen,
                 anti_alias: true,
+                force_hq_pipeline: true,
                 ..Paint::default()
             };
             pixmap.fill_path(&circle, &paint, FillRule::Winding, Transform::identity(), None);
@@ -518,6 +527,17 @@ mod tests {
         let a = render_procedural_cover("Song One|Artist A|Album 1", 128, 128, None).unwrap();
         let b = render_procedural_cover("Song Two|Artist B|Album 2", 128, 128, None).unwrap();
         assert_ne!(a, b);
+    }
+
+    #[test]
+    fn all_artwork_styles_render_without_panics() {
+        for i in 0..25 {
+            let key = format!("Track {i}|Artist {i}|Album {i}");
+            let accent = if i % 2 == 0 { Some(0xFFA78BFA) } else { None };
+            let bytes = render_procedural_cover(&key, 128, 128, accent)
+                .expect("every seed should render cleanly");
+            assert_eq!(bytes.len(), 128 * 128 * 4);
+        }
     }
 
     #[test]

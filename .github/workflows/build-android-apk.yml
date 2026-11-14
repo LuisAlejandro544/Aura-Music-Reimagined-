@@ -57,11 +57,9 @@ jobs:
           gradle-version: "8.14.7"
           cache-disabled: true
 
-      - name: Generar wrapper oficial y dar permisos a gradlew
+      - name: Dar permisos de ejecución a gradlew
         working-directory: android
-        run: |
-          gradle wrapper --gradle-version 8.14.7 --no-daemon
-          chmod +x gradlew
+        run: chmod +x gradlew
 
       - name: Compilar Rust (cargo-ndk) y Kotlin para generar APK Debug sin caché
         working-directory: android
