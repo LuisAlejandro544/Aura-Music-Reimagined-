@@ -43,7 +43,7 @@ val buildRustAndroidLibs by tasks.registering(Exec::class) {
         "-t", "armeabi-v7a",
         "-t", "arm64-v8a",
         "-t", "x86_64",
-        "-p", "26",
+        "--platform", "26",
         "-o", jniLibsOutputDir.asFile.absolutePath,
         "build",
         "--release",

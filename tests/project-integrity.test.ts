@@ -49,6 +49,7 @@ test('Rust crate uses edition 2024, 32/64-bit targets, and matches all JNI Kotli
 
   // Gradle debe compilar Rust obligatoriamente antes de preBuild para 32 y 64 bits
   assert.match(rustGradle, /cargo/);
+  assert.match(rustGradle, /--platform/);
   assert.match(rustGradle, /armeabi-v7a/);
   assert.match(rustGradle, /arm64-v8a/);
   assert.match(rustGradle, /preBuild/);
