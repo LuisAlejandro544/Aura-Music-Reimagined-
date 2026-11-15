@@ -8,6 +8,8 @@ import android.graphics.ImageDecoder
 import android.net.Uri
 import android.os.Build
 import android.webkit.MimeTypeMap
+import androidx.core.graphics.scale
+import androidx.core.net.toUri
 import androidx.documentfile.provider.DocumentFile
 import com.auramusic.core.database.MusicRepository
 import com.auramusic.core.database.StoragePreferencesRepository
@@ -405,7 +407,7 @@ class AudioImporter(
      * del sistema está activa (evitando que vuelva a importarse automáticamente al reiniciar).
      */
     suspend fun deleteOwnedDownloadFileIfExists(contentUri: String) = withContext(Dispatchers.IO) {
-        val parsed = runCatching { Uri.parse(contentUri) }.getOrNull() ?: return@withContext
+        val parsed = runCatching { contentUri.toUri() }.getOrNull() ?: return@withContext
         if (parsed.scheme != "file") return@withContext
         val path = parsed.path ?: return@withContext
         val target = File(path)
@@ -528,7 +530,7 @@ class AudioImporter(
                     val scale = maxEdgePx.toFloat() / rawLongest.toFloat()
                     val targetW = (raw.width * scale).roundToInt().coerceAtLeast(1)
                     val targetH = (raw.height * scale).roundToInt().coerceAtLeast(1)
-                    val scaled = Bitmap.createScaledBitmap(raw, targetW, targetH, true)
+                    val scaled = raw.scale(targetW, targetH)
                     if (scaled !== raw) raw.recycle()
                     scaled
                 } else {
@@ -749,10 +751,8 @@ class AudioImporter(
     ): Track? {
         val localFile = if (uri.scheme == "file") uri.path?.let(::File) else null
         val docFile = if (localFile == null) DocumentFile.fromSingleUri(context, uri) else null
-        val fallbackName = (localFile?.nameWithoutExtension
-            ?: docFile?.name?.substringBeforeLast('.'))
-            ?.takeIf { it.isNotBlank() }
-            ?: "Pista local"
+        val rawFallbackName = localFile?.nameWithoutExtension ?: docFile?.name?.substringBeforeLast('.')
+        val fallbackName = rawFallbackName?.takeIf { it.isNotBlank() } ?: "Pista local"
         val sizeBytes = localFile?.length() ?: docFile?.length() ?: 0L
 
         return try {

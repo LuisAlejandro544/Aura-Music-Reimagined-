@@ -4,7 +4,7 @@
 //! una ilustración cuadrada única de alta calidad a partir del identificador determinista
 //! de la pista (título + artista + álbum). No utiliza IA ni red; todo se calcula localmente.
 
-use rand::{Rng, SeedableRng};
+use rand::{RngExt, SeedableRng};
 use rand_chacha::ChaCha8Rng;
 use sha2::{Digest, Sha256};
 use tiny_skia::{
@@ -102,7 +102,7 @@ pub fn render_procedural_cover(
     Some(pixmap.take())
 }
 
-fn draw_base_gradient<R: Rng>(
+fn draw_base_gradient<R: RngExt>(
     pixmap: &mut Pixmap,
     w: f32,
     h: f32,
@@ -171,11 +171,17 @@ fn draw_radial_glow(
             force_hq_pipeline: true,
             ..Paint::default()
         };
-        pixmap.fill_path(&path, &paint, FillRule::Winding, Transform::identity(), None);
+        pixmap.fill_path(
+            &path,
+            &paint,
+            FillRule::Winding,
+            Transform::identity(),
+            None,
+        );
     }
 }
 
-fn draw_aura_orbs<R: Rng>(
+fn draw_aura_orbs<R: RngExt>(
     pixmap: &mut Pixmap,
     w: f32,
     h: f32,
@@ -212,7 +218,7 @@ fn draw_aura_orbs<R: Rng>(
     }
 }
 
-fn draw_prism_horizon<R: Rng>(
+fn draw_prism_horizon<R: RngExt>(
     pixmap: &mut Pixmap,
     w: f32,
     h: f32,
@@ -251,8 +257,14 @@ fn draw_prism_horizon<R: Rng>(
 
         if let Some(path) = pb.finish() {
             let stops = vec![
-                GradientStop::new(0.0, AuraPalette::color_with_alpha(colors[i % colors.len()], 155)),
-                GradientStop::new(1.0, AuraPalette::color_with_alpha(colors[(i + 1) % colors.len()], 25)),
+                GradientStop::new(
+                    0.0,
+                    AuraPalette::color_with_alpha(colors[i % colors.len()], 155),
+                ),
+                GradientStop::new(
+                    1.0,
+                    AuraPalette::color_with_alpha(colors[(i + 1) % colors.len()], 25),
+                ),
             ];
             if let Some(shader) = LinearGradient::new(
                 Point::from_xy(x1, y1),
@@ -272,13 +284,19 @@ fn draw_prism_horizon<R: Rng>(
                     force_hq_pipeline: true,
                     ..Paint::default()
                 };
-                pixmap.fill_path(&path, &paint, FillRule::Winding, Transform::identity(), None);
+                pixmap.fill_path(
+                    &path,
+                    &paint,
+                    FillRule::Winding,
+                    Transform::identity(),
+                    None,
+                );
             }
         }
     }
 }
 
-fn draw_concentric_resonance<R: Rng>(
+fn draw_concentric_resonance<R: RngExt>(
     pixmap: &mut Pixmap,
     w: f32,
     h: f32,
@@ -288,8 +306,24 @@ fn draw_concentric_resonance<R: Rng>(
     let cx = w * rng.random_range(0.45..0.55);
     let cy = h * rng.random_range(0.45..0.55);
 
-    draw_radial_glow(pixmap, cx, cy, w * 0.62, palette.glow_accent, 190, BlendMode::Screen);
-    draw_radial_glow(pixmap, cx, cy, w * 0.34, palette.glow_primary, 150, BlendMode::Screen);
+    draw_radial_glow(
+        pixmap,
+        cx,
+        cy,
+        w * 0.62,
+        palette.glow_accent,
+        190,
+        BlendMode::Screen,
+    );
+    draw_radial_glow(
+        pixmap,
+        cx,
+        cy,
+        w * 0.34,
+        palette.glow_primary,
+        150,
+        BlendMode::Screen,
+    );
 
     let ring_count = rng.random_range(5..8);
     for i in 0..ring_count {
@@ -328,11 +362,17 @@ fn draw_concentric_resonance<R: Rng>(
             ..Paint::default()
         };
         paint.set_color(AuraPalette::color_with_alpha(palette.highlight, 235));
-        pixmap.fill_path(&core, &paint, FillRule::Winding, Transform::identity(), None);
+        pixmap.fill_path(
+            &core,
+            &paint,
+            FillRule::Winding,
+            Transform::identity(),
+            None,
+        );
     }
 }
 
-fn draw_topographic_waves<R: Rng>(
+fn draw_topographic_waves<R: RngExt>(
     pixmap: &mut Pixmap,
     w: f32,
     h: f32,
@@ -363,7 +403,8 @@ fn draw_topographic_waves<R: Rng>(
         for s in 1..=steps {
             let px = (s as f32 / steps as f32) * w;
             let wave = (px / w * std::f32::consts::TAU * 1.5 + phase).sin() * base_amp;
-            let wave2 = (px / w * std::f32::consts::TAU * 3.0 - phase * 0.5).cos() * (base_amp * 0.35);
+            let wave2 =
+                (px / w * std::f32::consts::TAU * 3.0 - phase * 0.5).cos() * (base_amp * 0.35);
             pb.line_to(px, y_base + wave + wave2);
         }
         pb.line_to(w, h);
@@ -393,13 +434,19 @@ fn draw_topographic_waves<R: Rng>(
                     force_hq_pipeline: true,
                     ..Paint::default()
                 };
-                pixmap.fill_path(&path, &paint, FillRule::Winding, Transform::identity(), None);
+                pixmap.fill_path(
+                    &path,
+                    &paint,
+                    FillRule::Winding,
+                    Transform::identity(),
+                    None,
+                );
             }
         }
     }
 }
 
-fn draw_bauhaus_geometry<R: Rng>(
+fn draw_bauhaus_geometry<R: RngExt>(
     pixmap: &mut Pixmap,
     w: f32,
     h: f32,
@@ -460,7 +507,13 @@ fn draw_bauhaus_geometry<R: Rng>(
                 force_hq_pipeline: true,
                 ..Paint::default()
             };
-            pixmap.fill_path(&circle, &paint, FillRule::Winding, Transform::identity(), None);
+            pixmap.fill_path(
+                &circle,
+                &paint,
+                FillRule::Winding,
+                Transform::identity(),
+                None,
+            );
         }
     }
 }
@@ -516,7 +569,7 @@ mod tests {
         // Verifica que el canal alfa sea 255 en todos los píxeles y exista variación cromática real.
         let mut min_r = 255u8;
         let mut max_r = 0u8;
-        for chunk in a.chunks_exact(4) {
+        for chunk in a.as_chunks::<4>().0 {
             assert_eq!(chunk[3], 255);
             min_r = min_r.min(chunk[0]);
             max_r = max_r.max(chunk[0]);

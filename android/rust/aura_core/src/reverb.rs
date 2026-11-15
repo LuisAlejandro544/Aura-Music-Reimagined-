@@ -299,8 +299,10 @@ impl AudioEffectsProcessor {
         self.warmth_active = cfg.slowed_warmth_enabled && warmth > 0.01;
         if self.warmth_active {
             // Barre la frecuencia de corte desde 15.5 kHz hasta 3.2 kHz para un sonido cálido tipo cinta.
-            let cutoff_hz = (15_500.0 - warmth * 12_300.0).clamp(2_400.0, self.sample_rate as f64 * 0.45);
-            let alpha = 1.0 - (-2.0 * std::f64::consts::PI * cutoff_hz / (self.sample_rate as f64)).exp();
+            let cutoff_hz =
+                (15_500.0 - warmth * 12_300.0).clamp(2_400.0, self.sample_rate as f64 * 0.45);
+            let alpha =
+                1.0 - (-2.0 * std::f64::consts::PI * cutoff_hz / (self.sample_rate as f64)).exp();
             self.warmth_alpha = alpha.clamp(0.02, 1.0);
         } else {
             self.warmth_alpha = 1.0;
@@ -341,7 +343,11 @@ impl AudioEffectsProcessor {
             for ch in 0..ch_count {
                 let prev = self.warmth_states[ch];
                 let filtered = prev + a * (samples[ch] - prev);
-                self.warmth_states[ch] = if filtered.abs() < 1e-15 { 0.0 } else { filtered };
+                self.warmth_states[ch] = if filtered.abs() < 1e-15 {
+                    0.0
+                } else {
+                    filtered
+                };
                 samples[ch] = filtered;
             }
         }
@@ -381,8 +387,12 @@ impl AudioEffectsProcessor {
                     self.reverb_damp1,
                     self.reverb_damp2,
                 );
-                samples[0] = dry_l * self.reverb_dry_gain + out_l * self.reverb_wet1 + out_r * self.reverb_wet2;
-                samples[1] = dry_r * self.reverb_dry_gain + out_r * self.reverb_wet1 + out_l * self.reverb_wet2;
+                samples[0] = dry_l * self.reverb_dry_gain
+                    + out_l * self.reverb_wet1
+                    + out_r * self.reverb_wet2;
+                samples[1] = dry_r * self.reverb_dry_gain
+                    + out_r * self.reverb_wet1
+                    + out_l * self.reverb_wet2;
             }
         }
     }

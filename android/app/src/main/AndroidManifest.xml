@@ -5,7 +5,8 @@
      (MANAGE_EXTERNAL_STORAGE / WRITE_EXTERNAL_STORAGE hasta Android 10) son totalmente
      opcionales y solo se usan si el usuario activa manualmente "Carpeta del sistema (Aura Music)"
      en Ajustes; nunca escanea todo el teléfono de forma automática. -->
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
 
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
@@ -20,7 +21,9 @@
     <uses-permission
         android:name="android.permission.WRITE_EXTERNAL_STORAGE"
         android:maxSdkVersion="29" />
-    <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE" />
+    <uses-permission
+        android:name="android.permission.MANAGE_EXTERNAL_STORAGE"
+        tools:ignore="ScopedStorage" />
 
     <application
         android:name=".AuraApplication"

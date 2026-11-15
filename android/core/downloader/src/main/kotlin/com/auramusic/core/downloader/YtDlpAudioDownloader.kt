@@ -665,7 +665,7 @@ class YtDlpAudioDownloader(
             val stamp = System.currentTimeMillis()
             // Preserva la miniatura fuera de preview_thumbs antes de limpiar la caché temporal.
             val stagedThumbPath = if (thumbFile != null && thumbFile.exists()) {
-                val stagedFile = File(pendingDir, "thumb_${stamp}_${seq}.img")
+                val stagedFile = File(pendingDir, "thumb_${stamp}_$seq.img")
                 runCatching {
                     thumbFile.copyTo(stagedFile, overwrite = true)
                     stagedFile.absolutePath
@@ -684,8 +684,8 @@ class YtDlpAudioDownloader(
                 durationMs = durationMs,
                 accentArgb = accentArgb,
             )
-            val descriptorFile = File(pendingDir, "dl_${stamp}_${seq}.json")
-            val tmpFile = File(pendingDir, "dl_${stamp}_${seq}.json.tmp")
+            val descriptorFile = File(pendingDir, "dl_${stamp}_$seq.json")
+            val tmpFile = File(pendingDir, "dl_${stamp}_$seq.json.tmp")
             tmpFile.writeText(descriptor.toJson())
             if (!tmpFile.renameTo(descriptorFile)) {
                 descriptorFile.writeText(descriptor.toJson())
@@ -824,7 +824,7 @@ class YtDlpAudioDownloader(
     class PyProgressBridge(
         private val onProgress: (String) -> Unit,
     ) {
-        @Suppress("unused")
+        @Suppress("unused", "ktlint:standard:function-naming")
         fun __call__(payloadJson: String) {
             onProgress(payloadJson)
         }
@@ -836,7 +836,7 @@ class YtDlpAudioDownloader(
     class PyCancelBridge(
         private val isCancelled: () -> Boolean,
     ) {
-        @Suppress("unused")
+        @Suppress("unused", "ktlint:standard:function-naming")
         fun __call__(): Boolean = isCancelled()
     }
 
@@ -862,7 +862,8 @@ class YtDlpAudioDownloader(
             return when {
                 msg.contains("Sign in to confirm", ignoreCase = true) ||
                     msg.contains("not a bot", ignoreCase = true) ->
-                    "YouTube bloqueó temporalmente esta IP pidiendo verificación antibot. Intenta actualizar yt-dlp/yt-dlp-ejs o cambiar de red."
+                    "YouTube bloqueó temporalmente esta IP pidiendo verificación antibot. " +
+                        "Intenta actualizar yt-dlp/yt-dlp-ejs o cambiar de red."
                 msg.contains("HTTP Error 403", ignoreCase = true) ->
                     "YouTube devolvió error 403. Prueba pulsar 'Actualizar ahora' para bajar el parche más reciente de yt-dlp y yt-dlp-ejs."
                 msg.contains("Unsupported URL", ignoreCase = true) ->

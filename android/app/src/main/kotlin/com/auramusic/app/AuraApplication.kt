@@ -58,7 +58,9 @@ import kotlinx.coroutines.launch
  *
  * Nunca inicializa Python/Chaquopy ni ExoPlayer local en este proceso.
  */
-class AuraAppContainer(context: Context) {
+class AuraAppContainer(
+    context: Context,
+) {
     val appContext: Context = context.applicationContext
 
     private val database by lazy {
@@ -146,7 +148,6 @@ private class PlayerProcessTuningBridge(
     private val outputMonitor: AuraAudioOutputMonitor,
     private val scope: CoroutineScope,
 ) : AuraPlaybackTuningProvider {
-
     private val initial = AuraPlayerConfigStore.readSnapshot(context)
     private val tuningFlow = MutableStateFlow(initial.playbackTuning)
     private val effectsFlow = MutableStateFlow(initial.audioEffects)
@@ -222,7 +223,6 @@ class AuraApplication :
     AuraDownloadHost,
     AuraPlaybackTuningProvider,
     SingletonImageLoader.Factory {
-
     lateinit var container: AuraAppContainer
         private set
 

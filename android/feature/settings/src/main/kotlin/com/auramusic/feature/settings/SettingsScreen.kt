@@ -93,10 +93,10 @@ fun SettingsScreen(
     dynamicCoverColorsEnabled: Boolean,
     deleteAnimationsEnabled: Boolean,
     rustEngineInfo: String,
+    modifier: Modifier = Modifier,
     onSelectAccent: (AppAccentColor) -> Unit = {},
     onToggleDynamicCoverColors: (Boolean) -> Unit = {},
     onToggleDeleteAnimations: (Boolean) -> Unit = {},
-    modifier: Modifier = Modifier,
     outputRoute: AudioOutputRouteState = AudioOutputRouteState(),
     headphonePreferences: HeadphonePreferences = HeadphonePreferences(),
     onSetAutoPauseOnDisconnect: (Boolean) -> Unit = {},
@@ -120,7 +120,8 @@ fun SettingsScreen(
         AudioOutputType.USB_HEADSET -> Icons.Rounded.Usb
         AudioOutputType.WIRED_HEADSET -> Icons.Rounded.Headphones
         AudioOutputType.SPEAKER,
-        AudioOutputType.OTHER -> Icons.Rounded.Speaker
+        AudioOutputType.OTHER,
+        -> Icons.Rounded.Speaker
     }
 
     val mediaButtonsSummary = buildList {
@@ -133,7 +134,8 @@ fun SettingsScreen(
         systemFolderState.isBusy ->
             "Sincronizando (${systemFolderState.processedCount}/${systemFolderState.totalCount})..."
         systemFolderState.isEnabled ->
-            "Activa • ${SystemFolderHelper.ROOT_FOLDER_NAME}/${SystemFolderHelper.MUSIC_SUBFOLDER_NAME} y ${SystemFolderHelper.COVERS_SUBFOLDER_NAME}"
+            "Activa • ${SystemFolderHelper.ROOT_FOLDER_NAME}/" +
+                "${SystemFolderHelper.MUSIC_SUBFOLDER_NAME} y ${SystemFolderHelper.COVERS_SUBFOLDER_NAME}"
         else ->
             "Desactivada • Solo almacenamiento interno privado"
     }
@@ -186,10 +188,12 @@ fun SettingsScreen(
             }
 
             item {
+                val coverStatus = if (dynamicCoverColorsEnabled) "Activo" else "Desactivado"
+                val deleteStatus = if (deleteAnimationsEnabled) "Rust activo" else "Instantáneo"
                 SettingsCategoryCard(
                     icon = Icons.Rounded.AutoAwesome,
                     title = "Colores dinámicos y animación al eliminar",
-                    subtitle = "Carátula: ${if (dynamicCoverColorsEnabled) "Activo" else "Desactivado"} • Eliminar: ${if (deleteAnimationsEnabled) "Rust activo" else "Instantáneo"}",
+                    subtitle = "Carátula: $coverStatus • Eliminar: $deleteStatus",
                     onClick = onOpenVisualEffects,
                 )
             }
@@ -256,7 +260,8 @@ fun SettingsScreen(
                             )
                             Spacer(modifier = Modifier.height(4.dp))
                             Text(
-                                text = "Incluye lectura de metadatos, carátulas procedurales, ecualizador de 10 bandas, crossfeed binaural, efectos visuales de eliminación y QuickJS-NG.",
+                                text = "Incluye lectura de metadatos, carátulas procedurales, ecualizador de " +
+                                    "10 bandas, crossfeed binaural, efectos visuales de eliminación y QuickJS-NG.",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
@@ -516,7 +521,10 @@ fun SettingsVisualEffectsScreen(
                             fontWeight = FontWeight.SemiBold,
                         )
                         Text(
-                            text = "Los colores dinámicos extraen la paleta dominante de la portada mediante Palette + MaterialKolor con transiciones suaves. Las animaciones de eliminación se procesan por píxel en Rust sobre DirectByteBuffer eligiendo al azar entre cenizas, papel quemándose o aura extraña.",
+                            text = "Los colores dinámicos extraen la paleta dominante de la portada mediante " +
+                                "Palette + MaterialKolor con transiciones suaves. Las animaciones de eliminación " +
+                                "se procesan por píxel en Rust sobre DirectByteBuffer eligiendo al azar entre " +
+                                "cenizas, papel quemándose o aura extraña.",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
@@ -884,17 +892,20 @@ fun SettingsSystemFolderScreen(
                         FolderStructureRow(
                             icon = Icons.Rounded.LibraryMusic,
                             title = "${SystemFolderHelper.ROOT_FOLDER_NAME}/${SystemFolderHelper.MUSIC_SUBFOLDER_NAME}",
-                            description = "Almacena tus canciones traspasadas, descargas y pistas nuevas. Si copias una canción aquí y abres Aura Music, aparecerá automáticamente.",
+                            description = "Almacena tus canciones traspasadas, descargas y pistas nuevas. " +
+                                "Si copias una canción aquí y abres Aura Music, aparecerá automáticamente.",
                         )
                         FolderStructureRow(
                             icon = Icons.Rounded.Image,
                             title = "${SystemFolderHelper.ROOT_FOLDER_NAME}/${SystemFolderHelper.COVERS_SUBFOLDER_NAME}",
-                            description = "Guarda las portadas embebidas, de galería (WebP) y procedurales con archivo .nomedia para no llenar tu galería.",
+                            description = "Guarda las portadas embebidas, de galería (WebP) y procedurales " +
+                                "con archivo .nomedia para no llenar tu galería.",
                         )
                         FolderStructureRow(
                             icon = Icons.Rounded.Description,
                             title = "${SystemFolderHelper.ROOT_FOLDER_NAME}/*.json",
-                            description = "Respaldo legible de tu biblioteca (${SystemFolderHelper.LIBRARY_JSON_FILE_NAME}) y configuración de audio (${SystemFolderHelper.PLAYER_CONFIG_JSON_FILE_NAME}).",
+                            description = "Respaldo legible de tu biblioteca (${SystemFolderHelper.LIBRARY_JSON_FILE_NAME}) " +
+                                "y configuración de audio (${SystemFolderHelper.PLAYER_CONFIG_JSON_FILE_NAME}).",
                         )
                     }
                 }
@@ -917,7 +928,9 @@ fun SettingsSystemFolderScreen(
                                 fontWeight = FontWeight.SemiBold,
                             )
                             Text(
-                                text = "Android requiere autorizar el acceso a archivos del sistema para que Aura Music cree la carpeta raíz /Aura Music y detecte canciones copiadas desde tu explorador.",
+                                text = "Android requiere autorizar el acceso a archivos del sistema para que " +
+                                    "Aura Music cree la carpeta raíz /Aura Music y detecte canciones " +
+                                    "copiadas desde tu explorador.",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
@@ -972,7 +985,8 @@ fun SettingsSystemFolderScreen(
                         )
                         Spacer(modifier = Modifier.width(10.dp))
                         Text(
-                            text = "Si desactivas esta opción más adelante, Aura Music conservará intactos todos tus archivos en la carpeta /Aura Music sin borrar nada.",
+                            text = "Si desactivas esta opción más adelante, Aura Music conservará intactos " +
+                                "todos tus archivos en la carpeta /Aura Music sin borrar nada.",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
@@ -1176,7 +1190,8 @@ private fun HeadphoneOutputSettingsCard(
         AudioOutputType.USB_HEADSET -> Icons.Rounded.Usb
         AudioOutputType.WIRED_HEADSET -> Icons.Rounded.Headphones
         AudioOutputType.SPEAKER,
-        AudioOutputType.OTHER -> Icons.Rounded.Speaker
+        AudioOutputType.OTHER,
+        -> Icons.Rounded.Speaker
     }
 
     Surface(
@@ -1406,7 +1421,7 @@ private fun MediaButtonsTuningCard(
                 ) {
                     HeadphonePreferences.SEEK_STEP_OPTIONS_SECONDS.forEach { seconds ->
                         val selected = prefs.seekStepSeconds == seconds
-                        val label = "${seconds} s"
+                        val label = "$seconds s"
                         if (selected) {
                             FilledTonalButton(
                                 onClick = { onSetSeekStepSeconds(seconds) },

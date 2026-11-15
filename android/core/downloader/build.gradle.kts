@@ -2,13 +2,12 @@
 // y ejecución JS sobre QuickJS-NG compilado en Rust (32 y 64 bits).
 plugins {
     alias(libs.plugins.android.library)
-    alias(libs.plugins.kotlin.android)
     alias(libs.plugins.chaquopy)
 }
 
 android {
     namespace = "com.auramusic.core.downloader"
-    compileSdk = 35
+    compileSdk = 36
 
     defaultConfig {
         minSdk = 26
@@ -29,8 +28,14 @@ android {
         targetCompatibility = JavaVersion.VERSION_17
     }
 
-    kotlinOptions {
-        jvmTarget = "17"
+    lint {
+        disable.add("ChromeOsAbiSupport")
+    }
+}
+
+kotlin {
+    compilerOptions {
+        jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17)
     }
 }
 

@@ -11,6 +11,7 @@ import android.os.Environment
 import android.provider.Settings
 import android.webkit.MimeTypeMap
 import androidx.core.content.ContextCompat
+import androidx.core.net.toUri
 import androidx.documentfile.provider.DocumentFile
 import com.auramusic.core.database.MusicRepository
 import com.auramusic.core.database.StoragePreferencesRepository
@@ -279,7 +280,7 @@ class AuraSystemStorageManager(
         var migratedCount = 0
 
         allTracks.forEachIndexed { index, track ->
-            val currentUri = runCatching { Uri.parse(track.contentUri) }.getOrNull()
+            val currentUri = runCatching { track.contentUri.toUri() }.getOrNull()
             var nextContentUri = track.contentUri
             var oldManagedAudioToDelete: File? = null
 
@@ -301,10 +302,11 @@ class AuraSystemStorageManager(
                     if (currentUri.scheme == "file" && currentUri.path != null) {
                         val oldFile = File(currentUri.path!!)
                         val oldCanonical = runCatching { oldFile.canonicalPath }.getOrNull()
-                        val isOwned = oldCanonical != null && (
-                            (ownedDownloadDir != null && oldCanonical.startsWith(ownedDownloadDir + File.separator)) ||
-                                (ownedOpenedDir != null && oldCanonical.startsWith(ownedOpenedDir + File.separator))
-                            )
+                        val inDownloadsDir = ownedDownloadDir != null &&
+                            oldCanonical?.startsWith(ownedDownloadDir + File.separator) == true
+                        val inOpenedDir = ownedOpenedDir != null &&
+                            oldCanonical?.startsWith(ownedOpenedDir + File.separator) == true
+                        val isOwned = inDownloadsDir || inOpenedDir
                         if (isOwned && oldCanonical != runCatching { destFile.canonicalPath }.getOrNull()) {
                             oldManagedAudioToDelete = oldFile
                         }
@@ -454,7 +456,7 @@ class AuraSystemStorageManager(
                 JSONArray().apply {
                     for (track in tracks) {
                         val audioFileName = runCatching {
-                            Uri.parse(track.contentUri).path?.let { File(it).name }
+                            track.contentUri.toUri().path?.let { File(it).name }
                         }.getOrNull().orEmpty()
                         val coverFileName = track.coverFilePath?.let { File(it).name }.orEmpty()
                         put(
@@ -656,8 +658,8 @@ class AuraSystemStorageManager(
          * Verifica si la app cuenta con acceso de escritura a la carpeta pública `Aura Music`
          * en Android 8–10 (`READ/WRITE_EXTERNAL_STORAGE`) y Android 11–15 (`MANAGE_EXTERNAL_STORAGE`).
          */
-        fun hasStoragePermission(context: Context): Boolean {
-            return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+        fun hasStoragePermission(context: Context): Boolean =
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
                 Environment.isExternalStorageManager()
             } else {
                 val readOk = ContextCompat.checkSelfPermission(
@@ -670,24 +672,22 @@ class AuraSystemStorageManager(
                 ) == PackageManager.PERMISSION_GRANTED
                 readOk && writeOk
             }
-        }
 
         /**
          * Construye el Intent del sistema para conceder acceso total a archivos en Android 11+ (API 30+),
          * con respaldo seguro en caso de ROMs personalizadas.
          */
-        fun buildManageAllFilesIntent(context: Context): Intent {
-            return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+        fun buildManageAllFilesIntent(context: Context): Intent =
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
                 Intent(
                     Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION,
-                    Uri.parse("package:${context.packageName}"),
+                    "package:${context.packageName}".toUri(),
                 )
             } else {
                 Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
-                    data = Uri.parse("package:${context.packageName}")
+                    data = "package:${context.packageName}".toUri()
                 }
             }
-        }
 
         fun legacyStoragePermissions(): Array<String> = arrayOf(
             Manifest.permission.READ_EXTERNAL_STORAGE,

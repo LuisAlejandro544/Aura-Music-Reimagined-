@@ -9,7 +9,6 @@ import org.junit.Test
  * Pruebas unitarias puras para validación de URLs y traducción legible de errores de descarga.
  */
 class YtDlpUrlValidatorTest {
-
     @Test
     fun acceptsValidHttpAndHttpsUrlsAndRejectsMalformedInputs() {
         assertEquals(

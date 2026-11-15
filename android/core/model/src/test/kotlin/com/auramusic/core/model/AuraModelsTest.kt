@@ -9,7 +9,6 @@ import org.junit.Test
  * Pruebas unitarias de reglas puras del dominio de Aura Music.
  */
 class AuraModelsTest {
-
     @Test
     fun `progressFraction clamps cleanly between 0 and 1`() {
         val track = Track(

@@ -141,7 +141,8 @@ fun QueueScreen(
                         )
                         Spacer(modifier = Modifier.height(6.dp))
                         Text(
-                            text = "Reproduce una canción, abre una playlist o usa 'Reproducir siguiente' y 'Añadir a la cola' desde el menú de cualquier pista.",
+                            text = "Reproduce una canción, abre una playlist o usa 'Reproducir siguiente' " +
+                                "y 'Añadir a la cola' desde el menú de cualquier pista.",
                             style = MaterialTheme.typography.bodyMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )

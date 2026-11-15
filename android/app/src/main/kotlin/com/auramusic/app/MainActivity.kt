@@ -24,7 +24,6 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
  * datos locales y monta la navegación modular de Jetpack Compose.
  */
 class MainActivity : ComponentActivity() {
-
     private val viewModel: AuraViewModel by viewModels {
         AuraViewModel.Factory((application as AuraApplication).container)
     }
@@ -102,4 +101,3 @@ class MainActivity : ComponentActivity() {
         }
     }
 }
-

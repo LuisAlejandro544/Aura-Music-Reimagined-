@@ -2,8 +2,6 @@ package com.auramusic.core.database
 
 import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
-import org.json.JSONObject
-import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -13,7 +11,6 @@ import java.io.File
  * Pruebas unitarias de la cadena de migraciones y esquemas versionados de Room para Aura Music.
  */
 class AuraMigrationsTest {
-
     @Test
     fun currentDatabaseVersionHasValidMigrationChain() {
         assertTrue(AuraMigrations.validateMigrationChain())
@@ -42,14 +39,18 @@ class AuraMigrationsTest {
         val schemaFile = candidates.firstOrNull { it.exists() }
         assertTrue("Debe existir el esquema Room versionado en $relativeSchema", schemaFile != null)
 
-        val root = JSONObject(schemaFile!!.readText())
-        val database = root.getJSONObject("database")
-        assertEquals(AuraMigrations.CURRENT_DATABASE_VERSION, database.getInt("version"))
-
-        val entities = database.getJSONArray("entities")
-        val tableNames = (0 until entities.length()).map { idx ->
-            entities.getJSONObject(idx).getString("tableName")
-        }.toSet()
-        assertTrue(tableNames.containsAll(setOf("tracks", "playlists", "playlist_tracks")))
+        // En unit tests JVM locales sin Robolectric, org.json.JSONObject lanza stub "not mocked".
+        // Validamos la estructura JSON del esquema generado por Room en Kotlin puro.
+        val rawJson = schemaFile!!.readText()
+        assertTrue(
+            "El esquema debe declarar version = ${AuraMigrations.CURRENT_DATABASE_VERSION}",
+            Regex(""""version"\s*:\s*${AuraMigrations.CURRENT_DATABASE_VERSION}\b""").containsMatchIn(rawJson),
+        )
+        for (expectedTable in listOf("tracks", "playlists", "playlist_tracks")) {
+            assertTrue(
+                "El esquema debe contener la tabla $expectedTable",
+                Regex(""""tableName"\s*:\s*"$expectedTable"""").containsMatchIn(rawJson),
+            )
+        }
     }
 }

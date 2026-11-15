@@ -141,23 +141,23 @@ class AuraAudioOutputMonitor(
         return false
     }
 
-    private fun isUsbHeadphoneDevice(device: AudioDeviceInfo): Boolean {
-        return when (device.type) {
+    private fun isUsbHeadphoneDevice(device: AudioDeviceInfo): Boolean =
+        when (device.type) {
             AudioDeviceInfo.TYPE_USB_HEADSET,
             AudioDeviceInfo.TYPE_USB_DEVICE,
-            AudioDeviceInfo.TYPE_USB_ACCESSORY -> true
+            AudioDeviceInfo.TYPE_USB_ACCESSORY,
+            -> true
             else -> false
         }
-    }
 
-    private fun isWiredHeadphoneDevice(device: AudioDeviceInfo): Boolean {
-        return when (device.type) {
+    private fun isWiredHeadphoneDevice(device: AudioDeviceInfo): Boolean =
+        when (device.type) {
             AudioDeviceInfo.TYPE_WIRED_HEADSET,
             AudioDeviceInfo.TYPE_WIRED_HEADPHONES,
-            AudioDeviceInfo.TYPE_LINE_ANALOG -> true
+            AudioDeviceInfo.TYPE_LINE_ANALOG,
+            -> true
             else -> false
         }
-    }
 
     private fun isExternalOtherOutput(device: AudioDeviceInfo): Boolean {
         val type = device.type
@@ -168,7 +168,8 @@ class AuraAudioOutputMonitor(
             AudioDeviceInfo.TYPE_AUX_LINE,
             AudioDeviceInfo.TYPE_HDMI,
             AudioDeviceInfo.TYPE_HDMI_ARC,
-            AudioDeviceInfo.TYPE_LINE_DIGITAL -> true
+            AudioDeviceInfo.TYPE_LINE_DIGITAL,
+            -> true
             else -> false
         }
     }

@@ -121,8 +121,8 @@ object AuraDownloaderIpc {
         return obj.toString()
     }
 
-    fun downloadStateFromJson(raw: String): DownloadState {
-        return runCatching {
+    fun downloadStateFromJson(raw: String): DownloadState =
+        runCatching {
             val obj = JSONObject(raw)
             val statusName = obj.optString("status", DownloadStatus.IDLE.name)
             val status = runCatching { DownloadStatus.valueOf(statusName) }.getOrDefault(DownloadStatus.IDLE)
@@ -142,10 +142,9 @@ object AuraDownloaderIpc {
                 lastCompletedTrack = trackObj?.let(::trackFromJsonObject),
             )
         }.getOrDefault(DownloadState())
-    }
 
-    fun engineStatusToJson(status: DownloaderEngineStatus): String {
-        return JSONObject().apply {
+    fun engineStatusToJson(status: DownloaderEngineStatus): String =
+        JSONObject().apply {
             put("pythonVersion", status.pythonVersion)
             put("ytDlpVersion", status.ytDlpVersion)
             put("ytDlpEjsVersion", status.ytDlpEjsVersion)
@@ -157,10 +156,9 @@ object AuraDownloaderIpc {
             put("autoUpdateEnabled", status.autoUpdateEnabled)
             put("preferredQuality", status.preferredQuality.key)
         }.toString()
-    }
 
-    fun engineStatusFromJson(raw: String): DownloaderEngineStatus {
-        return runCatching {
+    fun engineStatusFromJson(raw: String): DownloaderEngineStatus =
+        runCatching {
             val obj = JSONObject(raw)
             DownloaderEngineStatus(
                 pythonVersion = obj.optString("pythonVersion", "Python 3.11 (ligero)"),
@@ -175,7 +173,6 @@ object AuraDownloaderIpc {
                 preferredQuality = AudioDownloadQuality.fromKey(obj.optString("preferredQuality")),
             )
         }.getOrDefault(DownloaderEngineStatus())
-    }
 
     fun previewToJson(preview: DownloadPreview): String = previewToJsonObject(preview).toString()
 

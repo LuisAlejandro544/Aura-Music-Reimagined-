@@ -323,7 +323,13 @@ fun SleepTimerBottomSheet(
                             singleLine = true,
                             isError = customInputHasError,
                             supportingText = if (customInputHasError) {
-                                { Text("Ingresa un número entre ${SleepTimerHelper.MIN_CUSTOM_MINUTES} y ${SleepTimerHelper.MAX_CUSTOM_MINUTES}") }
+                                {
+                                    Text(
+                                        "Ingresa un número entre " +
+                                            "${SleepTimerHelper.MIN_CUSTOM_MINUTES} y " +
+                                            "${SleepTimerHelper.MAX_CUSTOM_MINUTES}",
+                                    )
+                                }
                             } else {
                                 null
                             },

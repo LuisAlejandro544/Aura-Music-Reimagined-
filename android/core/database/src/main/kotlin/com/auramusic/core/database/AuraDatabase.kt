@@ -21,7 +21,6 @@ data class TrackIdentityRow(
  */
 @Dao
 interface TrackDao {
-
     @Query("SELECT * FROM tracks ORDER BY added_at DESC, title ASC")
     fun observeAllTracks(): Flow<List<TrackEntity>>
 
@@ -79,7 +78,6 @@ interface TrackDao {
  */
 @Dao
 interface PlaylistDao {
-
     @Query(
         """
         SELECT p.id, p.name, p.created_at,
@@ -139,5 +137,6 @@ interface PlaylistDao {
 )
 abstract class AuraDatabase : RoomDatabase() {
     abstract fun trackDao(): TrackDao
+
     abstract fun playlistDao(): PlaylistDao
 }

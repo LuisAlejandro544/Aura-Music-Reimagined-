@@ -15,7 +15,6 @@ import androidx.sqlite.db.SupportSQLiteDatabase
  *    protegiendo así las canciones, "Me gusta" y playlists del usuario al actualizar el APK.
  */
 object AuraMigrations {
-
     const val CURRENT_DATABASE_VERSION: Int = 1
 
     /**

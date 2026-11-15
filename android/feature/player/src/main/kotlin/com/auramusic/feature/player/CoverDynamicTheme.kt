@@ -88,7 +88,7 @@ fun CoverDynamicTheme(
         } else {
             val file = File(coverPath)
             if (file.exists() && file.isFile) {
-                "${coverPath}#${file.lastModified()}"
+                "$coverPath#${file.lastModified()}"
             } else {
                 null
             }

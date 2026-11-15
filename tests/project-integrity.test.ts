@@ -88,7 +88,7 @@ test('no forbidden persist.sys properties or third-party trademark names in sour
   for (const d of scanDirs) walk(d);
 });
 
-test('GitHub Action apk Debug is manual-only, zero-cache, and uses Gradle 8.14.7', () => {
+test('GitHub Action apk Debug is manual-only, zero-cache, and uses Gradle 9.9.1', () => {
   const workflow = fs.readFileSync(
     path.join(rootDir, '.github/workflows/build-android-apk.yml'),
     'utf8',
@@ -106,11 +106,11 @@ test('GitHub Action apk Debug is manual-only, zero-cache, and uses Gradle 8.14.7
   assert.match(workflow, /--no-build-cache/);
   assert.match(workflow, /cargo fetch/);
   assert.match(workflow, /assembleDebug/);
-  assert.match(workflow, /8\.14\.7/);
+  assert.match(workflow, /9\.9\.1/);
   assert.match(workflow, /android-actions\/setup-android@v4/);
-  assert.match(workflow, /platforms;android-35/);
+  assert.match(workflow, /platforms;android-36/);
   assert.doesNotMatch(workflow, /^\s*tools$/m);
-  assert.match(wrapperProps, /gradle-8\.14\.7-bin\.zip/);
+  assert.match(wrapperProps, /gradle-9\.9\.1-bin\.zip/);
   assert.ok(
     fs.existsSync(path.join(rootDir, 'android/gradle/wrapper/gradle-wrapper.jar')),
     'gradle-wrapper.jar must be committed so gradlew works everywhere',
@@ -885,11 +885,11 @@ test('Disco Local con Aura SVG logo and adaptive/notification drawables are wire
   const monoXml = path.join(rootDir, 'android/app/src/main/res/drawable/ic_launcher_monochrome.xml');
   const brandXml = path.join(rootDir, 'android/app/src/main/res/drawable/ic_aura_brand_logo.xml');
   const launcherXml = fs.readFileSync(
-    path.join(rootDir, 'android/app/src/main/res/mipmap-anydpi-v26/ic_launcher.xml'),
+    path.join(rootDir, 'android/app/src/main/res/mipmap-anydpi/ic_launcher.xml'),
     'utf8',
   );
   const launcherRoundXml = fs.readFileSync(
-    path.join(rootDir, 'android/app/src/main/res/mipmap-anydpi-v26/ic_launcher_round.xml'),
+    path.join(rootDir, 'android/app/src/main/res/mipmap-anydpi/ic_launcher_round.xml'),
     'utf8',
   );
   const playerNotifXml = fs.readFileSync(
@@ -1039,7 +1039,7 @@ test('audio downloader supports preferred quality presets and real format/bitrat
   assert.match(pyScript, /def _build_format_selector/);
   assert.match(pyScript, /def _extract_available_audio_formats/);
   assert.match(pyScript, /"available_formats":\s*available_formats/);
-  assert.match(pyScript, /format_id:\s*Optional\[str\]\s*=\s*None/);
+  assert.match(pyScript, /format_id:\s*str\s*\|\s*None\s*=\s*None/);
 
   assert.match(downloaderKt, /suspend fun setPreferredAudioQuality/);
   assert.match(downloaderKt, /fun selectPreviewAudioFormat/);

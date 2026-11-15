@@ -16,12 +16,20 @@ import kotlinx.coroutines.flow.emptyFlow
  */
 interface AuraPlaybackTuningProvider {
     fun observePlaybackTuning(): Flow<PlaybackTuning>
+
     fun observeAudioEffects(): Flow<AudioEffectsState> = emptyFlow()
+
     fun observeHeadphonePreferences(): Flow<HeadphonePreferences> = emptyFlow()
+
     fun observeAudioOutputRoute(): Flow<AudioOutputRouteState> = emptyFlow()
+
     fun createOpenPlayerIntent(): Intent? = null
+
     fun onSyncEqualizer(state: EqualizerState) {}
+
     fun onSyncAudioEffects(state: AudioEffectsState) {}
+
     fun onSyncPlaybackTuning(tuning: PlaybackTuning) {}
+
     fun onSyncHeadphonePreferences(prefs: HeadphonePreferences) {}
 }

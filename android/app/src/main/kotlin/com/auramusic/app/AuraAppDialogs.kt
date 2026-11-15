@@ -154,7 +154,9 @@ private fun EditTrackMetadataDialog(
                 )
 
                 Text(
-                    text = "Si dejas el artista vacío se guardará como «${TrackMetadataHelper.DEFAULT_ARTIST}». Los cambios actualizan al instante la biblioteca, artistas y notificación.",
+                    text = "Si dejas el artista vacío se guardará como " +
+                        "«${TrackMetadataHelper.DEFAULT_ARTIST}». " +
+                        "Los cambios actualizan al instante la biblioteca, artistas y notificación.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )

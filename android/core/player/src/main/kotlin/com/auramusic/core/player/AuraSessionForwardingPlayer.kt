@@ -24,7 +24,6 @@ internal class SessionControlForwardingPlayer(
     private val wrapped: ExoPlayer,
     private val headphonePrefsProvider: () -> HeadphonePreferences,
 ) : ForwardingPlayer(wrapped) {
-
     private val listenerWrappers = IdentityHashMap<Player.Listener, Player.Listener>()
 
     private fun extendCommands(base: Player.Commands): Player.Commands {
@@ -41,21 +40,19 @@ internal class SessionControlForwardingPlayer(
             .build()
     }
 
-    override fun getAvailableCommands(): Player.Commands {
-        return extendCommands(super.getAvailableCommands())
-    }
+    override fun getAvailableCommands(): Player.Commands = extendCommands(super.getAvailableCommands())
 
-    override fun isCommandAvailable(command: Int): Boolean {
-        return when (command) {
+    override fun isCommandAvailable(command: Int): Boolean =
+        when (command) {
             COMMAND_SEEK_TO_PREVIOUS,
             COMMAND_SEEK_TO_PREVIOUS_MEDIA_ITEM,
             COMMAND_SEEK_TO_NEXT,
             COMMAND_SEEK_TO_NEXT_MEDIA_ITEM,
             COMMAND_SEEK_FORWARD,
-            COMMAND_SEEK_BACK -> wrapped.mediaItemCount > 0 || super.isCommandAvailable(command)
+            COMMAND_SEEK_BACK,
+            -> wrapped.mediaItemCount > 0 || super.isCommandAvailable(command)
             else -> super.isCommandAvailable(command)
         }
-    }
 
     override fun addListener(listener: Player.Listener) {
         val wrapper = synchronized(listenerWrappers) {
@@ -73,17 +70,15 @@ internal class SessionControlForwardingPlayer(
         super.removeListener(wrapper ?: listener)
     }
 
-    override fun getSeekForwardIncrement(): Long {
-        return HeadphoneRoutingHelper.clampSeekStepSeconds(
+    override fun getSeekForwardIncrement(): Long =
+        HeadphoneRoutingHelper.clampSeekStepSeconds(
             headphonePrefsProvider().seekStepSeconds,
         ) * 1000L
-    }
 
-    override fun getSeekBackIncrement(): Long {
-        return HeadphoneRoutingHelper.clampSeekStepSeconds(
+    override fun getSeekBackIncrement(): Long =
+        HeadphoneRoutingHelper.clampSeekStepSeconds(
             headphonePrefsProvider().seekStepSeconds,
         ) * 1000L
-    }
 
     override fun seekForward() {
         val incrementMs = getSeekForwardIncrement()
@@ -168,7 +163,6 @@ internal class ExtendedCommandsListener(
     private val delegate: Player.Listener,
     private val extend: (Player.Commands) -> Player.Commands,
 ) : InvocationHandler {
-
     override fun invoke(proxy: Any, method: Method, args: Array<out Any?>?): Any? {
         if (method.declaringClass == Any::class.java) {
             return when (method.name) {
@@ -217,12 +211,11 @@ internal class ExtendedCommandsListener(
         fun createProxy(
             delegate: Player.Listener,
             extend: (Player.Commands) -> Player.Commands,
-        ): Player.Listener {
-            return Proxy.newProxyInstance(
+        ): Player.Listener =
+            Proxy.newProxyInstance(
                 Player.Listener::class.java.classLoader,
                 arrayOf(Player.Listener::class.java),
                 ExtendedCommandsListener(delegate, extend),
             ) as Player.Listener
-        }
     }
 }

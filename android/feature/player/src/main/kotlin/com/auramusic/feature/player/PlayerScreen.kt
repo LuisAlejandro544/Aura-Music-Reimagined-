@@ -100,12 +100,12 @@ import kotlin.math.roundToInt
 @Composable
 fun MiniPlayerBar(
     playbackState: PlaybackState,
-    dynamicCoverColorsEnabled: Boolean = true,
     onOpenFullPlayer: () -> Unit,
     onTogglePlayPause: () -> Unit,
     onSkipNext: () -> Unit,
     onToggleLike: (Long) -> Unit,
     modifier: Modifier = Modifier,
+    dynamicCoverColorsEnabled: Boolean = true,
 ) {
     val track = playbackState.currentTrack ?: return
 
@@ -128,80 +128,80 @@ fun MiniPlayerBar(
             shadowElevation = 6.dp,
         ) {
             Column {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 10.dp, vertical = 8.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                SquareCoverArt(
-                    coverPath = track.coverFilePath,
-                    contentDescription = track.title,
-                    modifier = Modifier.size(48.dp),
-                    cornerRadiusDp = 10,
-                )
-
-                Spacer(modifier = Modifier.width(12.dp))
-
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        text = track.title,
-                        style = MaterialTheme.typography.titleSmall,
-                        fontWeight = FontWeight.SemiBold,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                    Text(
-                        text = track.artist,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                }
-
-                IconButton(onClick = { onToggleLike(track.id) }) {
-                    Icon(
-                        imageVector = if (track.isLiked) Icons.Rounded.Favorite else Icons.Rounded.FavoriteBorder,
-                        contentDescription = if (track.isLiked) "Quitar me gusta" else "Me gusta",
-                        tint = if (track.isLiked) {
-                            MaterialTheme.colorScheme.primary
-                        } else {
-                            MaterialTheme.colorScheme.onSurfaceVariant
-                        },
-                    )
-                }
-
-                FilledIconButton(
-                    onClick = onTogglePlayPause,
-                    modifier = Modifier.size(40.dp),
-                    colors = IconButtonDefaults.filledIconButtonColors(
-                        containerColor = MaterialTheme.colorScheme.primary,
-                        contentColor = MaterialTheme.colorScheme.onPrimary,
-                    ),
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 10.dp, vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    Icon(
-                        imageVector = if (playbackState.isPlaying) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
-                        contentDescription = if (playbackState.isPlaying) "Pausar" else "Reproducir",
+                    SquareCoverArt(
+                        coverPath = track.coverFilePath,
+                        contentDescription = track.title,
+                        modifier = Modifier.size(48.dp),
+                        cornerRadiusDp = 10,
                     )
+
+                    Spacer(modifier = Modifier.width(12.dp))
+
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = track.title,
+                            style = MaterialTheme.typography.titleSmall,
+                            fontWeight = FontWeight.SemiBold,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                        Text(
+                            text = track.artist,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+
+                    IconButton(onClick = { onToggleLike(track.id) }) {
+                        Icon(
+                            imageVector = if (track.isLiked) Icons.Rounded.Favorite else Icons.Rounded.FavoriteBorder,
+                            contentDescription = if (track.isLiked) "Quitar me gusta" else "Me gusta",
+                            tint = if (track.isLiked) {
+                                MaterialTheme.colorScheme.primary
+                            } else {
+                                MaterialTheme.colorScheme.onSurfaceVariant
+                            },
+                        )
+                    }
+
+                    FilledIconButton(
+                        onClick = onTogglePlayPause,
+                        modifier = Modifier.size(40.dp),
+                        colors = IconButtonDefaults.filledIconButtonColors(
+                            containerColor = MaterialTheme.colorScheme.primary,
+                            contentColor = MaterialTheme.colorScheme.onPrimary,
+                        ),
+                    ) {
+                        Icon(
+                            imageVector = if (playbackState.isPlaying) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
+                            contentDescription = if (playbackState.isPlaying) "Pausar" else "Reproducir",
+                        )
+                    }
+
+                    IconButton(onClick = onSkipNext) {
+                        Icon(
+                            imageVector = Icons.Rounded.SkipNext,
+                            contentDescription = "Siguiente canción",
+                        )
+                    }
                 }
 
-                IconButton(onClick = onSkipNext) {
-                    Icon(
-                        imageVector = Icons.Rounded.SkipNext,
-                        contentDescription = "Siguiente canción",
-                    )
-                }
-            }
-
-            LinearProgressIndicator(
-                progress = { playbackState.progressFraction },
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(3.dp),
-                color = MaterialTheme.colorScheme.primary,
-                trackColor = MaterialTheme.colorScheme.surfaceContainerHighest,
-            )
+                LinearProgressIndicator(
+                    progress = { playbackState.progressFraction },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(3.dp),
+                    color = MaterialTheme.colorScheme.primary,
+                    trackColor = MaterialTheme.colorScheme.surfaceContainerHighest,
+                )
             }
         }
     }
@@ -258,559 +258,559 @@ fun PlayerScreen(
         Scaffold(
             containerColor = MaterialTheme.colorScheme.background,
             topBar = {
-            TopAppBar(
-                title = {
-                    Column {
-                        Text(
-                            text = "REPRODUCIENDO AHORA",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.primary,
-                            fontWeight = FontWeight.Bold,
-                            maxLines = 1,
-                            softWrap = false,
-                            overflow = TextOverflow.Ellipsis,
-                        )
-                        Text(
-                            text = track?.album ?: "Aura Music",
-                            style = MaterialTheme.typography.titleSmall,
-                            maxLines = 1,
-                            softWrap = false,
-                            overflow = TextOverflow.Ellipsis,
-                        )
-                    }
-                },
-                navigationIcon = {
-                    IconButton(onClick = onCollapse) {
-                        Icon(
-                            imageVector = Icons.Rounded.KeyboardArrowDown,
-                            contentDescription = "Minimizar reproductor",
-                            modifier = Modifier.size(30.dp),
-                        )
-                    }
-                },
-                actions = {
-                    Box {
-                        IconButton(onClick = { showOptionsMenu = true }) {
-                            Icon(
-                                imageVector = Icons.Rounded.MoreVert,
-                                contentDescription = "Opciones del reproductor",
+                TopAppBar(
+                    title = {
+                        Column {
+                            Text(
+                                text = "REPRODUCIENDO AHORA",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.primary,
+                                fontWeight = FontWeight.Bold,
+                                maxLines = 1,
+                                softWrap = false,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                            Text(
+                                text = track?.album ?: "Aura Music",
+                                style = MaterialTheme.typography.titleSmall,
+                                maxLines = 1,
+                                softWrap = false,
+                                overflow = TextOverflow.Ellipsis,
                             )
                         }
-
-                        DropdownMenu(
-                            expanded = showOptionsMenu,
-                            onDismissRequest = { showOptionsMenu = false },
-                        ) {
-                            val effectivePitch = if (playbackTuning.linkPitchToSpeed) {
-                                playbackTuning.playbackSpeed
-                            } else {
-                                playbackTuning.playbackPitch
+                    },
+                    navigationIcon = {
+                        IconButton(onClick = onCollapse) {
+                            Icon(
+                                imageVector = Icons.Rounded.KeyboardArrowDown,
+                                contentDescription = "Minimizar reproductor",
+                                modifier = Modifier.size(30.dp),
+                            )
+                        }
+                    },
+                    actions = {
+                        Box {
+                            IconButton(onClick = { showOptionsMenu = true }) {
+                                Icon(
+                                    imageVector = Icons.Rounded.MoreVert,
+                                    contentDescription = "Opciones del reproductor",
+                                )
                             }
-                            val hasCustomPitch = !audioEffects.slowedEnabled &&
-                                kotlin.math.abs(effectivePitch - 1.0f) > 0.01f
-                            val hasCustomSpeed = !audioEffects.slowedEnabled &&
-                                kotlin.math.abs(playbackTuning.playbackSpeed - 1.0f) > 0.01f
-                            val hasCustomTuning =
-                                hasCustomSpeed ||
-                                    hasCustomPitch ||
-                                    playbackTuning.linkPitchToSpeed ||
-                                    playbackTuning.crossfadeEnabled
-                            val tuningLabel = if (hasCustomTuning) {
-                                val parts = buildList {
-                                    if (hasCustomSpeed) {
-                                        add(PlaybackTuningHelper.formatSpeedLabel(playbackTuning.playbackSpeed))
+
+                            DropdownMenu(
+                                expanded = showOptionsMenu,
+                                onDismissRequest = { showOptionsMenu = false },
+                            ) {
+                                val effectivePitch = if (playbackTuning.linkPitchToSpeed) {
+                                    playbackTuning.playbackSpeed
+                                } else {
+                                    playbackTuning.playbackPitch
+                                }
+                                val hasCustomPitch = !audioEffects.slowedEnabled &&
+                                    kotlin.math.abs(effectivePitch - 1.0f) > 0.01f
+                                val hasCustomSpeed = !audioEffects.slowedEnabled &&
+                                    kotlin.math.abs(playbackTuning.playbackSpeed - 1.0f) > 0.01f
+                                val hasCustomTuning =
+                                    hasCustomSpeed ||
+                                        hasCustomPitch ||
+                                        playbackTuning.linkPitchToSpeed ||
+                                        playbackTuning.crossfadeEnabled
+                                val tuningLabel = if (hasCustomTuning) {
+                                    val parts = buildList {
+                                        if (hasCustomSpeed) {
+                                            add(PlaybackTuningHelper.formatSpeedLabel(playbackTuning.playbackSpeed))
+                                        }
+                                        if (hasCustomPitch) {
+                                            add("Voz ${PlaybackTuningHelper.formatPitchLabel(effectivePitch)}")
+                                        }
+                                        if (playbackTuning.crossfadeEnabled) {
+                                            add("Crossfade ${playbackTuning.crossfadeSeconds}s")
+                                        }
+                                    }.joinToString(" • ")
+                                    if (parts.isNotEmpty()) {
+                                        "Velocidad y Crossfade ($parts)"
+                                    } else {
+                                        "Velocidad y Crossfade"
                                     }
-                                    if (hasCustomPitch) {
-                                        add("Voz ${PlaybackTuningHelper.formatPitchLabel(effectivePitch)}")
-                                    }
-                                    if (playbackTuning.crossfadeEnabled) {
-                                        add("Crossfade ${playbackTuning.crossfadeSeconds}s")
-                                    }
-                                }.joinToString(" • ")
-                                if (parts.isNotEmpty()) {
-                                    "Velocidad y Crossfade ($parts)"
                                 } else {
                                     "Velocidad y Crossfade"
                                 }
-                            } else {
-                                "Velocidad y Crossfade"
-                            }
 
-                            DropdownMenuItem(
-                                text = { Text(tuningLabel) },
-                                leadingIcon = {
-                                    Icon(
-                                        imageVector = Icons.Rounded.Speed,
-                                        contentDescription = null,
-                                        tint = if (hasCustomTuning) {
-                                            MaterialTheme.colorScheme.primary
-                                        } else {
-                                            MaterialTheme.colorScheme.onSurfaceVariant
-                                        },
-                                    )
-                                },
-                                onClick = {
-                                    showOptionsMenu = false
-                                    showTuningSheet = true
-                                },
-                            )
-
-                            DropdownMenuItem(
-                                text = {
-                                    Text(
-                                        if (sleepTimerState.isActive) {
-                                            "Temporizador (${SleepTimerHelper.formatShortLabel(sleepTimerState)})"
-                                        } else {
-                                            "Temporizador"
-                                        },
-                                    )
-                                },
-                                leadingIcon = {
-                                    Icon(
-                                        imageVector = Icons.Rounded.Timer,
-                                        contentDescription = null,
-                                        tint = if (sleepTimerState.isActive) {
-                                            MaterialTheme.colorScheme.primary
-                                        } else {
-                                            MaterialTheme.colorScheme.onSurfaceVariant
-                                        },
-                                    )
-                                },
-                                onClick = {
-                                    showOptionsMenu = false
-                                    showSleepTimerSheet = true
-                                },
-                            )
-
-                            DropdownMenuItem(
-                                text = { Text("Ecualizador") },
-                                leadingIcon = {
-                                    Icon(
-                                        imageVector = Icons.Rounded.Tune,
-                                        contentDescription = null,
-                                    )
-                                },
-                                onClick = {
-                                    showOptionsMenu = false
-                                    onOpenEqualizer()
-                                },
-                            )
-
-                            val effectsSummary = PlaybackTuningHelper.formatEffectsSummary(audioEffects)
-                            DropdownMenuItem(
-                                text = {
-                                    Text(
-                                        if (effectsSummary != null) {
-                                            "8D, Reverb y Slowed ($effectsSummary)"
-                                        } else {
-                                            "8D, Reverb y Slowed"
-                                        },
-                                    )
-                                },
-                                leadingIcon = {
-                                    Icon(
-                                        imageVector = Icons.Rounded.SurroundSound,
-                                        contentDescription = null,
-                                        tint = if (audioEffects.isAnyEffectEnabled) {
-                                            MaterialTheme.colorScheme.primary
-                                        } else {
-                                            MaterialTheme.colorScheme.onSurfaceVariant
-                                        },
-                                    )
-                                },
-                                onClick = {
-                                    showOptionsMenu = false
-                                    onOpenAudioEffects()
-                                },
-                            )
-
-                            DropdownMenuItem(
-                                text = { Text("Cola de reproducción") },
-                                leadingIcon = {
-                                    Icon(
-                                        imageVector = Icons.AutoMirrored.Rounded.QueueMusic,
-                                        contentDescription = null,
-                                    )
-                                },
-                                onClick = {
-                                    showOptionsMenu = false
-                                    onOpenQueue()
-                                },
-                            )
-
-                            if (track != null) {
-                                HorizontalDivider(
-                                    modifier = Modifier.padding(vertical = 4.dp),
-                                    color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f),
-                                )
                                 DropdownMenuItem(
-                                    text = { Text("Editar metadatos") },
+                                    text = { Text(tuningLabel) },
                                     leadingIcon = {
                                         Icon(
-                                            imageVector = Icons.Rounded.Edit,
+                                            imageVector = Icons.Rounded.Speed,
+                                            contentDescription = null,
+                                            tint = if (hasCustomTuning) {
+                                                MaterialTheme.colorScheme.primary
+                                            } else {
+                                                MaterialTheme.colorScheme.onSurfaceVariant
+                                            },
+                                        )
+                                    },
+                                    onClick = {
+                                        showOptionsMenu = false
+                                        showTuningSheet = true
+                                    },
+                                )
+
+                                DropdownMenuItem(
+                                    text = {
+                                        Text(
+                                            if (sleepTimerState.isActive) {
+                                                "Temporizador (${SleepTimerHelper.formatShortLabel(sleepTimerState)})"
+                                            } else {
+                                                "Temporizador"
+                                            },
+                                        )
+                                    },
+                                    leadingIcon = {
+                                        Icon(
+                                            imageVector = Icons.Rounded.Timer,
+                                            contentDescription = null,
+                                            tint = if (sleepTimerState.isActive) {
+                                                MaterialTheme.colorScheme.primary
+                                            } else {
+                                                MaterialTheme.colorScheme.onSurfaceVariant
+                                            },
+                                        )
+                                    },
+                                    onClick = {
+                                        showOptionsMenu = false
+                                        showSleepTimerSheet = true
+                                    },
+                                )
+
+                                DropdownMenuItem(
+                                    text = { Text("Ecualizador") },
+                                    leadingIcon = {
+                                        Icon(
+                                            imageVector = Icons.Rounded.Tune,
                                             contentDescription = null,
                                         )
                                     },
                                     onClick = {
                                         showOptionsMenu = false
-                                        onEditMetadata(track)
+                                        onOpenEqualizer()
                                     },
                                 )
+
+                                val effectsSummary = PlaybackTuningHelper.formatEffectsSummary(audioEffects)
                                 DropdownMenuItem(
-                                    text = { Text("Cambiar carátula") },
+                                    text = {
+                                        Text(
+                                            if (effectsSummary != null) {
+                                                "8D, Reverb y Slowed ($effectsSummary)"
+                                            } else {
+                                                "8D, Reverb y Slowed"
+                                            },
+                                        )
+                                    },
                                     leadingIcon = {
                                         Icon(
-                                            imageVector = Icons.Rounded.Image,
+                                            imageVector = Icons.Rounded.SurroundSound,
+                                            contentDescription = null,
+                                            tint = if (audioEffects.isAnyEffectEnabled) {
+                                                MaterialTheme.colorScheme.primary
+                                            } else {
+                                                MaterialTheme.colorScheme.onSurfaceVariant
+                                            },
+                                        )
+                                    },
+                                    onClick = {
+                                        showOptionsMenu = false
+                                        onOpenAudioEffects()
+                                    },
+                                )
+
+                                DropdownMenuItem(
+                                    text = { Text("Cola de reproducción") },
+                                    leadingIcon = {
+                                        Icon(
+                                            imageVector = Icons.AutoMirrored.Rounded.QueueMusic,
                                             contentDescription = null,
                                         )
                                     },
                                     onClick = {
                                         showOptionsMenu = false
-                                        onChangeCover(track)
+                                        onOpenQueue()
                                     },
                                 )
-                                DropdownMenuItem(
-                                    text = { Text("Añadir a playlist") },
-                                    leadingIcon = {
-                                        Icon(
-                                            imageVector = Icons.AutoMirrored.Rounded.PlaylistAdd,
-                                            contentDescription = null,
-                                        )
-                                    },
-                                    onClick = {
-                                        showOptionsMenu = false
-                                        onOpenAddToPlaylist(track)
-                                    },
-                                )
+
+                                if (track != null) {
+                                    HorizontalDivider(
+                                        modifier = Modifier.padding(vertical = 4.dp),
+                                        color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f),
+                                    )
+                                    DropdownMenuItem(
+                                        text = { Text("Editar metadatos") },
+                                        leadingIcon = {
+                                            Icon(
+                                                imageVector = Icons.Rounded.Edit,
+                                                contentDescription = null,
+                                            )
+                                        },
+                                        onClick = {
+                                            showOptionsMenu = false
+                                            onEditMetadata(track)
+                                        },
+                                    )
+                                    DropdownMenuItem(
+                                        text = { Text("Cambiar carátula") },
+                                        leadingIcon = {
+                                            Icon(
+                                                imageVector = Icons.Rounded.Image,
+                                                contentDescription = null,
+                                            )
+                                        },
+                                        onClick = {
+                                            showOptionsMenu = false
+                                            onChangeCover(track)
+                                        },
+                                    )
+                                    DropdownMenuItem(
+                                        text = { Text("Añadir a playlist") },
+                                        leadingIcon = {
+                                            Icon(
+                                                imageVector = Icons.AutoMirrored.Rounded.PlaylistAdd,
+                                                contentDescription = null,
+                                            )
+                                        },
+                                        onClick = {
+                                            showOptionsMenu = false
+                                            onOpenAddToPlaylist(track)
+                                        },
+                                    )
+                                }
                             }
                         }
-                    }
-                },
-                colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = MaterialTheme.colorScheme.background,
-                ),
-            )
-        },
-    ) { innerPadding ->
-        if (track == null) {
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(innerPadding),
-                contentAlignment = Alignment.Center,
-            ) {
-                Text(
-                    text = "Selecciona una canción para empezar a escuchar",
-                    style = MaterialTheme.typography.bodyLarge,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-            return@Scaffold
-        }
-
-        val backdropTint = LocalCoverBackdropTint.current
-        val bgGradient = Brush.verticalGradient(
-            colors = listOf(
-                backdropTint.copy(alpha = 0.48f),
-                MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.24f),
-                MaterialTheme.colorScheme.background,
-            ),
-        )
-
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .background(bgGradient)
-                .padding(innerPadding)
-                .padding(horizontal = 24.dp, vertical = 12.dp),
-            verticalArrangement = Arrangement.SpaceBetween,
-            horizontalAlignment = Alignment.CenterHorizontally,
-        ) {
-            // Carátula cuadrada clásica bien enmarcada y proporcionada.
-            BoxWithConstraints(
-                modifier = Modifier
-                    .weight(1f)
-                    .fillMaxWidth()
-                    .padding(vertical = 10.dp),
-                contentAlignment = Alignment.Center,
-            ) {
-                val squareSize = minOf(maxWidth, maxHeight).coerceAtMost(360.dp)
-                Surface(
-                    modifier = Modifier.size(squareSize),
-                    shape = RoundedCornerShape(22.dp),
-                    color = MaterialTheme.colorScheme.surfaceContainerHigh,
-                    border = BorderStroke(
-                        width = 1.dp,
-                        color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.85f),
+                    },
+                    colors = TopAppBarDefaults.topAppBarColors(
+                        containerColor = MaterialTheme.colorScheme.background,
                     ),
-                    tonalElevation = 6.dp,
-                    shadowElevation = 14.dp,
+                )
+            },
+        ) { innerPadding ->
+            if (track == null) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(innerPadding),
+                    contentAlignment = Alignment.Center,
                 ) {
-                    SquareCoverArt(
-                        coverPath = track.coverFilePath,
-                        contentDescription = "Carátula de ${track.title}",
-                        modifier = Modifier.fillMaxSize(),
-                        cornerRadiusDp = 22,
-                    )
-                }
-            }
-
-            // Bloque de información + corazón de Me gusta.
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Column(modifier = Modifier.weight(1f)) {
                     Text(
-                        text = track.title,
-                        style = MaterialTheme.typography.headlineSmall,
-                        fontWeight = FontWeight.Bold,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                    Spacer(modifier = Modifier.height(4.dp))
-                    Text(
-                        text = track.artist,
+                        text = "Selecciona una canción para empezar a escuchar",
                         style = MaterialTheme.typography.bodyLarge,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
                     )
                 }
+                return@Scaffold
+            }
 
-                IconButton(
-                    onClick = { onToggleLike(track.id) },
-                    modifier = Modifier.size(48.dp),
+            val backdropTint = LocalCoverBackdropTint.current
+            val bgGradient = Brush.verticalGradient(
+                colors = listOf(
+                    backdropTint.copy(alpha = 0.48f),
+                    MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.24f),
+                    MaterialTheme.colorScheme.background,
+                ),
+            )
+
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(bgGradient)
+                    .padding(innerPadding)
+                    .padding(horizontal = 24.dp, vertical = 12.dp),
+                verticalArrangement = Arrangement.SpaceBetween,
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
+                // Carátula cuadrada clásica bien enmarcada y proporcionada.
+                BoxWithConstraints(
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxWidth()
+                        .padding(vertical = 10.dp),
+                    contentAlignment = Alignment.Center,
                 ) {
-                    Icon(
-                        imageVector = if (track.isLiked) Icons.Rounded.Favorite else Icons.Rounded.FavoriteBorder,
-                        contentDescription = if (track.isLiked) "Quitar me gusta" else "Me gusta",
-                        tint = if (track.isLiked) {
-                            MaterialTheme.colorScheme.primary
-                        } else {
-                            MaterialTheme.colorScheme.onSurfaceVariant
-                        },
-                        modifier = Modifier.size(30.dp),
-                    )
+                    val squareSize = minOf(maxWidth, maxHeight).coerceAtMost(360.dp)
+                    Surface(
+                        modifier = Modifier.size(squareSize),
+                        shape = RoundedCornerShape(22.dp),
+                        color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                        border = BorderStroke(
+                            width = 1.dp,
+                            color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.85f),
+                        ),
+                        tonalElevation = 6.dp,
+                        shadowElevation = 14.dp,
+                    ) {
+                        SquareCoverArt(
+                            coverPath = track.coverFilePath,
+                            contentDescription = "Carátula de ${track.title}",
+                            modifier = Modifier.fillMaxSize(),
+                            cornerRadiusDp = 22,
+                        )
+                    }
                 }
-            }
 
-            // Barra de progreso interactiva con tiempos formateados.
-            var isDragging by remember { mutableStateOf(false) }
-            var dragPosition by remember { mutableFloatStateOf(0f) }
-            val durationFloat = playbackState.durationMs.coerceAtLeast(1L).toFloat()
-            val sliderValue = if (isDragging) {
-                dragPosition
-            } else {
-                playbackState.positionMs.toFloat().coerceIn(0f, durationFloat)
-            }
-
-            Column(modifier = Modifier.fillMaxWidth()) {
-                Slider(
-                    value = sliderValue,
-                    onValueChange = { value ->
-                        isDragging = true
-                        dragPosition = value
-                    },
-                    onValueChangeFinished = {
-                        onSeekTo(dragPosition.toLong())
-                        isDragging = false
-                    },
-                    valueRange = 0f..durationFloat,
-                    thumb = {
-                        val thumbDiameter = if (isDragging) 20.dp else 16.dp
-                        Box(
-                            modifier = Modifier.size(24.dp),
-                            contentAlignment = Alignment.Center,
-                        ) {
-                            Box(
-                                modifier = Modifier
-                                    .size(thumbDiameter)
-                                    .shadow(elevation = 4.dp, shape = CircleShape)
-                                    .background(MaterialTheme.colorScheme.primary, CircleShape)
-                                    .border(
-                                        width = 2.dp,
-                                        color = MaterialTheme.colorScheme.background.copy(alpha = 0.85f),
-                                        shape = CircleShape,
-                                    ),
-                            )
-                        }
-                    },
-                    track = { sliderState ->
-                        val range = (sliderState.valueRange.endInclusive - sliderState.valueRange.start)
-                            .coerceAtLeast(1f)
-                        val fraction = ((sliderState.value - sliderState.valueRange.start) / range)
-                            .coerceIn(0f, 1f)
-
-                        Box(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(6.dp)
-                                .clip(CircleShape)
-                                .background(MaterialTheme.colorScheme.surfaceContainerHighest),
-                        ) {
-                            Box(
-                                modifier = Modifier
-                                    .fillMaxWidth(fraction)
-                                    .height(6.dp)
-                                    .clip(CircleShape)
-                                    .background(MaterialTheme.colorScheme.primary),
-                            )
-                        }
-                    },
-                    colors = SliderDefaults.colors(
-                        thumbColor = MaterialTheme.colorScheme.primary,
-                        activeTrackColor = MaterialTheme.colorScheme.primary,
-                        inactiveTrackColor = MaterialTheme.colorScheme.surfaceContainerHighest,
-                    ),
-                )
-
+                // Bloque de información + corazón de Me gusta.
                 Row(
                     modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = track.title,
+                            style = MaterialTheme.typography.headlineSmall,
+                            fontWeight = FontWeight.Bold,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(
+                            text = track.artist,
+                            style = MaterialTheme.typography.bodyLarge,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+
+                    IconButton(
+                        onClick = { onToggleLike(track.id) },
+                        modifier = Modifier.size(48.dp),
+                    ) {
+                        Icon(
+                            imageVector = if (track.isLiked) Icons.Rounded.Favorite else Icons.Rounded.FavoriteBorder,
+                            contentDescription = if (track.isLiked) "Quitar me gusta" else "Me gusta",
+                            tint = if (track.isLiked) {
+                                MaterialTheme.colorScheme.primary
+                            } else {
+                                MaterialTheme.colorScheme.onSurfaceVariant
+                            },
+                            modifier = Modifier.size(30.dp),
+                        )
+                    }
+                }
+
+                // Barra de progreso interactiva con tiempos formateados.
+                var isDragging by remember { mutableStateOf(false) }
+                var dragPosition by remember { mutableFloatStateOf(0f) }
+                val durationFloat = playbackState.durationMs.coerceAtLeast(1L).toFloat()
+                val sliderValue = if (isDragging) {
+                    dragPosition
+                } else {
+                    playbackState.positionMs.toFloat().coerceIn(0f, durationFloat)
+                }
+
+                Column(modifier = Modifier.fillMaxWidth()) {
+                    Slider(
+                        value = sliderValue,
+                        onValueChange = { value ->
+                            isDragging = true
+                            dragPosition = value
+                        },
+                        onValueChangeFinished = {
+                            onSeekTo(dragPosition.toLong())
+                            isDragging = false
+                        },
+                        valueRange = 0f..durationFloat,
+                        thumb = {
+                            val thumbDiameter = if (isDragging) 20.dp else 16.dp
+                            Box(
+                                modifier = Modifier.size(24.dp),
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(thumbDiameter)
+                                        .shadow(elevation = 4.dp, shape = CircleShape)
+                                        .background(MaterialTheme.colorScheme.primary, CircleShape)
+                                        .border(
+                                            width = 2.dp,
+                                            color = MaterialTheme.colorScheme.background.copy(alpha = 0.85f),
+                                            shape = CircleShape,
+                                        ),
+                                )
+                            }
+                        },
+                        track = { sliderState ->
+                            val range = (sliderState.valueRange.endInclusive - sliderState.valueRange.start)
+                                .coerceAtLeast(1f)
+                            val fraction = ((sliderState.value - sliderState.valueRange.start) / range)
+                                .coerceIn(0f, 1f)
+
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(6.dp)
+                                    .clip(CircleShape)
+                                    .background(MaterialTheme.colorScheme.surfaceContainerHighest),
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxWidth(fraction)
+                                        .height(6.dp)
+                                        .clip(CircleShape)
+                                        .background(MaterialTheme.colorScheme.primary),
+                                )
+                            }
+                        },
+                        colors = SliderDefaults.colors(
+                            thumbColor = MaterialTheme.colorScheme.primary,
+                            activeTrackColor = MaterialTheme.colorScheme.primary,
+                            inactiveTrackColor = MaterialTheme.colorScheme.surfaceContainerHighest,
+                        ),
+                    )
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(
+                            text = formatPlaybackTime(sliderValue.toLong()),
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        val effectiveSummaryPitch = if (playbackTuning.linkPitchToSpeed) {
+                            playbackTuning.playbackSpeed
+                        } else {
+                            playbackTuning.playbackPitch
+                        }
+                        val hasCustomPitch =
+                            !audioEffects.slowedEnabled && kotlin.math.abs(effectiveSummaryPitch - 1.0f) > 0.01f
+                        val hasSpeedOrCrossfade =
+                            (!audioEffects.slowedEnabled && kotlin.math.abs(playbackTuning.playbackSpeed - 1.0f) > 0.01f) ||
+                                hasCustomPitch ||
+                                playbackTuning.crossfadeEnabled
+                        val effectsText = PlaybackTuningHelper.formatEffectsSummary(audioEffects)
+                        if (hasSpeedOrCrossfade || effectsText != null || sleepTimerState.isActive) {
+                            val activeSummary = buildList {
+                                if (effectsText != null) {
+                                    add(effectsText)
+                                }
+                                if (!audioEffects.slowedEnabled && kotlin.math.abs(playbackTuning.playbackSpeed - 1.0f) > 0.01f) {
+                                    add(PlaybackTuningHelper.formatSpeedLabel(playbackTuning.playbackSpeed))
+                                }
+                                if (hasCustomPitch) {
+                                    add("Voz ${PlaybackTuningHelper.formatPitchLabel(effectiveSummaryPitch)}")
+                                }
+                                if (playbackTuning.crossfadeEnabled) {
+                                    add("Crossfade ${playbackTuning.crossfadeSeconds}s")
+                                }
+                                if (sleepTimerState.isActive) {
+                                    add("Timer ${SleepTimerHelper.formatShortLabel(sleepTimerState)}")
+                                }
+                            }.joinToString(" • ")
+                            Text(
+                                text = activeSummary,
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.primary,
+                                fontWeight = FontWeight.SemiBold,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier
+                                    .weight(1f, fill = false)
+                                    .padding(horizontal = 8.dp)
+                                    .clickable {
+                                        when {
+                                            sleepTimerState.isActive && !hasSpeedOrCrossfade && effectsText == null -> {
+                                                showSleepTimerSheet = true
+                                            }
+                                            effectsText != null && !hasSpeedOrCrossfade -> {
+                                                onOpenAudioEffects()
+                                            }
+                                            else -> showTuningSheet = true
+                                        }
+                                    },
+                            )
+                        }
+                        Text(
+                            text = formatPlaybackTime(playbackState.durationMs),
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
+
+                // Controles clásicos del reproductor.
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(bottom = 16.dp),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    Text(
-                        text = formatPlaybackTime(sliderValue.toLong()),
-                        style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                    val effectiveSummaryPitch = if (playbackTuning.linkPitchToSpeed) {
-                        playbackTuning.playbackSpeed
-                    } else {
-                        playbackTuning.playbackPitch
-                    }
-                    val hasCustomPitch =
-                        !audioEffects.slowedEnabled && kotlin.math.abs(effectiveSummaryPitch - 1.0f) > 0.01f
-                    val hasSpeedOrCrossfade =
-                        (!audioEffects.slowedEnabled && kotlin.math.abs(playbackTuning.playbackSpeed - 1.0f) > 0.01f) ||
-                            hasCustomPitch ||
-                            playbackTuning.crossfadeEnabled
-                    val effectsText = PlaybackTuningHelper.formatEffectsSummary(audioEffects)
-                    if (hasSpeedOrCrossfade || effectsText != null || sleepTimerState.isActive) {
-                        val activeSummary = buildList {
-                            if (effectsText != null) {
-                                add(effectsText)
-                            }
-                            if (!audioEffects.slowedEnabled && kotlin.math.abs(playbackTuning.playbackSpeed - 1.0f) > 0.01f) {
-                                add(PlaybackTuningHelper.formatSpeedLabel(playbackTuning.playbackSpeed))
-                            }
-                            if (hasCustomPitch) {
-                                add("Voz ${PlaybackTuningHelper.formatPitchLabel(effectiveSummaryPitch)}")
-                            }
-                            if (playbackTuning.crossfadeEnabled) {
-                                add("Crossfade ${playbackTuning.crossfadeSeconds}s")
-                            }
-                            if (sleepTimerState.isActive) {
-                                add("Timer ${SleepTimerHelper.formatShortLabel(sleepTimerState)}")
-                            }
-                        }.joinToString(" • ")
-                        Text(
-                            text = activeSummary,
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.primary,
-                            fontWeight = FontWeight.SemiBold,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                            modifier = Modifier
-                                .weight(1f, fill = false)
-                                .padding(horizontal = 8.dp)
-                                .clickable {
-                                    when {
-                                        sleepTimerState.isActive && !hasSpeedOrCrossfade && effectsText == null -> {
-                                            showSleepTimerSheet = true
-                                        }
-                                        effectsText != null && !hasSpeedOrCrossfade -> {
-                                            onOpenAudioEffects()
-                                        }
-                                        else -> showTuningSheet = true
-                                    }
-                                },
+                    IconButton(onClick = onToggleShuffle) {
+                        Icon(
+                            imageVector = Icons.Rounded.Shuffle,
+                            contentDescription = "Aleatorio",
+                            tint = if (playbackState.shuffleEnabled) {
+                                MaterialTheme.colorScheme.primary
+                            } else {
+                                MaterialTheme.colorScheme.onSurfaceVariant
+                            },
                         )
                     }
-                    Text(
-                        text = formatPlaybackTime(playbackState.durationMs),
-                        style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
+
+                    IconButton(
+                        onClick = onSkipPrevious,
+                        modifier = Modifier.size(52.dp),
+                    ) {
+                        Icon(
+                            imageVector = Icons.Rounded.SkipPrevious,
+                            contentDescription = "Anterior",
+                            modifier = Modifier.size(36.dp),
+                        )
+                    }
+
+                    FilledIconButton(
+                        onClick = onTogglePlayPause,
+                        modifier = Modifier.size(72.dp),
+                        shape = CircleShape,
+                        colors = IconButtonDefaults.filledIconButtonColors(
+                            containerColor = MaterialTheme.colorScheme.primary,
+                            contentColor = MaterialTheme.colorScheme.onPrimary,
+                        ),
+                    ) {
+                        Icon(
+                            imageVector = if (playbackState.isPlaying) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
+                            contentDescription = if (playbackState.isPlaying) "Pausar" else "Reproducir",
+                            modifier = Modifier.size(38.dp),
+                        )
+                    }
+
+                    IconButton(
+                        onClick = onSkipNext,
+                        modifier = Modifier.size(52.dp),
+                    ) {
+                        Icon(
+                            imageVector = Icons.Rounded.SkipNext,
+                            contentDescription = "Siguiente",
+                            modifier = Modifier.size(36.dp),
+                        )
+                    }
+
+                    IconButton(onClick = onCycleRepeat) {
+                        Icon(
+                            imageVector = if (playbackState.repeatMode == RepeatMode.ONE) {
+                                Icons.Rounded.RepeatOne
+                            } else {
+                                Icons.Rounded.Repeat
+                            },
+                            contentDescription = "Modo de repetición",
+                            tint = if (playbackState.repeatMode != RepeatMode.OFF) {
+                                MaterialTheme.colorScheme.primary
+                            } else {
+                                MaterialTheme.colorScheme.onSurfaceVariant
+                            },
+                        )
+                    }
                 }
             }
-
-            // Controles clásicos del reproductor.
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(bottom = 16.dp),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                IconButton(onClick = onToggleShuffle) {
-                    Icon(
-                        imageVector = Icons.Rounded.Shuffle,
-                        contentDescription = "Aleatorio",
-                        tint = if (playbackState.shuffleEnabled) {
-                            MaterialTheme.colorScheme.primary
-                        } else {
-                            MaterialTheme.colorScheme.onSurfaceVariant
-                        },
-                    )
-                }
-
-                IconButton(
-                    onClick = onSkipPrevious,
-                    modifier = Modifier.size(52.dp),
-                ) {
-                    Icon(
-                        imageVector = Icons.Rounded.SkipPrevious,
-                        contentDescription = "Anterior",
-                        modifier = Modifier.size(36.dp),
-                    )
-                }
-
-                FilledIconButton(
-                    onClick = onTogglePlayPause,
-                    modifier = Modifier.size(72.dp),
-                    shape = CircleShape,
-                    colors = IconButtonDefaults.filledIconButtonColors(
-                        containerColor = MaterialTheme.colorScheme.primary,
-                        contentColor = MaterialTheme.colorScheme.onPrimary,
-                    ),
-                ) {
-                    Icon(
-                        imageVector = if (playbackState.isPlaying) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
-                        contentDescription = if (playbackState.isPlaying) "Pausar" else "Reproducir",
-                        modifier = Modifier.size(38.dp),
-                    )
-                }
-
-                IconButton(
-                    onClick = onSkipNext,
-                    modifier = Modifier.size(52.dp),
-                ) {
-                    Icon(
-                        imageVector = Icons.Rounded.SkipNext,
-                        contentDescription = "Siguiente",
-                        modifier = Modifier.size(36.dp),
-                    )
-                }
-
-                IconButton(onClick = onCycleRepeat) {
-                    Icon(
-                        imageVector = if (playbackState.repeatMode == RepeatMode.ONE) {
-                            Icons.Rounded.RepeatOne
-                        } else {
-                            Icons.Rounded.Repeat
-                        },
-                        contentDescription = "Modo de repetición",
-                        tint = if (playbackState.repeatMode != RepeatMode.OFF) {
-                            MaterialTheme.colorScheme.primary
-                        } else {
-                            MaterialTheme.colorScheme.onSurfaceVariant
-                        },
-                    )
-                }
-            }
-        }
         }
 
         if (showTuningSheet) {
@@ -916,8 +916,10 @@ private fun PlaybackTuningBottomSheet(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.SpaceBetween,
                     ) {
+                        val slowedLabel = PlaybackTuningHelper.formatSpeedLabel(slowedSpeed)
                         Text(
-                            text = "Modo Slowed activo (${PlaybackTuningHelper.formatSpeedLabel(slowedSpeed)}). Cambiar la velocidad aquí volverá al modo normal.",
+                            text = "Modo Slowed activo ($slowedLabel). " +
+                                "Cambiar la velocidad aquí volverá al modo normal.",
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.onPrimaryContainer,
                             modifier = Modifier.weight(1f),

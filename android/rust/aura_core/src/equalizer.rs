@@ -18,8 +18,8 @@ pub const BAND_FREQUENCIES_HZ: [f64; BAND_COUNT] = [
     31.25, 62.5, 125.0, 250.0, 500.0, 1000.0, 2000.0, 4000.0, 8000.0, 16000.0,
 ];
 
-/// Factor Q estándar para bandas separadas 1 octava (1.4142).
-const OCTAVE_BAND_Q: f64 = 1.4142135623730951;
+/// Factor Q estándar para bandas separadas 1 octava (sqrt(2)).
+const OCTAVE_BAND_Q: f64 = std::f64::consts::SQRT_2;
 const MIN_GAIN_DB: f32 = -12.0;
 const MAX_GAIN_DB: f32 = 12.0;
 
@@ -210,7 +210,7 @@ impl EqualizerProcessor {
 
         let mut frame_samples = [0.0_f64; MAX_CHANNELS];
         for frame in bytes[..usable_bytes].chunks_exact_mut(frame_bytes) {
-            for ch in 0..ch_count {
+            for (ch, slot) in frame_samples[..ch_count].iter_mut().enumerate() {
                 let offset = ch * 2;
                 let raw = i16::from_le_bytes([frame[offset], frame[offset + 1]]);
                 let mut sample = (raw as f64) / 32768.0;
@@ -224,16 +224,16 @@ impl EqualizerProcessor {
                         }
                     }
                 }
-                frame_samples[ch] = sample;
+                *slot = sample;
             }
 
             if fx_active {
                 self.effects.process_frame(&mut frame_samples[..ch_count]);
             }
 
-            for ch in 0..ch_count {
+            for (ch, &processed) in frame_samples[..ch_count].iter().enumerate() {
                 let offset = ch * 2;
-                let limited = soft_limit(frame_samples[ch]);
+                let limited = soft_limit(processed);
                 let out_i16 = (limited * 32767.0).round().clamp(-32768.0, 32767.0) as i16;
                 let out_bytes = out_i16.to_le_bytes();
                 frame[offset] = out_bytes[0];
@@ -263,7 +263,7 @@ impl EqualizerProcessor {
 
         let mut frame_samples = [0.0_f64; MAX_CHANNELS];
         for frame in bytes[..usable_bytes].chunks_exact_mut(frame_bytes) {
-            for ch in 0..ch_count {
+            for (ch, slot) in frame_samples[..ch_count].iter_mut().enumerate() {
                 let offset = ch * 4;
                 let raw = f32::from_le_bytes([
                     frame[offset],
@@ -282,16 +282,16 @@ impl EqualizerProcessor {
                         }
                     }
                 }
-                frame_samples[ch] = sample;
+                *slot = sample;
             }
 
             if fx_active {
                 self.effects.process_frame(&mut frame_samples[..ch_count]);
             }
 
-            for ch in 0..ch_count {
+            for (ch, &processed) in frame_samples[..ch_count].iter().enumerate() {
                 let offset = ch * 4;
-                let out_f32 = soft_limit(frame_samples[ch]) as f32;
+                let out_f32 = soft_limit(processed) as f32;
                 let out_bytes = out_f32.to_le_bytes();
                 frame[offset..offset + 4].copy_from_slice(&out_bytes);
             }
@@ -379,7 +379,12 @@ pub fn process_global_pcm_f32_le(bytes: &mut [u8]) -> bool {
 mod tests {
     use super::*;
 
-    fn generate_sine_pcm16(freq_hz: f64, sample_rate: u32, frames: usize, amplitude: f64) -> Vec<u8> {
+    fn generate_sine_pcm16(
+        freq_hz: f64,
+        sample_rate: u32,
+        frames: usize,
+        amplitude: f64,
+    ) -> Vec<u8> {
         let mut out = Vec::with_capacity(frames * 4);
         for i in 0..frames {
             let t = i as f64 / sample_rate as f64;
@@ -396,7 +401,7 @@ mod tests {
     fn rms_pcm16(bytes: &[u8]) -> f64 {
         let mut sum_sq = 0.0_f64;
         let mut count = 0usize;
-        for chunk in bytes.chunks_exact(2) {
+        for chunk in bytes.as_chunks::<2>().0 {
             let s = i16::from_le_bytes([chunk[0], chunk[1]]) as f64 / 32768.0;
             sum_sq += s * s;
             count += 1;
@@ -474,7 +479,7 @@ mod tests {
         }
 
         assert!(proc.process_pcm_f32_le(&mut bytes));
-        for chunk in bytes.chunks_exact(4) {
+        for chunk in bytes.as_chunks::<4>().0 {
             let sample = f32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]);
             assert!(sample.is_finite());
             assert!(sample.abs() <= 1.0);
@@ -510,10 +515,13 @@ mod tests {
 
         let mut pcm16 = generate_sine_pcm16(440.0, 48_000, 1024, 0.5);
         assert!(proc.process_pcm16_le(&mut pcm16));
-        for chunk in pcm16.chunks_exact(2) {
-            let s = i16::from_le_bytes([chunk[0], chunk[1]]);
-            assert!(s >= i16::MIN && s <= i16::MAX);
+        let mut has_nonzero_sample = false;
+        for chunk in pcm16.as_chunks::<2>().0 {
+            if i16::from_le_bytes(*chunk) != 0 {
+                has_nonzero_sample = true;
+            }
         }
+        assert!(has_nonzero_sample);
 
         let mut pcm_f32 = Vec::with_capacity(512 * 8);
         for i in 0..512 {
@@ -522,7 +530,7 @@ mod tests {
             pcm_f32.extend_from_slice(&v.to_le_bytes());
         }
         assert!(proc.process_pcm_f32_le(&mut pcm_f32));
-        for chunk in pcm_f32.chunks_exact(4) {
+        for chunk in pcm_f32.as_chunks::<4>().0 {
             let sample = f32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]);
             assert!(sample.is_finite());
             assert!(sample.abs() <= 1.0);

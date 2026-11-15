@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Genera un reporte HTML interactivo y autocontenido + paquete .zip de artefactos
 con todos los errores crudos, warnings, resultados de lint (Kotlin/Android, Rust, Python,
 Integridad) y dependencias desactualizadas de Aura Music.
@@ -13,11 +12,12 @@ import json
 import os
 import re
 import shutil
+import sys
 import xml.etree.ElementTree as ET
 import zipfile
 from dataclasses import asdict, dataclass
-from datetime import datetime, timezone
-from typing import Optional
+from datetime import UTC, datetime
+from typing import Any
 
 
 @dataclass
@@ -38,7 +38,7 @@ class ToolLogSection:
     title: str
     category: str
     status: str  # passed | failed | skipped
-    exit_code: Optional[int]
+    exit_code: int | None
     error_count: int
     warning_count: int
     raw_text: str
@@ -50,20 +50,33 @@ LOG_SPECS = [
     ("rust-lint-and-test.log", "Rust (cargo fmt, check, clippy, test, ndk)", "rust"),
     ("kotlin-ktlint.log", "Kotlin Style & Lint (ktlint)", "kotlin"),
     ("gradle-lint.log", "Android Lint (./gradlew lintDebug --continue)", "kotlin"),
-    ("gradle-compile-and-test.log", "Compilación APK & Unit Tests (./gradlew --continue)", "kotlin"),
+    (
+        "gradle-compile-and-test.log",
+        "Compilación APK & Unit Tests (./gradlew --continue)",
+        "kotlin",
+    ),
     ("room-schema-diff.log", "Verificación de esquemas Room (schemas/)", "integrity"),
-    ("outdated-deps.log", "Dependencias desactualizadas (Maven / Crates.io / PyPI)", "dependencies"),
+    (
+        "outdated-deps.log",
+        "Dependencias desactualizadas (Maven / Crates.io / PyPI)",
+        "dependencies",
+    ),
 ]
 
 
 def _read_text(path: str) -> str:
     if not os.path.exists(path):
         return ""
-    with open(path, "r", encoding="utf-8", errors="replace") as f:
+    with open(path, encoding="utf-8", errors="replace") as f:
         return f.read()
 
 
-def _parse_diagnostics_from_log(tool_id: str, title: str, category: str, text: str) -> list[DiagnosticItem]:
+def _parse_diagnostics_from_log(
+    tool_id: str,
+    title: str,
+    category: str,
+    text: str,
+) -> list[DiagnosticItem]:
     items: list[DiagnosticItem] = []
     seen: set[tuple[str, str, str]] = set()
     lines = text.splitlines()
@@ -73,36 +86,43 @@ def _parse_diagnostics_from_log(tool_id: str, title: str, category: str, text: s
         if not stripped:
             continue
 
-        severity: Optional[str] = None
+        severity: str | None = None
         file_ref = ""
         line_ref = ""
         msg = stripped
 
         # Kotlin compiler: e: file:///.../Foo.kt:12:5 message | w: ...
-        m_kt = re.match(r"^(e|w):\s+(?:file://)?(.+?):(\d+)(?::\d+)?\s+(.*)$", stripped)
+        m_kt = re.match(
+            r"^(e|w):\s+(?:file://)?(.+?):(\d+)(?::\d+)?\s+(.*)$",
+            stripped,
+        )
+        # ktlint / ruff / mypy: path/file.py:12:5: E501 message
+        m_std = re.match(
+            r"^([^\s:]+\.(?:kt|kts|py|rs|ts|tsx)):(\d+)(?::\d+)?:\s+(.+)$",
+            stripped,
+        )
+        # Rust cargo / clippy: error[E0308]: ... or warning: ...
+        m_rs = re.match(r"^(error(?:\[[^\]]+\])?|warning):\s+(.+)$", stripped)
+
         if m_kt:
             severity = "error" if m_kt.group(1) == "e" else "warning"
             file_ref, line_ref, msg = m_kt.group(2), m_kt.group(3), m_kt.group(4)
-        # ktlint / ruff / mypy: path/file.py:12:5: E501 message
-        elif re.match(r"^[^\s:]+\.(?:kt|kts|py|rs|ts|tsx):\d+(?::\d+)?:\s+.+$", stripped):
-            m_std = re.match(r"^([^\s:]+):(\d+)(?::\d+)?:\s+(.+)$", stripped)
-            if m_std:
-                file_ref, line_ref, msg = m_std.group(1), m_std.group(2), m_std.group(3)
-                lower_msg = msg.lower()
-                severity = "error" if ("error" in lower_msg or "syntaxerror" in lower_msg or "fail" in lower_msg) else "warning"
-        # Rust cargo / clippy: error[E0308]: ... or warning: ... with next line --> src/foo.rs:10:5
-        elif re.match(r"^(error(?:\[[^\]]+\])?|warning):\s+(.+)$", stripped):
-            m_rs = re.match(r"^(error(?:\[[^\]]+\])?|warning):\s+(.+)$", stripped)
-            if m_rs:
-                kind, msg = m_rs.group(1), m_rs.group(2)
-                if "generated" in msg and "warning" in msg:
-                    continue
-                severity = "error" if kind.startswith("error") else "warning"
-                if idx + 1 < len(lines):
-                    m_loc = re.match(r"^\s*-->\s+(.+?):(\d+):\d+", lines[idx + 1])
-                    if m_loc:
-                        file_ref, line_ref = m_loc.group(1), m_loc.group(2)
-        # Gradle / node:test / general failure markers
+        elif m_std:
+            file_ref, line_ref, msg = m_std.group(1), m_std.group(2), m_std.group(3)
+            lower_msg = msg.lower()
+            is_err = (
+                "error" in lower_msg or "syntaxerror" in lower_msg or "fail" in lower_msg
+            )
+            severity = "error" if is_err else "warning"
+        elif m_rs:
+            kind, msg = m_rs.group(1), m_rs.group(2)
+            if "generated" in msg and "warning" in msg:
+                continue
+            severity = "error" if kind.startswith("error") else "warning"
+            if idx + 1 < len(lines):
+                m_loc = re.match(r"^\s*-->\s+(.+?):(\d+):\d+", lines[idx + 1])
+                if m_loc:
+                    file_ref, line_ref = m_loc.group(1), m_loc.group(2)
         elif any(
             token in stripped
             for token in (
@@ -116,7 +136,11 @@ def _parse_diagnostics_from_log(tool_id: str, title: str, category: str, text: s
             )
         ):
             severity = "error"
-        elif any(token in stripped for token in ("[WARN]", "w: ", "deprecated", "WARNING:")):
+        elif (
+            stripped.startswith(("w: ", "[WARN]", "WARNING:"))
+            or "[WARN]" in stripped
+            or "WARNING:" in stripped
+        ):
             severity = "warning"
 
         if severity is not None:
@@ -139,7 +163,10 @@ def _parse_diagnostics_from_log(tool_id: str, title: str, category: str, text: s
     return items
 
 
-def _parse_android_lint_xmls(android_dir: str, copy_dest_dir: str) -> tuple[list[DiagnosticItem], int]:
+def _parse_android_lint_xmls(
+    android_dir: str,
+    copy_dest_dir: str,
+) -> tuple[list[DiagnosticItem], int]:
     items: list[DiagnosticItem] = []
     copied_reports = 0
     seen: set[tuple[str, str, str, str]] = set()
@@ -148,7 +175,8 @@ def _parse_android_lint_xmls(android_dir: str, copy_dest_dir: str) -> tuple[list
         return items, copied_reports
 
     os.makedirs(copy_dest_dir, exist_ok=True)
-    for report_path in sorted(glob.glob(os.path.join(android_dir, "**", "build", "reports", "lint-results-*.*"), recursive=True)):
+    pattern = os.path.join(android_dir, "**", "build", "reports", "lint-results-*.*")
+    for report_path in sorted(glob.glob(pattern, recursive=True)):
         rel = os.path.relpath(report_path, android_dir).replace(os.sep, "__")
         shutil.copy2(report_path, os.path.join(copy_dest_dir, rel))
         copied_reports += 1
@@ -158,7 +186,10 @@ def _parse_android_lint_xmls(android_dir: str, copy_dest_dir: str) -> tuple[list
         try:
             tree = ET.parse(report_path)
             root = tree.getroot()
-        except Exception:
+        except (ET.ParseError, OSError) as exc:
+            sys.stderr.write(
+                f"Advertencia leyendo reporte XML {report_path}: {exc}\n"
+            )
             continue
 
         for issue in root.findall("issue"):
@@ -189,14 +220,17 @@ def _parse_android_lint_xmls(android_dir: str, copy_dest_dir: str) -> tuple[list
                     file=file_ref,
                     line=line_ref,
                     message=f"[{issue_id}] {summary}",
-                    raw_line=f"[{sev_raw.upper()}] {issue_id} at {file_ref}:{line_ref} — {summary}",
+                    raw_line=(
+                        f"[{sev_raw.upper()}] {issue_id} at "
+                        f"{file_ref}:{line_ref} — {summary}"
+                    ),
                 )
             )
 
     return items, copied_reports
 
 
-def _render_html(payload: dict) -> str:
+def _render_html(payload: dict[str, Any]) -> str:
     safe_json = json.dumps(payload, ensure_ascii=False).replace("</", "<\\/")
     meta = payload["meta"]
     summary = payload["summary"]
@@ -704,7 +738,9 @@ def _render_html(payload: dict) -> str:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Genera index.html interactivo y ZIP de auditoría.")
+    parser = argparse.ArgumentParser(
+        description="Genera index.html interactivo y ZIP de auditoría."
+    )
     parser.add_argument("--logs-dir", required=True)
     parser.add_argument("--deps-json", required=True)
     parser.add_argument("--android-dir", default="android")
@@ -715,12 +751,12 @@ def main() -> int:
 
     exit_codes: dict[str, int] = {}
     if args.exit_codes_json and os.path.exists(args.exit_codes_json):
-        with open(args.exit_codes_json, "r", encoding="utf-8") as f:
+        with open(args.exit_codes_json, encoding="utf-8") as f:
             exit_codes = json.load(f)
 
-    deps_payload = {"dependencies": [], "outdated_count": 0}
+    deps_payload: dict[str, Any] = {"dependencies": [], "outdated_count": 0}
     if os.path.exists(args.deps_json):
-        with open(args.deps_json, "r", encoding="utf-8") as f:
+        with open(args.deps_json, encoding="utf-8") as f:
             deps_payload = json.load(f)
 
     os.makedirs(args.output_dir, exist_ok=True)
@@ -762,31 +798,45 @@ def main() -> int:
         )
 
     lint_dest = os.path.join(args.output_dir, "android-lint-reports")
-    lint_items, copied_lint_reports = _parse_android_lint_xmls(args.android_dir, lint_dest)
+    lint_items, copied_lint_reports = _parse_android_lint_xmls(
+        args.android_dir,
+        lint_dest,
+    )
     diagnostics.extend(lint_items)
 
     # Copia esquemas Room generados por KSP si existieran para inspección directa
     schemas_src = os.path.join(args.android_dir, "core/database/schemas")
     if os.path.isdir(schemas_src):
-        shutil.copytree(schemas_src, os.path.join(args.output_dir, "room-schemas"), dirs_exist_ok=True)
+        shutil.copytree(
+            schemas_src,
+            os.path.join(args.output_dir, "room-schemas"),
+            dirs_exist_ok=True,
+        )
 
     if os.path.exists(args.deps_json):
-        shutil.copy2(args.deps_json, os.path.join(args.output_dir, "outdated-deps.json"))
+        shutil.copy2(
+            args.deps_json,
+            os.path.join(args.output_dir, "outdated-deps.json"),
+        )
 
     total_errors = sum(1 for d in diagnostics if d.severity == "error")
     total_warnings = sum(1 for d in diagnostics if d.severity == "warning")
     passed_sections = sum(1 for s in sections if s.status == "passed")
+    raw_outdated = deps_payload.get("outdated_count", 0)
+    outdated_dependencies = (
+        raw_outdated if isinstance(raw_outdated, int) else int(str(raw_outdated))
+    )
 
-    payload = {
+    payload: dict[str, Any] = {
         "meta": {
             "sha": os.environ.get("GITHUB_SHA", "local"),
             "branch": os.environ.get("GITHUB_REF_NAME", "local"),
-            "generated_at": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC"),
+            "generated_at": datetime.now(UTC).strftime("%Y-%m-%d %H:%M:%S UTC"),
         },
         "summary": {
             "total_errors": total_errors,
             "total_warnings": total_warnings,
-            "outdated_dependencies": int(deps_payload.get("outdated_count", 0)),
+            "outdated_dependencies": outdated_dependencies,
             "passed_sections": passed_sections,
             "total_sections": len(sections),
             "lint_report_files": copied_lint_reports,
@@ -811,7 +861,10 @@ def main() -> int:
                 rel_path = os.path.relpath(full_path, args.output_dir)
                 zf.write(full_path, arcname=rel_path)
 
-    print(f"Generated {args.zip_path} with {total_errors} errors, {total_warnings} warnings.")
+    print(
+        f"Generated {args.zip_path} with {total_errors} errors, "
+        f"{total_warnings} warnings."
+    )
     return 0
 
 

@@ -2,6 +2,7 @@ package com.auramusic.core.rust
 
 import android.content.Context
 import android.graphics.Bitmap
+import androidx.core.graphics.createBitmap
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.File
@@ -28,7 +29,6 @@ data class RustAudioMetadata(
  * en [Dispatchers.IO] para no bloquear jamás el hilo principal de la interfaz.
  */
 object AuraRustBridge {
-
     init {
         System.loadLibrary("aura_core")
     }
@@ -169,7 +169,7 @@ object AuraRustBridge {
             "Tamaño de buffer RGBA inesperado desde Rust: ${rgbaBytes.size}"
         }
 
-        val bitmap = Bitmap.createBitmap(sizePx, sizePx, Bitmap.Config.ARGB_8888)
+        val bitmap = createBitmap(sizePx, sizePx)
         bitmap.copyPixelsFromBuffer(ByteBuffer.wrap(rgbaBytes))
 
         withContext(Dispatchers.IO) {

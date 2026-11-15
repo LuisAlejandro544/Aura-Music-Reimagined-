@@ -46,7 +46,6 @@ internal class AuraMediaSessionCallback(
     private val onSyncPlaybackTuning: (PlaybackTuning) -> Unit,
     private val onSyncHeadphonePrefs: (HeadphonePreferences) -> Unit,
 ) : MediaSession.Callback {
-
     private var headsetHookTapCount = 0
     private var headsetHookDispatchJob: Job? = null
 

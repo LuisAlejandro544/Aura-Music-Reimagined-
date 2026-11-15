@@ -7,7 +7,6 @@ import org.junit.Test
  * Pruebas unitarias de detección real de formato de imagen para carátulas embebidas.
  */
 class AudioImporterFormatTest {
-
     @Test
     fun detectsPngJpegWebpGifAndBmpMagicBytes() {
         val png = byteArrayOf(

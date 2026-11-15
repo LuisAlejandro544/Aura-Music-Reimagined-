@@ -870,11 +870,10 @@ class AuraPlayerController(
             .build()
     }
 
-    private fun Track.toMediaItem(): MediaItem {
-        return MediaItem.Builder()
+    private fun Track.toMediaItem(): MediaItem =
+        MediaItem.Builder()
             .setMediaId(id.toString())
             .setUri(contentUri.toUri())
             .setMediaMetadata(toMediaMetadata())
             .build()
-    }
 }

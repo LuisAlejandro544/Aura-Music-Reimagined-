@@ -466,15 +466,14 @@ class AuraDownloaderRemoteClient(
         batch.forEach { msg -> sendRawMessage(remote, msg) }
     }
 
-    private fun sendRawMessage(remote: Messenger, msg: Message): Boolean {
-        return runCatching {
+    private fun sendRawMessage(remote: Messenger, msg: Message): Boolean =
+        runCatching {
             remote.send(msg)
             true
         }.getOrElse {
             serviceMessenger = null
             false
         }
-    }
 
     private fun bindToDownloaderService() {
         if (isBound) return

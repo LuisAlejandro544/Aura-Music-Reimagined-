@@ -44,6 +44,7 @@ import java.util.concurrent.CopyOnWriteArraySet
  */
 interface AuraDownloadHost {
     fun provideAudioDownloader(): YtDlpAudioDownloader
+
     fun createDownloaderNotificationIntent(): Intent
 }
 
@@ -54,7 +55,6 @@ interface AuraDownloadHost {
  * libera el proceso `:downloader` para devolver toda la RAM nativa de Python al sistema.
  */
 class AuraDownloadForegroundService : Service() {
-
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val mainHandler = Handler(Looper.getMainLooper())
     private val boundClients = CopyOnWriteArraySet<Messenger>()

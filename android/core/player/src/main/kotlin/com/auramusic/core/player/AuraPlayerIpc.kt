@@ -334,8 +334,14 @@ object AuraPlayerConfigStore {
                     spatial8dSpeed = fxJson.optDouble("spatial8dSpeed", AudioEffectsState.DEFAULT_SPATIAL_8D_SPEED.toDouble()).toFloat(),
                     spatial8dDepth = fxJson.optDouble("spatial8dDepth", AudioEffectsState.DEFAULT_SPATIAL_8D_DEPTH.toDouble()).toFloat(),
                     crossfeedEnabled = fxJson.optBoolean("crossfeedEnabled", false),
-                    crossfeedStrength = fxJson.optDouble("crossfeedStrength", AudioEffectsState.DEFAULT_CROSSFEED_STRENGTH.toDouble()).toFloat(),
-                    crossfeedAngle = fxJson.optDouble("crossfeedAngle", AudioEffectsState.DEFAULT_CROSSFEED_ANGLE.toDouble()).toFloat(),
+                    crossfeedStrength = fxJson.optDouble(
+                        "crossfeedStrength",
+                        AudioEffectsState.DEFAULT_CROSSFEED_STRENGTH.toDouble(),
+                    ).toFloat(),
+                    crossfeedAngle = fxJson.optDouble(
+                        "crossfeedAngle",
+                        AudioEffectsState.DEFAULT_CROSSFEED_ANGLE.toDouble(),
+                    ).toFloat(),
                     activePresetId = fxJson.optString("presetId", AudioEffectsState.PRESET_OFF_ID),
                 ).normalized()
             } else {
@@ -364,9 +370,15 @@ object AuraPlayerConfigStore {
                     autoEnableCrossfeedOnHeadphones = hpJson.optBoolean("autoEnableCrossfeedOnHeadphones", false),
                     doubleTapNextEnabled = hpJson.optBoolean("doubleTapNextEnabled", true),
                     tripleTapPreviousEnabled = hpJson.optBoolean("tripleTapPreviousEnabled", true),
-                    previousRestartThresholdMs = hpJson.optLong("previousRestartThresholdMs", HeadphonePreferences.DEFAULT_PREVIOUS_RESTART_MS),
+                    previousRestartThresholdMs = hpJson.optLong(
+                        "previousRestartThresholdMs",
+                        HeadphonePreferences.DEFAULT_PREVIOUS_RESTART_MS,
+                    ),
                     wrapQueueNavigation = hpJson.optBoolean("wrapQueueNavigation", true),
-                    seekStepSeconds = hpJson.optInt("seekStepSeconds", HeadphonePreferences.DEFAULT_SEEK_STEP_SECONDS),
+                    seekStepSeconds = hpJson.optInt(
+                        "seekStepSeconds",
+                        HeadphonePreferences.DEFAULT_SEEK_STEP_SECONDS,
+                    ),
                 ).normalized()
             } else {
                 HeadphonePreferences()

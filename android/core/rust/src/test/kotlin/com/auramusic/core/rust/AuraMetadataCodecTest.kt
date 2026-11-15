@@ -12,7 +12,6 @@ import java.io.DataOutputStream
  * Pruebas unitarias del protocolo binario JNI entre Rust (`aura_core::metadata`) y Kotlin.
  */
 class AuraMetadataCodecTest {
-
     @Test
     fun decodesValidPayloadWithTagsAndCover() {
         val baos = ByteArrayOutputStream()

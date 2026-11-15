@@ -61,6 +61,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -68,7 +69,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.platform.LocalClipboard
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
@@ -81,6 +82,7 @@ import com.auramusic.core.model.DownloadState
 import com.auramusic.core.model.DownloadStatus
 import com.auramusic.core.model.DownloaderEngineStatus
 import com.auramusic.core.model.Track
+import kotlinx.coroutines.launch
 import java.io.File
 import java.util.Locale
 
@@ -101,16 +103,16 @@ fun DownloaderScreen(
     onInspectUrl: (String) -> Unit,
     onConfirmDownload: () -> Unit,
     onCancelPreview: () -> Unit,
-    onCancelDownload: () -> Unit = {},
     onPlayDownloadedTrack: (Track) -> Unit,
     onCheckUpdates: () -> Unit,
     onToggleAutoUpdate: (Boolean) -> Unit,
-    onSelectQualityPreset: (AudioDownloadQuality) -> Unit = {},
-    onSelectPreviewFormat: (String) -> Unit = {},
     onDismissDownloadStatus: () -> Unit,
     onDismissUpdateMessage: () -> Unit,
-    onScreenActiveChanged: (Boolean) -> Unit = {},
     modifier: Modifier = Modifier,
+    onCancelDownload: () -> Unit = {},
+    onSelectQualityPreset: (AudioDownloadQuality) -> Unit = {},
+    onSelectPreviewFormat: (String) -> Unit = {},
+    onScreenActiveChanged: (Boolean) -> Unit = {},
 ) {
     DisposableEffect(Unit) {
         onScreenActiveChanged(true)
@@ -120,7 +122,8 @@ fun DownloaderScreen(
     }
 
     var urlInput by rememberSaveable { mutableStateOf("") }
-    val clipboardManager = LocalClipboardManager.current
+    val clipboard = LocalClipboard.current
+    val coroutineScope = rememberCoroutineScope()
 
     Scaffold(
         modifier = modifier,
@@ -197,7 +200,8 @@ fun DownloaderScreen(
                                 color = MaterialTheme.colorScheme.onPrimaryContainer,
                             )
                             Text(
-                                text = "Analiza el enlace antes de descargar. Al confirmar, la descarga sigue en segundo plano con notificación incluso si sales de Aura Music.",
+                                text = "Analiza el enlace antes de descargar. Al confirmar, la descarga sigue " +
+                                    "en segundo plano con notificación incluso si sales de Aura Music.",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.85f),
                             )
@@ -307,11 +311,18 @@ fun DownloaderScreen(
                         ) {
                             OutlinedButton(
                                 onClick = {
-                                    val pasted = clipboardManager.getText()?.text?.trim().orEmpty()
-                                    if (pasted.isNotEmpty()) {
-                                        urlInput = pasted
-                                        if (downloadState.status == DownloadStatus.PREVIEW_READY) {
-                                            onCancelPreview()
+                                    coroutineScope.launch {
+                                        val clipData = clipboard.getClipEntry()?.clipData
+                                        val pasted = if (clipData != null && clipData.itemCount > 0) {
+                                            clipData.getItemAt(0).text?.toString()?.trim().orEmpty()
+                                        } else {
+                                            ""
+                                        }
+                                        if (pasted.isNotEmpty()) {
+                                            urlInput = pasted
+                                            if (downloadState.status == DownloadStatus.PREVIEW_READY) {
+                                                onCancelPreview()
+                                            }
                                         }
                                     }
                                 },
@@ -1005,13 +1016,8 @@ private fun EngineVersionRow(
     }
 }
 
-private fun buildVersionWithDate(version: String, updatedAt: String?): String {
-    return if (updatedAt.isNullOrBlank()) {
-        version
-    } else {
-        "$version ($updatedAt)"
-    }
-}
+private fun buildVersionWithDate(version: String, updatedAt: String?): String =
+    if (updatedAt.isNullOrBlank()) version else "$version ($updatedAt)"
 
 private fun formatPreviewDuration(durationMs: Long): String {
     if (durationMs <= 0L) return "Desconocida"

@@ -10,7 +10,7 @@ use std::sync::{Arc, Mutex};
 use rquickjs::{CatchResultExt, Context, Function, Object, Runtime};
 
 /// Versión reportada de QuickJS-NG compatible con la detección de `yt-dlp`.
-pub const QUICKJS_VERSION_STRING: &str = "QuickJS-ng version 0.12.2";
+pub const QUICKJS_VERSION_STRING: &str = "QuickJS-ng version 0.14.0";
 
 /// Resultado estructurado de la ejecución de un script JavaScript en QuickJS-NG.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -55,17 +55,27 @@ pub fn eval_script_with_args(script: &str, args: &[String]) -> Result<JsExecutio
             .map_err(|e| format!("Error registrando print(): {e}"))?;
 
         // Objeto `console` (`log`, `info`, `warn`, `error`, `debug`).
-        let console_obj = Object::new(ctx.clone())
-            .map_err(|e| format!("Error creando objeto console: {e}"))?;
+        let console_obj =
+            Object::new(ctx.clone()).map_err(|e| format!("Error creando objeto console: {e}"))?;
 
         let log_fn = make_capture_fn(ctx.clone(), Arc::clone(&stdout_buf))?;
         let warn_fn = make_capture_fn(ctx.clone(), Arc::clone(&stderr_buf))?;
 
-        console_obj.set("log", log_fn.clone()).map_err(|e| e.to_string())?;
-        console_obj.set("info", log_fn.clone()).map_err(|e| e.to_string())?;
-        console_obj.set("debug", log_fn).map_err(|e| e.to_string())?;
-        console_obj.set("warn", warn_fn.clone()).map_err(|e| e.to_string())?;
-        console_obj.set("error", warn_fn).map_err(|e| e.to_string())?;
+        console_obj
+            .set("log", log_fn.clone())
+            .map_err(|e| e.to_string())?;
+        console_obj
+            .set("info", log_fn.clone())
+            .map_err(|e| e.to_string())?;
+        console_obj
+            .set("debug", log_fn)
+            .map_err(|e| e.to_string())?;
+        console_obj
+            .set("warn", warn_fn.clone())
+            .map_err(|e| e.to_string())?;
+        console_obj
+            .set("error", warn_fn)
+            .map_err(|e| e.to_string())?;
         globals
             .set("console", console_obj)
             .map_err(|e| format!("Error registrando console: {e}"))?;
@@ -81,20 +91,16 @@ pub fn eval_script_with_args(script: &str, args: &[String]) -> Result<JsExecutio
     // Asegura drenar trabajos pendientes de promesas si el script usó microtasks.
     while runtime.is_job_pending() {
         if let Err(err) = runtime.execute_pending_job() {
-            return Err(format!("Error ejecutando promesa pendiente en QuickJS: {err:?}"));
+            return Err(format!(
+                "Error ejecutando promesa pendiente en QuickJS: {err:?}"
+            ));
         }
     }
 
     exec_result?;
 
-    let stdout = stdout_buf
-        .lock()
-        .map(|g| g.clone())
-        .unwrap_or_default();
-    let stderr = stderr_buf
-        .lock()
-        .map(|g| g.clone())
-        .unwrap_or_default();
+    let stdout = stdout_buf.lock().map(|g| g.clone()).unwrap_or_default();
+    let stderr = stderr_buf.lock().map(|g| g.clone()).unwrap_or_default();
 
     Ok(JsExecutionResult { stdout, stderr })
 }
@@ -107,7 +113,8 @@ fn make_capture_fn<'js>(
 ) -> Result<Function<'js>, String> {
     Function::new(
         ctx,
-        move |call_ctx: rquickjs::Ctx<'js>, args: rquickjs::function::Rest<rquickjs::Value<'js>>| {
+        move |call_ctx: rquickjs::Ctx<'js>,
+              args: rquickjs::function::Rest<rquickjs::Value<'js>>| {
             let line = format_js_args(&call_ctx, &args);
             if let Ok(mut buf) = target.lock() {
                 if !buf.is_empty() {

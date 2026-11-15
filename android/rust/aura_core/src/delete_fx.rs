@@ -31,6 +31,7 @@ impl DeleteEffectKind {
 ///
 /// Ambos slices deben tener longitud mínima `width * height * 4` bytes en formato RGBA8888
 /// premultiplicado (el formato nativo de `android.graphics.Bitmap.Config.ARGB_8888`).
+#[allow(clippy::too_many_arguments)]
 pub fn render_delete_effect_frame(
     src_rgba: &[u8],
     dst_rgba: &mut [u8],
@@ -77,14 +78,7 @@ pub fn render_delete_effect_frame(
 }
 
 /// Efecto 0: Desintegración en cenizas (la tarjeta se quiebra en partículas que vuelan y se apagan).
-fn render_ashes(
-    src: &[u8],
-    dst: &mut [u8],
-    width: usize,
-    height: usize,
-    progress: f32,
-    seed: u32,
-) {
+fn render_ashes(src: &[u8], dst: &mut [u8], width: usize, height: usize, progress: f32, seed: u32) {
     let wf = width as f32;
     let hf = height as f32;
     // El frente avanza de derecha a izquierda con ligera inclinación diagonal.
@@ -153,7 +147,10 @@ fn render_ashes(
                 let ra = ((sa as f32) * fade).round().clamp(0.0, 255.0) as u8;
 
                 let tidx = (ty as usize * width + tx as usize) * 4;
-                blend_over_premul(&mut dst[tidx..tidx + 4], [rr.min(ra), rg.min(ra), rb.min(ra), ra]);
+                blend_over_premul(
+                    &mut dst[tidx..tidx + 4],
+                    [rr.min(ra), rg.min(ra), rb.min(ra), ra],
+                );
             }
         }
     }
@@ -197,7 +194,8 @@ fn render_burning_paper(
                 let darken = 1.0 - heat * 0.88;
                 let warm_boost = heat * 26.0;
                 let rr = ((src[idx] as f32 * darken) + warm_boost).clamp(0.0, sa as f32) as u8;
-                let rg = ((src[idx + 1] as f32 * darken) + warm_boost * 0.35).clamp(0.0, sa as f32) as u8;
+                let rg = ((src[idx + 1] as f32 * darken) + warm_boost * 0.35)
+                    .clamp(0.0, sa as f32) as u8;
                 let rb = (src[idx + 2] as f32 * darken * 0.65).clamp(0.0, sa as f32) as u8;
                 dst[idx] = rr;
                 dst[idx + 1] = rg;
@@ -206,11 +204,8 @@ fn render_burning_paper(
             } else if diff <= 0.055 {
                 // Línea de fuego / brasas incandescentes (naranja -> ámbar -> dorado).
                 let flame_t = (diff / 0.055).clamp(0.0, 1.0);
-                let flicker = 0.78
-                    + 0.22
-                        * (progress * 32.0 + detail * 14.0 + nx * 10.0)
-                            .sin()
-                            .abs();
+                let flicker =
+                    0.78 + 0.22 * (progress * 32.0 + detail * 14.0 + nx * 10.0).sin().abs();
                 let core = (1.0 - (flame_t - 0.35).abs() * 2.1).clamp(0.0, 1.0);
                 let alpha_f = (sa as f32 / 255.0) * (1.0 - flame_t * 0.25) * flicker;
                 let alpha = (alpha_f * 255.0).round().clamp(0.0, 255.0) as u8;
@@ -362,7 +357,11 @@ fn render_strange_aura(
 
                 let wave1 = (angle * 3.0 + radius * 14.0 - progress * 11.0).sin();
                 let wave2 = (angle * 5.0 - radius * 10.0 + progress * 8.0).cos();
-                let n = fbm_2d(nx * 5.0 + progress * 1.4, ny * 3.0 - progress * 1.1, seed ^ 0x99aabbcc);
+                let n = fbm_2d(
+                    nx * 5.0 + progress * 1.4,
+                    ny * 3.0 - progress * 1.1,
+                    seed ^ 0x99aabbcc,
+                );
 
                 let ribbon = ((wave1 * 0.55 + wave2 * 0.45) * 0.5 + 0.5).powf(2.6);
                 let ring = (1.0 - (radius - (0.48 - progress * 0.42)).abs() * 3.2).clamp(0.0, 1.0);
@@ -415,7 +414,8 @@ fn blend_over_premul(dst: &mut [u8], src: [u8; 4]) {
 
 #[inline]
 fn hash01(x: u32, y: u32, seed: u32) -> f32 {
-    let mut h = x.wrapping_mul(374761393) ^ y.wrapping_mul(668265263) ^ seed.wrapping_mul(1442695041);
+    let mut h =
+        x.wrapping_mul(374761393) ^ y.wrapping_mul(668265263) ^ seed.wrapping_mul(1442695041);
     h = (h ^ (h >> 13)).wrapping_mul(1274126177);
     h ^= h >> 16;
     (h & 0x00ff_ffff) as f32 / 16_777_215.0
@@ -479,42 +479,24 @@ mod tests {
             DeleteEffectKind::StrangeAura,
         ] {
             assert!(render_delete_effect_frame(
-                &src,
-                &mut dst,
-                w,
-                h,
-                effect,
-                0.0,
-                42,
-                0xFFA78BFA
+                &src, &mut dst, w, h, effect, 0.0, 42, 0xFFA78BFA
             ));
             assert_eq!(dst, src, "progress=0.0 debe preservar el frame original");
 
             assert!(render_delete_effect_frame(
-                &src,
-                &mut dst,
-                w,
-                h,
-                effect,
-                0.5,
-                42,
-                0xFFA78BFA
+                &src, &mut dst, w, h, effect, 0.5, 42, 0xFFA78BFA
             ));
-            assert_ne!(dst, src, "progress=0.5 debe transformar el buffer en {effect:?}");
+            assert_ne!(
+                dst, src,
+                "progress=0.5 debe transformar el buffer en {effect:?}"
+            );
             // Verifica que todo píxel mantenga alfa premultiplicado válido (R, G, B <= A).
-            for px in dst.chunks_exact(4) {
+            for px in dst.as_chunks::<4>().0 {
                 assert!(px[0] <= px[3] && px[1] <= px[3] && px[2] <= px[3]);
             }
 
             assert!(render_delete_effect_frame(
-                &src,
-                &mut dst,
-                w,
-                h,
-                effect,
-                1.0,
-                42,
-                0xFFA78BFA
+                &src, &mut dst, w, h, effect, 1.0, 42, 0xFFA78BFA
             ));
             assert!(
                 dst.iter().all(|&b| b == 0),

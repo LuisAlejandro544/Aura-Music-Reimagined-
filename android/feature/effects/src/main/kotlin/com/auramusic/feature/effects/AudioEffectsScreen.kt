@@ -227,8 +227,8 @@ fun AudioEffectsScreen(
                             )
                             Text(
                                 text = activePreset?.subtitle
-                                    ?: (PlaybackTuningHelper.formatEffectsSummary(effectsState)
-                                        ?: "Activa un preset o ajusta Audio 8D, Reverb y Slowed manualmente."),
+                                    ?: PlaybackTuningHelper.formatEffectsSummary(effectsState)
+                                    ?: "Activa un preset o ajusta Audio 8D, Reverb y Slowed manualmente.",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = if (effectsState.isAnyEffectEnabled) {
                                     MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.85f)
@@ -377,7 +377,13 @@ fun AudioEffectsScreen(
                                     )
                                     Text(
                                         text = if (effectsState.slowedEnabled) {
-                                            "Ritmo ${PlaybackTuningHelper.formatSpeedLabel(effectsState.slowedSpeed)} • ${if (effectsState.slowedPreservePitch) "Tono original" else "Tono grave de cinta"}"
+                                            val speedLabel = PlaybackTuningHelper.formatSpeedLabel(effectsState.slowedSpeed)
+                                            val pitchLabel = if (effectsState.slowedPreservePitch) {
+                                                "Tono original"
+                                            } else {
+                                                "Tono grave de cinta"
+                                            }
+                                            "Ritmo $speedLabel • $pitchLabel"
                                         } else {
                                             "Desactivado"
                                         },
@@ -543,7 +549,9 @@ fun AudioEffectsScreen(
                                     )
                                     Text(
                                         text = if (effectsState.reverbEnabled) {
-                                            "Sala ${(effectsState.reverbRoomSize * 100).roundToInt()}% • Mezcla ${(effectsState.reverbWetMix * 100).roundToInt()}%"
+                                            val roomPct = (effectsState.reverbRoomSize * 100).roundToInt()
+                                            val wetPct = (effectsState.reverbWetMix * 100).roundToInt()
+                                            "Sala $roomPct% • Mezcla $wetPct%"
                                         } else {
                                             "Desactivado (8 combs + 4 allpass en espera)"
                                         },
@@ -751,7 +759,8 @@ private fun OutputRouteEffectsBanner(
         AudioOutputType.USB_HEADSET -> Icons.Rounded.Usb
         AudioOutputType.WIRED_HEADSET -> Icons.Rounded.Headphones
         AudioOutputType.SPEAKER,
-        AudioOutputType.OTHER -> Icons.Rounded.Speaker
+        AudioOutputType.OTHER,
+        -> Icons.Rounded.Speaker
     }
     val statusDetail = when {
         spatial8dBypassedBySpeaker ->
@@ -859,9 +868,9 @@ private fun StaticCrossfeedCard(
                         Text(
                             text = when {
                                 autoEnabledByHeadphones ->
-                                    "Activo por auriculares • ${angleDegrees}° • ${(strength * 100f).roundToInt()}%"
+                                    "Activo por auriculares • $angleDegrees° • ${(strength * 100f).roundToInt()}%"
                                 enabled ->
-                                    "Escenario frontal ±${angleDegrees}° • Intensidad ${(strength * 100f).roundToInt()}%"
+                                    "Escenario frontal ±$angleDegrees° • Intensidad ${(strength * 100f).roundToInt()}%"
                                 else ->
                                     "Desactivado • Naturaliza el estéreo en auriculares"
                             },
@@ -955,7 +964,7 @@ private fun StaticCrossfeedCard(
                             fontWeight = FontWeight.SemiBold,
                         )
                         Text(
-                            text = "±${angleDegrees}°",
+                            text = "±$angleDegrees°",
                             style = MaterialTheme.typography.labelLarge,
                             fontWeight = FontWeight.Bold,
                             color = if (enabled) primary else MaterialTheme.colorScheme.onSurfaceVariant,

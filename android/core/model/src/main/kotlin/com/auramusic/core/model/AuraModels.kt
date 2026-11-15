@@ -312,7 +312,6 @@ data class ArtistPlaylist(
  * Constructor puro y determinista de playlists automáticas por artista.
  */
 object ArtistPlaylistBuilder {
-
     private val whitespaceRegex = Regex("\\s+")
 
     /**
@@ -384,7 +383,6 @@ object ArtistPlaylistBuilder {
  * Operaciones puras y seguras de índice para manipular la cola de reproducción activa.
  */
 object PlaybackQueueHelper {
-
     data class QueueMutationResult(
         val queue: List<Track>,
         val currentIndex: Int,
@@ -562,7 +560,6 @@ data class DownloadPreview(
  * Reglas puras para seleccionar la calidad/formato de audio en la vista previa de descarga.
  */
 object DownloadFormatHelper {
-
     fun pickDefaultOption(
         options: List<DownloadAudioFormatOption>,
         quality: AudioDownloadQuality,
@@ -660,7 +657,9 @@ data class DownloaderEngineStatus(
 /**
  * Efectos creativos ejecutados en Rust al eliminar o quitar una canción.
  */
-enum class DeleteAnimationEffect(val id: Int) {
+enum class DeleteAnimationEffect(
+    val id: Int,
+) {
     ASHES(0),
     BURNING_PAPER(1),
     STRANGE_AURA(2);
@@ -726,7 +725,6 @@ data class PlaybackTuning(
  * Reglas puras y deterministas para velocidad de reproducción, tono/velocidad de voz y Crossfade.
  */
 object PlaybackTuningHelper {
-
     fun clampCrossfadeSeconds(seconds: Int): Int =
         seconds.coerceIn(PlaybackTuning.MIN_CROSSFADE_SECONDS, PlaybackTuning.MAX_CROSSFADE_SECONDS)
 
@@ -1270,7 +1268,6 @@ enum class MediaHookTapAction {
  * y comportamiento de botones multimedia cableados / Bluetooth AVRCP.
  */
 object HeadphoneRoutingHelper {
-
     fun clampPreviousRestartThresholdMs(ms: Long): Long =
         ms.coerceIn(0L, 15_000L)
 
@@ -1425,7 +1422,8 @@ object SleepTimerHelper {
         SleepTimerMode.END_OF_TRACK -> true
         SleepTimerMode.END_OF_QUEUE -> !hasNextMediaItem
         SleepTimerMode.OFF,
-        SleepTimerMode.DURATION -> false
+        SleepTimerMode.DURATION,
+        -> false
     }
 
     /**
@@ -1445,7 +1443,8 @@ object SleepTimerHelper {
             reasonIsRepeat || wrappedQueue
         }
         SleepTimerMode.OFF,
-        SleepTimerMode.DURATION -> false
+        SleepTimerMode.DURATION,
+        -> false
     }
 }
 
@@ -1617,11 +1616,3 @@ object SystemFolderHelper {
         return ext in SUPPORTED_AUDIO_EXTENSIONS
     }
 }
-
-
-
-
-
-
-
-

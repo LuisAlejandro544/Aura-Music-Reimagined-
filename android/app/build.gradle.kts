@@ -4,20 +4,19 @@
 // distribución directa en Uptodown o repositorios de terceros.
 plugins {
     alias(libs.plugins.android.application)
-    alias(libs.plugins.kotlin.android)
     alias(libs.plugins.kotlin.compose)
 }
 
 android {
     namespace = "com.auramusic.app"
-    compileSdk = 35
+    compileSdk = 36
 
     defaultConfig {
         applicationId = "com.auramusic.app"
         // minSdk 26 (Android 8.0): elegido deliberadamente para contar con canales de notificación
         // nativos requeridos por Media3 MediaSessionService, iconos adaptativos y mejor ABI Rust.
         minSdk = 26
-        targetSdk = 35
+        targetSdk = 36
         versionCode = 1
         versionName = "0.1.0"
 
@@ -59,8 +58,9 @@ android {
         targetCompatibility = JavaVersion.VERSION_17
     }
 
-    kotlinOptions {
-        jvmTarget = "17"
+    lint {
+        // La distribución universal/individual por ABI móvil (-PauraAbis) se gestiona intencionadamente para teléfonos 32/64-bit.
+        disable.add("ChromeOsAbiSupport")
     }
 
     packaging {
@@ -71,6 +71,12 @@ android {
         resources {
             excludes += "/META-INF/{AL2.0,LGPL2.1}"
         }
+    }
+}
+
+kotlin {
+    compilerOptions {
+        jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17)
     }
 }
 

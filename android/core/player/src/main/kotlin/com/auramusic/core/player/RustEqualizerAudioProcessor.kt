@@ -1,5 +1,6 @@
 package com.auramusic.core.player
 
+import android.annotation.SuppressLint
 import androidx.annotation.OptIn
 import androidx.media3.common.C
 import androidx.media3.common.audio.AudioProcessor.AudioFormat
@@ -17,7 +18,6 @@ import java.nio.ByteBuffer
  */
 @OptIn(UnstableApi::class)
 class RustEqualizerAudioProcessor : BaseAudioProcessor() {
-
     override fun onConfigure(inputAudioFormat: AudioFormat): AudioFormat {
         if (inputAudioFormat.encoding != C.ENCODING_PCM_16BIT &&
             inputAudioFormat.encoding != C.ENCODING_PCM_FLOAT
@@ -32,6 +32,7 @@ class RustEqualizerAudioProcessor : BaseAudioProcessor() {
         return inputAudioFormat
     }
 
+    @SuppressLint("SwitchIntDef")
     override fun queueInput(inputBuffer: ByteBuffer) {
         val remaining = inputBuffer.remaining()
         if (remaining == 0) return
@@ -44,6 +45,7 @@ class RustEqualizerAudioProcessor : BaseAudioProcessor() {
             when (inputAudioFormat.encoding) {
                 C.ENCODING_PCM_16BIT -> AuraRustBridge.processEqualizerPcm16(outputBuffer, remaining)
                 C.ENCODING_PCM_FLOAT -> AuraRustBridge.processEqualizerPcmFloat(outputBuffer, remaining)
+                else -> Unit
             }
         }
     }

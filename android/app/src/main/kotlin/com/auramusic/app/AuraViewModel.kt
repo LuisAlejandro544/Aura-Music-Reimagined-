@@ -46,18 +46,17 @@ import kotlinx.coroutines.withContext
 class AuraViewModel(
     private val container: AuraAppContainer,
 ) : ViewModel() {
-
     private val _rustEngineInfo = MutableStateFlow("Cargando motor nativo Rust...")
     val rustEngineInfo: StateFlow<String> = _rustEngineInfo.asStateFlow()
 
     private val _isAppReady = MutableStateFlow(false)
     val isAppReady: StateFlow<Boolean> = _isAppReady.asStateFlow()
 
-    private val _openPlayerChannel = Channel<Unit>(Channel.BUFFERED)
-    val openPlayerEvents: Flow<Unit> = _openPlayerChannel.receiveAsFlow()
+    private val openPlayerChannel = Channel<Unit>(Channel.BUFFERED)
+    val openPlayerEvents: Flow<Unit> = openPlayerChannel.receiveAsFlow()
 
-    private val _uiMessagesChannel = Channel<String>(Channel.BUFFERED)
-    val uiMessages: Flow<String> = _uiMessagesChannel.receiveAsFlow()
+    private val uiMessagesChannel = Channel<String>(Channel.BUFFERED)
+    val uiMessages: Flow<String> = uiMessagesChannel.receiveAsFlow()
 
     private lateinit var playbackCoordinator: AuraPlaybackCoordinator
     private lateinit var audioTuningCoordinator: AuraAudioTuningCoordinator
@@ -99,8 +98,8 @@ class AuraViewModel(
             systemStorageManager = container.systemStorageManager,
             downloaderClient = container.downloaderRemoteClient,
             playerController = container.playerController,
-            onOpenPlayerRequested = { _openPlayerChannel.trySend(Unit) },
-            onUiMessage = { message -> _uiMessagesChannel.trySend(message) },
+            onOpenPlayerRequested = { openPlayerChannel.trySend(Unit) },
+            onUiMessage = { message -> uiMessagesChannel.trySend(message) },
         )
 
         container.playerController.onUiAttached()
@@ -319,7 +318,7 @@ class AuraViewModel(
     fun cancelSleepTimer() = playbackCoordinator.cancelSleepTimer()
 
     fun requestOpenPlayer() {
-        _openPlayerChannel.trySend(Unit)
+        openPlayerChannel.trySend(Unit)
     }
 
     /**
@@ -457,8 +456,7 @@ class AuraViewModel(
         private val container: AuraAppContainer,
     ) : ViewModelProvider.Factory {
         @Suppress("UNCHECKED_CAST")
-        override fun <T : ViewModel> create(modelClass: Class<T>): T {
-            return AuraViewModel(container) as T
-        }
+        override fun <T : ViewModel> create(modelClass: Class<T>): T =
+            AuraViewModel(container) as T
     }
 }

@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Comprueba dependencias desactualizadas en Gradle (libs.versions.toml), Gradle Wrapper,
 Rust (Cargo.toml) y Python (yt-dlp / yt-dlp-ejs) consultando Maven, Gradle, Crates.io y PyPI.
 
@@ -12,20 +11,26 @@ import argparse
 import json
 import os
 import re
+import sys
+import tomllib
 import urllib.error
 import urllib.request
 import xml.etree.ElementTree as ET
 from dataclasses import asdict, dataclass
-from typing import Optional
 
-try:
-    import tomllib  # Python 3.11+
-except ImportError:  # pragma: no cover
-    tomllib = None  # type: ignore[assignment]
-
-
-USER_AGENT = "AuraMusic-CI-Audit/1.0 (https://github.com/LuisAlejandro544/Aura-Music-Reimagined-)"
+USER_AGENT = (
+    "AuraMusic-CI-Audit/1.0 "
+    "(https://github.com/LuisAlejandro544/Aura-Music-Reimagined-)"
+)
 UNSTABLE_MARKERS = ("alpha", "beta", "rc", "dev", "snapshot", "canary", "-m")
+HTTP_ERRORS = (
+    urllib.error.URLError,
+    urllib.error.HTTPError,
+    TimeoutError,
+    OSError,
+    ValueError,
+    json.JSONDecodeError,
+)
 
 
 @dataclass
@@ -33,8 +38,8 @@ class DependencyCheckResult:
     ecosystem: str
     name: str
     current_version: str
-    latest_version: Optional[str]
-    status: str  # "up-to-date" | "patch-update" | "minor-update" | "major-update" | "update-available" | "check-failed"
+    latest_version: str | None
+    status: str
     registry_url: str
     note: str = ""
 
@@ -62,7 +67,7 @@ def _version_tuple(version: str) -> tuple[int, ...]:
     return tuple(parts)
 
 
-def _classify_update(current: str, latest: Optional[str]) -> str:
+def _classify_update(current: str, latest: str | None) -> str:
     if not latest:
         return "check-failed"
     cur_norm = current.strip().lstrip("^~>=<!v ")
@@ -87,44 +92,56 @@ def _classify_update(current: str, latest: Optional[str]) -> str:
 
 def _parse_toml(path: str) -> dict:
     with open(path, "rb") as f:
-        if tomllib is not None:
-            return tomllib.load(f)
-    raise RuntimeError("Python 3.11+ (tomllib) es requerido para parsear TOML.")
+        return tomllib.load(f)
 
 
-def _fetch_maven_latest(group: str, artifact: str) -> tuple[Optional[str], str]:
+def _fetch_maven_latest(group: str, artifact: str) -> tuple[str | None, str]:
     group_path = group.replace(".", "/")
-    urls = []
+    google_url = (
+        f"https://dl.google.com/dl/android/maven2/{group_path}"
+        f"/{artifact}/maven-metadata.xml"
+    )
+    central_url = (
+        f"https://repo1.maven.org/maven2/{group_path}/{artifact}/maven-metadata.xml"
+    )
     if group.startswith(("androidx.", "com.android.", "com.google.android.")):
-        urls.append(f"https://dl.google.com/dl/android/maven2/{group_path}/{artifact}/maven-metadata.xml")
-        urls.append(f"https://repo1.maven.org/maven2/{group_path}/{artifact}/maven-metadata.xml")
+        urls = [google_url, central_url]
     else:
-        urls.append(f"https://repo1.maven.org/maven2/{group_path}/{artifact}/maven-metadata.xml")
-        urls.append(f"https://dl.google.com/dl/android/maven2/{group_path}/{artifact}/maven-metadata.xml")
+        urls = [central_url, google_url]
 
     for url in urls:
         try:
             xml_text = _http_get_text(url, timeout=10)
             root = ET.fromstring(xml_text)
-            versions = [v.text.strip() for v in root.findall(".//versioning/versions/version") if v.text]
-            stable = [v for v in versions if _is_stable_version(v)]
-            release = root.findtext(".//versioning/release")
-            if stable:
-                return stable[-1], url.rsplit("/maven-metadata.xml", 1)[0]
-            if release:
-                return release.strip(), url.rsplit("/maven-metadata.xml", 1)[0]
-            if versions:
-                return versions[-1], url.rsplit("/maven-metadata.xml", 1)[0]
-        except Exception:
+        except (*HTTP_ERRORS, ET.ParseError) as exc:
+            sys.stderr.write(f"Maven lookup warning ({url}): {exc}\n")
             continue
+
+        versions = [
+            v.text.strip()
+            for v in root.findall(".//versioning/versions/version")
+            if v.text
+        ]
+        stable = [v for v in versions if _is_stable_version(v)]
+        release = root.findtext(".//versioning/release")
+        base_url = url.rsplit("/maven-metadata.xml", 1)[0]
+        if stable:
+            return stable[-1], base_url
+        if release:
+            return release.strip(), base_url
+        if versions:
+            return versions[-1], base_url
     return None, urls[0]
 
 
 def check_gradle_wrapper(root_dir: str) -> list[DependencyCheckResult]:
-    props_path = os.path.join(root_dir, "android/gradle/wrapper/gradle-wrapper.properties")
+    props_path = os.path.join(
+        root_dir,
+        "android/gradle/wrapper/gradle-wrapper.properties",
+    )
     if not os.path.exists(props_path):
         return []
-    with open(props_path, "r", encoding="utf-8") as f:
+    with open(props_path, encoding="utf-8") as f:
         text = f.read()
     m = re.search(r"gradle-([0-9]+\.[0-9]+(?:\.[0-9]+)?)-(?:bin|all)\.zip", text)
     if not m:
@@ -133,9 +150,10 @@ def check_gradle_wrapper(root_dir: str) -> list[DependencyCheckResult]:
     latest = None
     note = ""
     try:
-        data = json.loads(_http_get_text("https://services.gradle.org/versions/current", timeout=10))
+        raw = _http_get_text("https://services.gradle.org/versions/current", timeout=10)
+        data = json.loads(raw)
         latest = str(data.get("version") or "").strip() or None
-    except Exception as exc:
+    except HTTP_ERRORS as exc:
         note = f"No se pudo consultar Gradle Services: {exc}"
     return [
         DependencyCheckResult(
@@ -159,21 +177,34 @@ def check_version_catalog(root_dir: str) -> list[DependencyCheckResult]:
     libraries = data.get("libraries", {})
     plugins = data.get("plugins", {})
 
-    # Mapea cada version.ref a un artefacto representativo de Maven para consultar su última versión.
+    # Mapea cada version.ref a un artefacto Maven para consultar su última versión.
     ref_to_coord: dict[str, tuple[str, str, str]] = {}
 
     plugin_coords = {
         "com.android.application": ("com.android.tools.build", "gradle"),
         "com.android.library": ("com.android.tools.build", "gradle"),
         "org.jetbrains.kotlin.android": ("org.jetbrains.kotlin", "kotlin-gradle-plugin"),
-        "com.google.devtools.ksp": ("com.google.devtools.ksp", "symbol-processing-gradle-plugin"),
+        "org.jetbrains.kotlin.jvm": ("org.jetbrains.kotlin", "kotlin-gradle-plugin"),
+        "org.jetbrains.kotlin.plugin.compose": (
+            "org.jetbrains.kotlin",
+            "kotlin-gradle-plugin",
+        ),
+        "com.google.devtools.ksp": (
+            "com.google.devtools.ksp",
+            "symbol-processing-gradle-plugin",
+        ),
         "com.chaquo.python": ("com.chaquo.python", "gradle"),
     }
 
     for alias, entry in plugins.items():
         if isinstance(entry, dict):
             pid = entry.get("id", "")
-            vref = entry.get("version", {}).get("ref") if isinstance(entry.get("version"), dict) else entry.get("version.ref")
+            ver_obj = entry.get("version")
+            vref = (
+                ver_obj.get("ref")
+                if isinstance(ver_obj, dict)
+                else entry.get("version.ref")
+            )
             if vref and pid in plugin_coords and vref not in ref_to_coord:
                 g, a = plugin_coords[pid]
                 ref_to_coord[vref] = (alias, g, a)
@@ -181,7 +212,12 @@ def check_version_catalog(root_dir: str) -> list[DependencyCheckResult]:
     for alias, entry in libraries.items():
         if not isinstance(entry, dict):
             continue
-        vref = entry.get("version", {}).get("ref") if isinstance(entry.get("version"), dict) else entry.get("version.ref")
+        ver_obj = entry.get("version")
+        vref = (
+            ver_obj.get("ref")
+            if isinstance(ver_obj, dict)
+            else entry.get("version.ref")
+        )
         if not vref or vref in ref_to_coord:
             continue
         group = entry.get("group")
@@ -199,10 +235,14 @@ def check_version_catalog(root_dir: str) -> list[DependencyCheckResult]:
         coord = ref_to_coord.get(vref)
         if not coord:
             continue
-        alias, group, artifact = coord
+        _alias, group, artifact = coord
         latest, reg_url = _fetch_maven_latest(group, artifact)
         note = ""
-        if vref == "ksp" and latest and not latest.startswith(str(versions.get("kotlin", ""))):
+        if (
+            vref == "ksp"
+            and latest
+            and not latest.startswith(str(versions.get("kotlin", "")))
+        ):
             note = "KSP debe mantenerse alineado con la versión mayor/menor de Kotlin."
         results.append(
             DependencyCheckResult(
@@ -242,13 +282,16 @@ def check_rust_crates(root_dir: str) -> list[DependencyCheckResult]:
         try:
             payload = json.loads(_http_get_text(url, timeout=10))
             crate_info = payload.get("crate", {})
-            latest = str(
-                crate_info.get("max_stable_version")
-                or crate_info.get("max_version")
-                or crate_info.get("newest_version")
-                or ""
-            ).strip() or None
-        except Exception as exc:
+            latest = (
+                str(
+                    crate_info.get("max_stable_version")
+                    or crate_info.get("max_version")
+                    or crate_info.get("newest_version")
+                    or ""
+                ).strip()
+                or None
+            )
+        except HTTP_ERRORS as exc:
             note = f"Error consultando crates.io: {exc}"
 
         results.append(
@@ -269,23 +312,35 @@ def check_python_packages(root_dir: str) -> list[DependencyCheckResult]:
     dl_gradle_path = os.path.join(root_dir, "android/core/downloader/build.gradle.kts")
     if not os.path.exists(dl_gradle_path):
         return []
-    with open(dl_gradle_path, "r", encoding="utf-8") as f:
+    with open(dl_gradle_path, encoding="utf-8") as f:
         gradle_text = f.read()
 
     pkgs = re.findall(r'install\(\s*"([^"]+)"\s*\)', gradle_text)
     results: list[DependencyCheckResult] = []
     for raw_pkg in pkgs:
         pkg_name = raw_pkg.split("==")[0].split(">=")[0].strip()
-        pinned = raw_pkg.split("==")[1].strip() if "==" in raw_pkg else "latest (en compilación)"
+        pinned = (
+            raw_pkg.split("==")[1].strip()
+            if "==" in raw_pkg
+            else "latest (en compilación)"
+        )
         latest = None
-        note = "Sin versión fija en build.gradle.kts; la app también auto-actualiza desde PyPI en runtime."
+        note = (
+            "Sin versión fija en build.gradle.kts; "
+            "la app auto-actualiza desde PyPI en runtime."
+        )
         try:
-            payload = json.loads(_http_get_text(f"https://pypi.org/pypi/{pkg_name}/json", timeout=10))
+            raw = _http_get_text(f"https://pypi.org/pypi/{pkg_name}/json", timeout=10)
+            payload = json.loads(raw)
             latest = str(payload.get("info", {}).get("version") or "").strip() or None
-        except Exception as exc:
+        except HTTP_ERRORS as exc:
             note = f"Error consultando PyPI: {exc}"
 
-        status = "up-to-date" if "==" not in raw_pkg and latest else _classify_update(pinned, latest)
+        status = (
+            "up-to-date"
+            if "==" not in raw_pkg and latest
+            else _classify_update(pinned, latest)
+        )
         results.append(
             DependencyCheckResult(
                 ecosystem="Python (PyPI)",
@@ -301,10 +356,16 @@ def check_python_packages(root_dir: str) -> list[DependencyCheckResult]:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Audita dependencias viejas en Gradle, Rust y Python.")
+    parser = argparse.ArgumentParser(
+        description="Audita dependencias viejas en Gradle, Rust y Python."
+    )
     parser.add_argument("--root", default=".", help="Raíz del repositorio")
     parser.add_argument("--output-json", required=True, help="Ruta de salida JSON")
-    parser.add_argument("--output-log", required=True, help="Ruta de salida de log legible")
+    parser.add_argument(
+        "--output-log",
+        required=True,
+        help="Ruta de salida de log legible",
+    )
     args = parser.parse_args()
 
     results: list[DependencyCheckResult] = []
@@ -313,9 +374,13 @@ def main() -> int:
     results.extend(check_rust_crates(args.root))
     results.extend(check_python_packages(args.root))
 
-    outdated_count = sum(
-        1 for r in results if r.status in ("patch-update", "minor-update", "major-update", "update-available")
+    outdated_statuses = (
+        "patch-update",
+        "minor-update",
+        "major-update",
+        "update-available",
     )
+    outdated_count = sum(1 for r in results if r.status in outdated_statuses)
 
     payload = {
         "total": len(results),
@@ -328,7 +393,8 @@ def main() -> int:
         json.dump(payload, f, indent=2, ensure_ascii=False)
 
     lines = [
-        f"=== Auditoría de dependencias ({len(results)} analizadas, {outdated_count} con actualización disponible) ===",
+        f"=== Auditoría de dependencias ({len(results)} analizadas, "
+        f"{outdated_count} con actualización disponible) ===",
         "",
     ]
     for item in results:
@@ -342,7 +408,10 @@ def main() -> int:
         }.get(item.status, item.status.upper())
         latest_str = item.latest_version or "?"
         note_str = f" | {item.note}" if item.note else ""
-        lines.append(f"[{tag}] [{item.ecosystem}] {item.name}: {item.current_version} -> {latest_str}{note_str}")
+        lines.append(
+            f"[{tag}] [{item.ecosystem}] {item.name}: "
+            f"{item.current_version} -> {latest_str}{note_str}"
+        )
 
     os.makedirs(os.path.dirname(os.path.abspath(args.output_log)), exist_ok=True)
     with open(args.output_log, "w", encoding="utf-8") as f:

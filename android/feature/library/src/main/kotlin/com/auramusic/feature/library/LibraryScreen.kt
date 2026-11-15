@@ -89,17 +89,19 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
+import androidx.core.graphics.createBitmap
+import androidx.core.graphics.scale
 import coil3.compose.AsyncImage
 import coil3.request.ImageRequest
 import com.auramusic.core.model.DeleteAnimationEffect
 import com.auramusic.core.model.DeleteEffectFrameRenderer
 import com.auramusic.core.model.ImportProgress
 import com.auramusic.core.model.Track
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import java.io.File
 import java.nio.ByteBuffer
 import java.util.Locale
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
 import kotlin.math.roundToInt
 
 /**
@@ -119,19 +121,19 @@ fun LibraryScreen(
     onImportFolder: () -> Unit,
     onPlayTrack: (List<Track>, Int) -> Unit,
     onToggleLike: (Long) -> Unit,
-    onPlayNext: (Track) -> Unit = {},
-    onAddToQueue: (Track) -> Unit = {},
     onAddToPlaylist: (Track) -> Unit,
-    onEditMetadata: (Track) -> Unit = {},
     onChangeCover: (Track) -> Unit,
     onDeleteTrack: (Long) -> Unit,
     onOpenLikedSongs: () -> Unit,
     onDismissImportMessage: () -> Unit,
+    modifier: Modifier = Modifier,
+    onPlayNext: (Track) -> Unit = {},
+    onAddToQueue: (Track) -> Unit = {},
+    onEditMetadata: (Track) -> Unit = {},
     onOpenDownloader: () -> Unit = {},
     deleteAnimationsEnabled: Boolean = true,
     accentArgb: Int = 0xFFA78BFA.toInt(),
     deleteEffectRenderer: DeleteEffectFrameRenderer? = null,
-    modifier: Modifier = Modifier,
 ) {
     var searchQuery by remember { mutableStateOf("") }
     var showImportSheet by remember { mutableStateOf(false) }
@@ -626,7 +628,8 @@ private fun EmptyLibraryState(
         )
         Spacer(modifier = Modifier.height(8.dp))
         Text(
-            text = "Importa canciones sueltas, varias a la vez o una carpeta completa. Las pistas sin carátula recibirán una portada procedural creada en Rust.",
+            text = "Importa canciones sueltas, varias a la vez o una carpeta completa. " +
+                "Las pistas sin carátula recibirán una portada procedural creada en Rust.",
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
@@ -816,7 +819,7 @@ private fun RustDeleteEffectHost(
                     .toInt()
                     .coerceAtLeast(1)
                 val scaledBitmap = if (targetWidth != softwareBitmap.width || targetHeight != softwareBitmap.height) {
-                    Bitmap.createScaledBitmap(softwareBitmap, targetWidth, targetHeight, true)
+                    softwareBitmap.scale(targetWidth, targetHeight)
                 } else {
                     softwareBitmap
                 }
@@ -837,8 +840,8 @@ private fun RustDeleteEffectHost(
 
             val (width, height, srcBuffer) = prepared
             val dstBuffer = ByteBuffer.allocateDirect(width * height * 4)
-            val frameBitmapA = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
-            val frameBitmapB = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+            val frameBitmapA = createBitmap(width, height)
+            val frameBitmapB = createBitmap(width, height)
             var useBufferA = true
 
             val startNanos = System.nanoTime()

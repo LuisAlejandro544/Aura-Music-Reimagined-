@@ -7,7 +7,6 @@ import java.util.Properties
 
 plugins {
     alias(libs.plugins.android.library)
-    alias(libs.plugins.kotlin.android)
 }
 
 val rustCrateDir = rootProject.file("rust/aura_core")
@@ -140,7 +139,7 @@ val buildRustAndroidLibs by tasks.registering(Exec::class) {
 
 android {
     namespace = "com.auramusic.core.rust"
-    compileSdk = 35
+    compileSdk = 36
 
     // minSdk 26 (Android 8.0): habilita canales de notificación nativos para Media3,
     // iconos adaptativos, java.time sin desugaring pesado y compatibilidad moderna con NDK/Rust.
@@ -159,9 +158,11 @@ android {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
     }
+}
 
-    kotlinOptions {
-        jvmTarget = "17"
+kotlin {
+    compilerOptions {
+        jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17)
     }
 }
 

@@ -148,7 +148,9 @@ internal class AuraCrossfadeEngine(
         crossfadeMonitorJob = null
     }
 
-    fun cancelActive(@Suppress("UNUSED_PARAMETER") reason: String) {
+    fun cancelActive(
+        @Suppress("UNUSED_PARAMETER") reason: String,
+    ) {
         activeCrossfadeJob?.cancel()
         activeCrossfadeJob = null
         primaryPlayerProvider()?.volume = 1f

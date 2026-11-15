@@ -42,7 +42,6 @@ import kotlinx.coroutines.launch
  * - [AuraMediaSessionCallback]: comandos IPC y gestos de botones cableados/Bluetooth.
  */
 class AuraPlaybackService : MediaSessionService() {
-
     private var mediaSession: MediaSession? = null
     private var primaryPlayer: ExoPlayer? = null
     private val rustEqualizerProcessor = RustEqualizerAudioProcessor()
@@ -138,13 +137,12 @@ class AuraPlaybackService : MediaSessionService() {
                 context: Context,
                 enableFloatOutput: Boolean,
                 enableAudioOutputPlaybackParameters: Boolean,
-            ): AudioSink {
-                return DefaultAudioSink.Builder(context)
+            ): AudioSink =
+                DefaultAudioSink.Builder(context)
                     .setEnableFloatOutput(enableFloatOutput)
                     .setEnableAudioTrackPlaybackParams(enableAudioOutputPlaybackParameters)
                     .setAudioProcessors(arrayOf(rustEqualizerProcessor))
                     .build()
-            }
         }
 
         // Buffer acotado optimizado para pistas de audio locales (evita reservar ~15 MB de vídeo).
@@ -235,9 +233,7 @@ class AuraPlaybackService : MediaSessionService() {
         observeTuningPreferences()
     }
 
-    override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaSession? {
-        return mediaSession
-    }
+    override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaSession? = mediaSession
 
     override fun onTrimMemory(level: Int) {
         super.onTrimMemory(level)
@@ -340,12 +336,13 @@ class AuraPlaybackService : MediaSessionService() {
                 wasPausedByHeadphoneDisconnect = true
             }
         } else if (!prevConnected && nextRoute.isHeadphonesConnected) {
+            val canAutoResumeState = wasPausedByHeadphoneDisconnect ||
+                player.playbackState == Player.STATE_READY ||
+                player.playbackState == Player.STATE_IDLE
             if (currentHeadphonePrefs.autoResumeOnConnect &&
                 player.mediaItemCount > 0 &&
                 !player.isPlaying &&
-                (wasPausedByHeadphoneDisconnect ||
-                    player.playbackState == Player.STATE_READY ||
-                    player.playbackState == Player.STATE_IDLE)
+                canAutoResumeState
             ) {
                 wasPausedByHeadphoneDisconnect = false
                 if (player.playbackState == Player.STATE_IDLE) {

@@ -11,7 +11,6 @@ import java.nio.ByteOrder
  * sin cargar la librería nativa `.so`.
  */
 object AuraMetadataCodec {
-
     fun decode(raw: ByteArray): RustAudioMetadata? {
         if (raw.size < 4) return null
         val buffer = ByteBuffer.wrap(raw).order(ByteOrder.BIG_ENDIAN)

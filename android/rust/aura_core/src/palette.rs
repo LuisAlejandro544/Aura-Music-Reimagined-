@@ -4,7 +4,7 @@
 //! (primario profundo, secundario luminoso, acento cálido/frío y sombra de contraste),
 //! evitando tonos apagados o combinaciones genéricas.
 
-use rand::Rng;
+use rand::RngExt;
 use tiny_skia::Color;
 
 /// Paleta cromática de 4 colores usada para componer cada carátula procedural.
@@ -20,7 +20,7 @@ pub struct AuraPalette {
 impl AuraPalette {
     /// Genera una paleta armónica a partir de un generador pseudoaleatorio determinista
     /// y un color de acento opcional (ARGB) proveniente del tema del usuario.
-    pub fn from_rng<R: Rng>(rng: &mut R, accent_argb: Option<u32>) -> Self {
+    pub fn from_rng<R: RngExt>(rng: &mut R, accent_argb: Option<u32>) -> Self {
         // Si hay acento del tema, desplazamos ligeramente su matiz para mantener variedad
         // entre canciones sin perder cohesión visual.
         let base_hue = match accent_argb {

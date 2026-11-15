@@ -77,7 +77,9 @@ fn write_opt_str(out: &mut Vec<u8>, value: Option<&str>) {
 }
 
 /// Extrae metadatos de audio desde cualquier lector `Read + Seek` usando `lofty`.
-pub fn extract_metadata_from_reader<R: Read + Seek>(reader: R) -> Result<AudioMetadataResult, String> {
+pub fn extract_metadata_from_reader<R: Read + Seek>(
+    reader: R,
+) -> Result<AudioMetadataResult, String> {
     let buf_reader = BufReader::new(reader);
     let tagged_file = Probe::new(buf_reader)
         .guess_file_type()
@@ -183,7 +185,7 @@ mod tests {
             let mut data = text.as_bytes().to_vec();
             data.push(0); // terminador NUL requerido en RIFF INFO
             let unpadded_len = data.len() as u32;
-            if data.len() % 2 != 0 {
+            if !data.len().is_multiple_of(2) {
                 data.push(0);
             }
             dst.extend_from_slice(id);
@@ -199,7 +201,8 @@ mod tests {
 
         // 1 segundo de audio PCM estéreo a 44100 Hz / 16 bits = 176_400 bytes
         let pcm_len: u32 = 176_400;
-        let mut riff_body = Vec::with_capacity(4 + 24 + 8 + pcm_len as usize + 8 + info_payload.len());
+        let mut riff_body =
+            Vec::with_capacity(4 + 24 + 8 + pcm_len as usize + 8 + info_payload.len());
         riff_body.extend_from_slice(b"WAVE");
 
         // Chunk fmt

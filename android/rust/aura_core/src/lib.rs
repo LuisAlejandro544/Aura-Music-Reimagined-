@@ -4,10 +4,13 @@
 //! - Validar la inicialización del motor Rust y reportar versión/arquitectura.
 //! - Generar carátulas procedurales cuadradas en bytes RGBA8888 sin usar IA.
 //! - Calcular huellas digitales SHA-256 de pistas importadas.
+//! - Extraer metadatos y carátulas embebidas con `lofty`.
+//! - Procesar ecualizador de 10 bandas, efectos DSP y animaciones de eliminación.
 
-use jni::JNIEnv;
+use jni::errors::ThrowRuntimeExAndDefault;
 use jni::objects::{JByteArray, JByteBuffer, JClass, JFloatArray, JString};
-use jni::sys::{JNI_FALSE, JNI_TRUE, jboolean, jfloat, jint, jlong, jstring};
+use jni::sys::{JNI_FALSE, JNI_TRUE, jboolean, jfloat, jint, jlong};
+use jni::{Env, EnvUnowned};
 
 mod artwork;
 mod crossfeed;
@@ -33,68 +36,77 @@ fn init_android_logger() {
 
 /// Devuelve información del motor nativo Rust y la arquitectura ABI compilada.
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_com_auramusic_core_rust_AuraRustBridge_nativeGetEngineInfo(
-    env: JNIEnv,
-    _class: JClass,
-) -> jstring {
+pub extern "system" fn Java_com_auramusic_core_rust_AuraRustBridge_nativeGetEngineInfo<'local>(
+    mut unowned_env: EnvUnowned<'local>,
+    _class: JClass<'local>,
+) -> JString<'local> {
     init_android_logger();
-    let arch = std::env::consts::ARCH;
-    let info = format!(
-        "AuraCore Rust v{} (Edition 2024 • {})",
-        env!("CARGO_PKG_VERSION"),
-        arch
-    );
-    match env.new_string(info) {
-        Ok(s) => s.into_raw(),
-        Err(_) => std::ptr::null_mut(),
-    }
+    unowned_env
+        .with_env(|env| -> jni::errors::Result<JString<'local>> {
+            let arch = std::env::consts::ARCH;
+            let info = format!(
+                "AuraCore Rust v{} (Edition 2024 • {})",
+                env!("CARGO_PKG_VERSION"),
+                arch
+            );
+            Ok(env.new_string(info).unwrap_or_default())
+        })
+        .resolve::<ThrowRuntimeExAndDefault>()
 }
 
 /// Devuelve la versión del motor QuickJS-NG embebido en Rust (`rquickjs`).
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_com_auramusic_core_rust_AuraRustBridge_nativeGetQuickJsVersion(
-    env: JNIEnv,
-    _class: JClass,
-) -> jstring {
+pub extern "system" fn Java_com_auramusic_core_rust_AuraRustBridge_nativeGetQuickJsVersion<
+    'local,
+>(
+    mut unowned_env: EnvUnowned<'local>,
+    _class: JClass<'local>,
+) -> JString<'local> {
     init_android_logger();
-    match env.new_string(js_runtime::QUICKJS_VERSION_STRING) {
-        Ok(s) => s.into_raw(),
-        Err(_) => std::ptr::null_mut(),
-    }
+    unowned_env
+        .with_env(|env| -> jni::errors::Result<JString<'local>> {
+            Ok(env
+                .new_string(js_runtime::QUICKJS_VERSION_STRING)
+                .unwrap_or_default())
+        })
+        .resolve::<ThrowRuntimeExAndDefault>()
 }
 
 /// Evalúa un script JavaScript en QuickJS-NG desde Rust y devuelve la salida estándar o error.
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_com_auramusic_core_rust_AuraRustBridge_nativeEvalQuickJs(
-    mut env: JNIEnv,
-    _class: JClass,
-    script: JString,
-) -> jstring {
+pub extern "system" fn Java_com_auramusic_core_rust_AuraRustBridge_nativeEvalQuickJs<'local>(
+    mut unowned_env: EnvUnowned<'local>,
+    _class: JClass<'local>,
+    script: JString<'local>,
+) -> JString<'local> {
     init_android_logger();
-    let script_str: String = match env.get_string(&script) {
-        Ok(s) => s.into(),
-        Err(err) => {
-            let msg = format!("ERROR: No se pudo leer script JNI: {err:?}");
-            return env.new_string(msg).map(JString::into_raw).unwrap_or(std::ptr::null_mut());
-        }
-    };
+    unowned_env
+        .with_env(|env| -> jni::errors::Result<JString<'local>> {
+            let script_str = match script.try_to_string(env) {
+                Ok(s) => s,
+                Err(err) => {
+                    let msg = format!("ERROR: No se pudo leer script JNI: {err:?}");
+                    return Ok(env.new_string(msg).unwrap_or_default());
+                }
+            };
 
-    let output = match js_runtime::eval_script_with_args(&script_str, &[]) {
-        Ok(res) => res.stdout,
-        Err(err) => format!("ERROR: {err}"),
-    };
+            let output = match js_runtime::eval_script_with_args(&script_str, &[]) {
+                Ok(res) => res.stdout,
+                Err(err) => format!("ERROR: {err}"),
+            };
 
-    match env.new_string(output) {
-        Ok(s) => s.into_raw(),
-        Err(_) => std::ptr::null_mut(),
-    }
+            Ok(env.new_string(output).unwrap_or_default())
+        })
+        .resolve::<ThrowRuntimeExAndDefault>()
 }
 
 /// Genera una carátula procedural cuadrada en formato RGBA8888 directamente en Rust.
 /// `accent_argb`: color ARGB del tema activo (0 indica sin preferencia).
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_com_auramusic_core_rust_AuraRustBridge_nativeGenerateCoverRgba<'local>(
-    mut env: JNIEnv<'local>,
+pub extern "system" fn Java_com_auramusic_core_rust_AuraRustBridge_nativeGenerateCoverRgba<
+    'local,
+>(
+    mut unowned_env: EnvUnowned<'local>,
     _class: JClass<'local>,
     seed_key: JString<'local>,
     width: jint,
@@ -102,120 +114,138 @@ pub extern "system" fn Java_com_auramusic_core_rust_AuraRustBridge_nativeGenerat
     accent_argb: jint,
 ) -> JByteArray<'local> {
     init_android_logger();
+    unowned_env
+        .with_env(|env| -> jni::errors::Result<JByteArray<'local>> {
+            let seed_str = match seed_key.try_to_string(env) {
+                Ok(s) => s,
+                Err(err) => {
+                    log::error!("Error leyendo seed_key desde JNI: {err:?}");
+                    return Ok(JByteArray::default());
+                }
+            };
 
-    let seed_str: String = match env.get_string(&seed_key) {
-        Ok(s) => s.into(),
-        Err(err) => {
-            log::error!("Error leyendo seed_key desde JNI: {err:?}");
-            return JByteArray::default();
-        }
-    };
+            let w = width.max(64) as u32;
+            let h = height.max(64) as u32;
+            let accent = if accent_argb == 0 {
+                None
+            } else {
+                Some(accent_argb as u32)
+            };
 
-    let w = width.max(64) as u32;
-    let h = height.max(64) as u32;
-    let accent = if accent_argb == 0 {
-        None
-    } else {
-        Some(accent_argb as u32)
-    };
-
-    match artwork::render_procedural_cover(&seed_str, w, h, accent) {
-        Some(bytes) => match env.byte_array_from_slice(&bytes) {
-            Ok(arr) => arr,
-            Err(err) => {
-                log::error!("Error creando JByteArray para carátula: {err:?}");
-                JByteArray::default()
-            }
-        },
-        None => {
-            log::error!("render_procedural_cover devolvió None");
-            JByteArray::default()
-        }
-    }
+            let array = match artwork::render_procedural_cover(&seed_str, w, h, accent) {
+                Some(bytes) => match env.byte_array_from_slice(&bytes) {
+                    Ok(arr) => arr,
+                    Err(err) => {
+                        log::error!("Error creando JByteArray para carátula: {err:?}");
+                        JByteArray::default()
+                    }
+                },
+                None => {
+                    log::error!("render_procedural_cover devolvió None");
+                    JByteArray::default()
+                }
+            };
+            Ok(array)
+        })
+        .resolve::<ThrowRuntimeExAndDefault>()
 }
 
 /// Calcula una huella digital determinista SHA-256 en Rust para evitar duplicados al importar.
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_com_auramusic_core_rust_AuraRustBridge_nativeComputeTrackFingerprint(
-    mut env: JNIEnv,
-    _class: JClass,
-    title: JString,
-    artist: JString,
+pub extern "system" fn Java_com_auramusic_core_rust_AuraRustBridge_nativeComputeTrackFingerprint<
+    'local,
+>(
+    mut unowned_env: EnvUnowned<'local>,
+    _class: JClass<'local>,
+    title: JString<'local>,
+    artist: JString<'local>,
     duration_ms: jlong,
     size_bytes: jlong,
-) -> jstring {
+) -> JString<'local> {
     init_android_logger();
+    unowned_env
+        .with_env(|env| -> jni::errors::Result<JString<'local>> {
+            let title_str = title.try_to_string(env).unwrap_or_default();
+            let artist_str = artist.try_to_string(env).unwrap_or_default();
 
-    let title_str: String = env
-        .get_string(&title)
-        .map(Into::into)
-        .unwrap_or_default();
-    let artist_str: String = env
-        .get_string(&artist)
-        .map(Into::into)
-        .unwrap_or_default();
-
-    let fp = artwork::compute_track_fingerprint(&title_str, &artist_str, duration_ms, size_bytes);
-    match env.new_string(fp) {
-        Ok(s) => s.into_raw(),
-        Err(_) => std::ptr::null_mut(),
-    }
+            let fp = artwork::compute_track_fingerprint(
+                &title_str,
+                &artist_str,
+                duration_ms,
+                size_bytes,
+            );
+            Ok(env.new_string(fp).unwrap_or_default())
+        })
+        .resolve::<ThrowRuntimeExAndDefault>()
 }
 
 /// Extrae título, artista, álbum, duración y carátula embebida desde un file descriptor SAF en Rust.
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_com_auramusic_core_rust_AuraRustBridge_nativeExtractAudioMetadata<'local>(
-    env: JNIEnv<'local>,
+pub extern "system" fn Java_com_auramusic_core_rust_AuraRustBridge_nativeExtractAudioMetadata<
+    'local,
+>(
+    mut unowned_env: EnvUnowned<'local>,
     _class: JClass<'local>,
     fd: jint,
 ) -> JByteArray<'local> {
     init_android_logger();
+    unowned_env
+        .with_env(|env| -> jni::errors::Result<JByteArray<'local>> {
+            let payload = match metadata::extract_metadata_from_fd(fd) {
+                Ok(meta) => meta.to_jni_bytes(),
+                Err(err) => {
+                    log::warn!("No se pudieron extraer metadatos de audio desde fd {fd}: {err}");
+                    metadata::AudioMetadataResult::error_jni_bytes()
+                }
+            };
 
-    let payload = match metadata::extract_metadata_from_fd(fd) {
-        Ok(meta) => meta.to_jni_bytes(),
-        Err(err) => {
-            log::warn!("No se pudieron extraer metadatos de audio desde fd {fd}: {err}");
-            metadata::AudioMetadataResult::error_jni_bytes()
-        }
-    };
-
-    match env.byte_array_from_slice(&payload) {
-        Ok(arr) => arr,
-        Err(err) => {
-            log::error!("Error serializando metadatos hacia JByteArray: {err:?}");
-            JByteArray::default()
-        }
-    }
+            let array = match env.byte_array_from_slice(&payload) {
+                Ok(arr) => arr,
+                Err(err) => {
+                    log::error!("Error serializando metadatos hacia JByteArray: {err:?}");
+                    JByteArray::default()
+                }
+            };
+            Ok(array)
+        })
+        .resolve::<ThrowRuntimeExAndDefault>()
 }
 
 /// Actualiza en Rust el estado encendido/apagado y las ganancias (dB) de las 10 bandas del ecualizador.
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_com_auramusic_core_rust_AuraRustBridge_nativeSetEqualizerConfig<'local>(
-    env: JNIEnv<'local>,
+pub extern "system" fn Java_com_auramusic_core_rust_AuraRustBridge_nativeSetEqualizerConfig<
+    'local,
+>(
+    mut unowned_env: EnvUnowned<'local>,
     _class: JClass<'local>,
     enabled: jboolean,
     gains_db: JFloatArray<'local>,
 ) {
     init_android_logger();
+    unowned_env
+        .with_env(|env| -> jni::errors::Result<()> {
+            let len = gains_db.len(env).unwrap_or(0);
+            let copy_len = len.min(equalizer::BAND_COUNT);
+            let mut bands = [0.0_f32; equalizer::BAND_COUNT];
+            if copy_len > 0
+                && let Err(err) = gains_db.get_region(env, 0, &mut bands[..copy_len])
+            {
+                log::error!("Error leyendo bandas del ecualizador desde JNI: {err:?}");
+                return Ok(());
+            }
 
-    let len = env.get_array_length(&gains_db).unwrap_or(0).max(0) as usize;
-    let copy_len = len.min(equalizer::BAND_COUNT);
-    let mut bands = [0.0_f32; equalizer::BAND_COUNT];
-    if copy_len > 0 {
-        if let Err(err) = env.get_float_array_region(&gains_db, 0, &mut bands[..copy_len]) {
-            log::error!("Error leyendo bandas del ecualizador desde JNI: {err:?}");
-            return;
-        }
-    }
-
-    equalizer::set_equalizer_config(enabled != JNI_FALSE, &bands);
+            equalizer::set_equalizer_config(enabled != JNI_FALSE, &bands);
+            Ok(())
+        })
+        .resolve::<ThrowRuntimeExAndDefault>();
 }
 
 /// Actualiza en Rust los parámetros de Reverberación estéreo, calidez analógica Slowed, Audio 8D y Crossfeed binaural.
 #[unsafe(no_mangle)]
+#[allow(clippy::too_many_arguments)]
 pub extern "system" fn Java_com_auramusic_core_rust_AuraRustBridge_nativeSetAudioEffectsConfig(
-    _env: JNIEnv,
-    _class: JClass,
+    _unowned_env: EnvUnowned<'_>,
+    _class: JClass<'_>,
     reverb_enabled: jboolean,
     reverb_room_size: jfloat,
     reverb_damping: jfloat,
@@ -251,8 +281,8 @@ pub extern "system" fn Java_com_auramusic_core_rust_AuraRustBridge_nativeSetAudi
 /// Configura frecuencia de muestreo y número de canales en el procesador DSP del ecualizador.
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_com_auramusic_core_rust_AuraRustBridge_nativeConfigureEqualizer(
-    _env: JNIEnv,
-    _class: JClass,
+    _unowned_env: EnvUnowned<'_>,
+    _class: JClass<'_>,
     sample_rate: jint,
     channel_count: jint,
 ) {
@@ -266,37 +296,49 @@ pub extern "system" fn Java_com_auramusic_core_rust_AuraRustBridge_nativeConfigu
 /// Reinicia las líneas de retardo internas de los filtros biquad al hacer seek o flush.
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_com_auramusic_core_rust_AuraRustBridge_nativeResetEqualizerState(
-    _env: JNIEnv,
-    _class: JClass,
+    _unowned_env: EnvUnowned<'_>,
+    _class: JClass<'_>,
 ) {
     equalizer::reset_global_processor();
 }
 
 /// Procesa in-place un DirectByteBuffer PCM de 16 bits little-endian sin copias adicionales.
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_com_auramusic_core_rust_AuraRustBridge_nativeProcessEqualizerPcm16<'local>(
-    env: JNIEnv<'local>,
+pub extern "system" fn Java_com_auramusic_core_rust_AuraRustBridge_nativeProcessEqualizerPcm16<
+    'local,
+>(
+    mut unowned_env: EnvUnowned<'local>,
     _class: JClass<'local>,
     buffer: JByteBuffer<'local>,
     byte_length: jint,
 ) -> jboolean {
-    process_direct_pcm_buffer(&env, &buffer, byte_length, false)
+    unowned_env
+        .with_env(|env| -> jni::errors::Result<jboolean> {
+            Ok(process_direct_pcm_buffer(env, &buffer, byte_length, false))
+        })
+        .resolve::<ThrowRuntimeExAndDefault>()
 }
 
 /// Procesa in-place un DirectByteBuffer PCM de 32 bits flotante little-endian sin copias adicionales.
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_com_auramusic_core_rust_AuraRustBridge_nativeProcessEqualizerPcmFloat<'local>(
-    env: JNIEnv<'local>,
+pub extern "system" fn Java_com_auramusic_core_rust_AuraRustBridge_nativeProcessEqualizerPcmFloat<
+    'local,
+>(
+    mut unowned_env: EnvUnowned<'local>,
     _class: JClass<'local>,
     buffer: JByteBuffer<'local>,
     byte_length: jint,
 ) -> jboolean {
-    process_direct_pcm_buffer(&env, &buffer, byte_length, true)
+    unowned_env
+        .with_env(|env| -> jni::errors::Result<jboolean> {
+            Ok(process_direct_pcm_buffer(env, &buffer, byte_length, true))
+        })
+        .resolve::<ThrowRuntimeExAndDefault>()
 }
 
 fn process_direct_pcm_buffer(
-    env: &JNIEnv,
-    buffer: &JByteBuffer,
+    env: &Env<'_>,
+    buffer: &JByteBuffer<'_>,
     byte_length: jint,
     is_float: bool,
 ) -> jboolean {
@@ -329,8 +371,11 @@ fn process_direct_pcm_buffer(
 
 /// Renderiza en Rust un fotograma del efecto creativo de eliminación sobre DirectByteBuffers RGBA8888.
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_com_auramusic_core_rust_AuraRustBridge_nativeRenderDeleteEffectFrame<'local>(
-    env: JNIEnv<'local>,
+#[allow(clippy::too_many_arguments)]
+pub extern "system" fn Java_com_auramusic_core_rust_AuraRustBridge_nativeRenderDeleteEffectFrame<
+    'local,
+>(
+    mut unowned_env: EnvUnowned<'local>,
     _class: JClass<'local>,
     source_buffer: JByteBuffer<'local>,
     output_buffer: JByteBuffer<'local>,
@@ -341,46 +386,49 @@ pub extern "system" fn Java_com_auramusic_core_rust_AuraRustBridge_nativeRenderD
     seed: jint,
     accent_argb: jint,
 ) -> jboolean {
-    if width <= 0 || height <= 0 {
-        return JNI_FALSE;
-    }
-    let w = width as usize;
-    let h = height as usize;
-    let Some(required) = w.checked_mul(h).and_then(|px| px.checked_mul(4)) else {
-        return JNI_FALSE;
-    };
+    unowned_env
+        .with_env(|env| -> jni::errors::Result<jboolean> {
+            if width <= 0 || height <= 0 {
+                return Ok(JNI_FALSE);
+            }
+            let w = width as usize;
+            let h = height as usize;
+            let Some(required) = w.checked_mul(h).and_then(|px| px.checked_mul(4)) else {
+                return Ok(JNI_FALSE);
+            };
 
-    let Ok(src_ptr) = env.get_direct_buffer_address(&source_buffer) else {
-        return JNI_FALSE;
-    };
-    let Ok(src_cap) = env.get_direct_buffer_capacity(&source_buffer) else {
-        return JNI_FALSE;
-    };
-    let Ok(dst_ptr) = env.get_direct_buffer_address(&output_buffer) else {
-        return JNI_FALSE;
-    };
-    let Ok(dst_cap) = env.get_direct_buffer_capacity(&output_buffer) else {
-        return JNI_FALSE;
-    };
+            let Ok(src_ptr) = env.get_direct_buffer_address(&source_buffer) else {
+                return Ok(JNI_FALSE);
+            };
+            let Ok(src_cap) = env.get_direct_buffer_capacity(&source_buffer) else {
+                return Ok(JNI_FALSE);
+            };
+            let Ok(dst_ptr) = env.get_direct_buffer_address(&output_buffer) else {
+                return Ok(JNI_FALSE);
+            };
+            let Ok(dst_cap) = env.get_direct_buffer_capacity(&output_buffer) else {
+                return Ok(JNI_FALSE);
+            };
 
-    if src_ptr.is_null() || dst_ptr.is_null() || src_cap < required || dst_cap < required {
-        return JNI_FALSE;
-    }
+            if src_ptr.is_null() || dst_ptr.is_null() || src_cap < required || dst_cap < required {
+                return Ok(JNI_FALSE);
+            }
 
-    // SAFETY: ambos son DirectByteBuffer no nulos con capacidad >= width * height * 4 verificada.
-    let src_slice = unsafe { std::slice::from_raw_parts(src_ptr, required) };
-    let dst_slice = unsafe { std::slice::from_raw_parts_mut(dst_ptr, required) };
-    let ok = delete_fx::render_delete_effect_frame(
-        src_slice,
-        dst_slice,
-        w,
-        h,
-        delete_fx::DeleteEffectKind::from_i32(effect_type),
-        progress,
-        seed as u32,
-        accent_argb as u32,
-    );
+            // SAFETY: ambos son DirectByteBuffer no nulos con capacidad >= width * height * 4 verificada.
+            let src_slice = unsafe { std::slice::from_raw_parts(src_ptr, required) };
+            let dst_slice = unsafe { std::slice::from_raw_parts_mut(dst_ptr, required) };
+            let ok = delete_fx::render_delete_effect_frame(
+                src_slice,
+                dst_slice,
+                w,
+                h,
+                delete_fx::DeleteEffectKind::from_i32(effect_type),
+                progress,
+                seed as u32,
+                accent_argb as u32,
+            );
 
-    if ok { JNI_TRUE } else { JNI_FALSE }
+            Ok(if ok { JNI_TRUE } else { JNI_FALSE })
+        })
+        .resolve::<ThrowRuntimeExAndDefault>()
 }
-

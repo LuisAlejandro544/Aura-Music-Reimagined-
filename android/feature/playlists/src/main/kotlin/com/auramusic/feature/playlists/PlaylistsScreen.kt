@@ -34,7 +34,6 @@ import androidx.compose.material.icons.rounded.MoreVert
 import androidx.compose.material.icons.rounded.MusicNote
 import androidx.compose.material.icons.rounded.Person
 import androidx.compose.material.icons.rounded.PlayArrow
-import androidx.compose.material.icons.rounded.QueueMusic
 import androidx.compose.material.icons.rounded.RemoveCircleOutline
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -90,6 +89,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
+import androidx.core.graphics.createBitmap
+import androidx.core.graphics.scale
 import coil3.compose.AsyncImage
 import coil3.request.ImageRequest
 import com.auramusic.core.model.ArtistPlaylist
@@ -97,11 +98,11 @@ import com.auramusic.core.model.DeleteAnimationEffect
 import com.auramusic.core.model.DeleteEffectFrameRenderer
 import com.auramusic.core.model.Playlist
 import com.auramusic.core.model.Track
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import java.io.File
 import java.nio.ByteBuffer
 import java.util.Locale
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
 import kotlin.math.roundToInt
 
 /**
@@ -115,14 +116,14 @@ import kotlin.math.roundToInt
 fun PlaylistsScreen(
     playlists: List<Playlist>,
     likedCount: Int,
-    artistPlaylists: List<ArtistPlaylist> = emptyList(),
     onOpenLikedSongs: () -> Unit,
     onOpenPlaylist: (Long) -> Unit,
-    onOpenArtist: (String) -> Unit = {},
-    onPlayArtist: (ArtistPlaylist) -> Unit = {},
     onCreatePlaylist: (String) -> Unit,
     onDeletePlaylist: (Long) -> Unit,
     modifier: Modifier = Modifier,
+    artistPlaylists: List<ArtistPlaylist> = emptyList(),
+    onOpenArtist: (String) -> Unit = {},
+    onPlayArtist: (ArtistPlaylist) -> Unit = {},
 ) {
     var showCreateDialog by remember { mutableStateOf(false) }
     var selectedTab by rememberSaveable { mutableIntStateOf(0) }
@@ -255,7 +256,7 @@ fun PlaylistsScreen(
                                     horizontalAlignment = Alignment.CenterHorizontally,
                                 ) {
                                     Icon(
-                                        imageVector = Icons.Rounded.QueueMusic,
+                                        imageVector = Icons.AutoMirrored.Rounded.QueueMusic,
                                         contentDescription = null,
                                         tint = MaterialTheme.colorScheme.primary,
                                         modifier = Modifier.size(40.dp),
@@ -312,7 +313,8 @@ fun PlaylistsScreen(
                                 )
                                 Spacer(modifier = Modifier.width(10.dp))
                                 Text(
-                                    text = "Agrupación automática por artista: las canciones del mismo artista se juntan aquí y solo suena ese artista al reproducir su lista.",
+                                    text = "Agrupación automática por artista: las canciones del mismo artista " +
+                                        "se juntan aquí y solo suena ese artista al reproducir su lista.",
                                     style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.onSecondaryContainer,
                                 )
@@ -347,7 +349,8 @@ fun PlaylistsScreen(
                                     )
                                     Spacer(modifier = Modifier.height(4.dp))
                                     Text(
-                                        text = "Importa o descarga canciones y Aura Music creará automáticamente una playlist por cada artista.",
+                                        text = "Importa o descarga canciones y Aura Music creará " +
+                                            "automáticamente una playlist por cada artista.",
                                         style = MaterialTheme.typography.bodySmall,
                                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                                     )
@@ -685,7 +688,7 @@ fun AddToPlaylistBottomSheet(
                     },
                     leadingContent = {
                         Icon(
-                            imageVector = Icons.Rounded.QueueMusic,
+                            imageVector = Icons.AutoMirrored.Rounded.QueueMusic,
                             contentDescription = null,
                             tint = MaterialTheme.colorScheme.primary,
                         )
@@ -788,7 +791,7 @@ private fun PlaylistCard(
                     contentAlignment = Alignment.Center,
                 ) {
                     Icon(
-                        imageVector = Icons.Rounded.QueueMusic,
+                        imageVector = Icons.AutoMirrored.Rounded.QueueMusic,
                         contentDescription = null,
                         tint = MaterialTheme.colorScheme.primary,
                     )
@@ -886,8 +889,10 @@ private fun ArtistPlaylistCard(
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
+                val durationLabel = formatArtistTotalDuration(artistPlaylist.totalDurationMs)
+                val songsWord = if (artistPlaylist.trackCount == 1) "canción" else "canciones"
                 Text(
-                    text = "${artistPlaylist.trackCount} ${if (artistPlaylist.trackCount == 1) "canción" else "canciones"} • ${formatArtistTotalDuration(artistPlaylist.totalDurationMs)}",
+                    text = "${artistPlaylist.trackCount} $songsWord • $durationLabel",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 1,
@@ -1107,7 +1112,7 @@ private fun RustPlaylistDeleteEffectHost(
                     .toInt()
                     .coerceAtLeast(1)
                 val scaledBitmap = if (targetWidth != softwareBitmap.width || targetHeight != softwareBitmap.height) {
-                    Bitmap.createScaledBitmap(softwareBitmap, targetWidth, targetHeight, true)
+                    softwareBitmap.scale(targetWidth, targetHeight)
                 } else {
                     softwareBitmap
                 }
@@ -1128,8 +1133,8 @@ private fun RustPlaylistDeleteEffectHost(
 
             val (width, height, srcBuffer) = prepared
             val dstBuffer = ByteBuffer.allocateDirect(width * height * 4)
-            val frameBitmapA = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
-            val frameBitmapB = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+            val frameBitmapA = createBitmap(width, height)
+            val frameBitmapB = createBitmap(width, height)
             var useBufferA = true
 
             val startNanos = System.nanoTime()

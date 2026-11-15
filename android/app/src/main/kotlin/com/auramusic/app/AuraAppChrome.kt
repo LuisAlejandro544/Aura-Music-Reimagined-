@@ -13,8 +13,8 @@ import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.rounded.QueueMusic
 import androidx.compose.material.icons.rounded.LibraryMusic
-import androidx.compose.material.icons.rounded.QueueMusic
 import androidx.compose.material.icons.rounded.Settings
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -28,6 +28,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.core.net.toUri
 import com.auramusic.core.importer.AuraSystemStorageManager
 import com.auramusic.core.model.PlaybackState
 import com.auramusic.feature.player.MiniPlayerBar
@@ -140,7 +141,7 @@ fun rememberAuraSystemStoragePermissionLauncher(
                     }.isSuccess
                     if (!launchedFallback) {
                         val detailsIntent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
-                            data = Uri.parse("package:${context.packageName}")
+                            data = "package:${context.packageName}".toUri()
                         }
                         runCatching { manageFilesLauncher.launch(detailsIntent) }
                     }
@@ -202,7 +203,7 @@ fun AuraBottomChrome(
             NavigationBarItem(
                 selected = isPlaylistsSelected,
                 onClick = onSelectPlaylists,
-                icon = { Icon(Icons.Rounded.QueueMusic, contentDescription = null) },
+                icon = { Icon(Icons.AutoMirrored.Rounded.QueueMusic, contentDescription = null) },
                 label = { Text("Playlists") },
             )
             NavigationBarItem(

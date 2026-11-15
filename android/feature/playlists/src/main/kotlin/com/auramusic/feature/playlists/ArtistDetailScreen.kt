@@ -211,8 +211,10 @@ fun ArtistDetailScreen(
                                     overflow = TextOverflow.Ellipsis,
                                 )
                                 Spacer(modifier = Modifier.height(2.dp))
+                                val durationLabel = formatArtistTotalDuration(artistPlaylist.totalDurationMs)
+                                val songsWord = if (artistPlaylist.trackCount == 1) "canción" else "canciones"
                                 Text(
-                                    text = "${artistPlaylist.trackCount} ${if (artistPlaylist.trackCount == 1) "canción" else "canciones"} • ${formatArtistTotalDuration(artistPlaylist.totalDurationMs)}",
+                                    text = "${artistPlaylist.trackCount} $songsWord • $durationLabel",
                                     style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.85f),
                                 )
@@ -434,7 +436,7 @@ internal fun formatArtistTotalDuration(durationMs: Long): String {
     val seconds = totalSeconds % 60L
     return when {
         hours > 0L -> "${hours}h ${minutes}m"
-        minutes > 0L -> "${minutes} min ${seconds}s"
+        minutes > 0L -> "$minutes min ${seconds}s"
         else -> "${seconds}s"
     }
 }
