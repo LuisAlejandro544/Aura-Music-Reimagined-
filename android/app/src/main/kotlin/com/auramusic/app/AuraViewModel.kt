@@ -52,6 +52,9 @@ class AuraViewModel(
     private val _isAppReady = MutableStateFlow(false)
     val isAppReady: StateFlow<Boolean> = _isAppReady.asStateFlow()
 
+    private val _onboardingCompleted = MutableStateFlow(true)
+    val onboardingCompleted: StateFlow<Boolean> = _onboardingCompleted.asStateFlow()
+
     private val openPlayerChannel = Channel<Unit>(Channel.BUFFERED)
     val openPlayerEvents: Flow<Unit> = openPlayerChannel.receiveAsFlow()
 
@@ -107,6 +110,7 @@ class AuraViewModel(
         viewModelScope.launch {
             val minSplashDelay = async { delay(320L) }
             val themeJob = async { container.themePreferencesRepository.accentColor.first() }
+            val onboardingJob = async { container.onboardingPreferencesRepository.onboardingCompleted.first() }
             val coverColorsJob = async { container.themePreferencesRepository.dynamicCoverColorsEnabled.first() }
             val deleteFxJob = async { container.themePreferencesRepository.deleteAnimationsEnabled.first() }
             val eqJob = async { container.equalizerPreferencesRepository.equalizerState.first() }
@@ -122,6 +126,7 @@ class AuraViewModel(
             }
 
             themeJob.await()
+            _onboardingCompleted.value = onboardingJob.await()
             coverColorsJob.await()
             deleteFxJob.await()
             val savedEq = eqJob.await()
@@ -161,6 +166,17 @@ class AuraViewModel(
 
     fun setDownloaderScreenActive(active: Boolean) {
         libraryCoordinator.setDownloaderScreenActive(active)
+    }
+
+    /**
+     * Marca la guía de bienvenida y permisos como completada en DataStore
+     * para que no vuelva a mostrarse en futuros inicios.
+     */
+    fun completeOnboarding() {
+        _onboardingCompleted.value = true
+        viewModelScope.launch {
+            container.onboardingPreferencesRepository.markOnboardingCompleted()
+        }
     }
 
     val accentColor: StateFlow<AppAccentColor>

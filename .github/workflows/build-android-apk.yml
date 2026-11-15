@@ -110,6 +110,32 @@ jobs:
             exit 1
           fi
 
+      - name: Verificar librerías Rust/QuickJS y Chaquopy dentro del APK Debug
+        run: |
+          for apk in dist-apks/*.apk; do
+            echo "=== Verificando $apk ==="
+            if ! unzip -l "$apk" | grep -q "libaura_core.so"; then
+              echo "::error::Falta libaura_core.so en $apk"
+              exit 1
+            fi
+            if ! unzip -l "$apk" | grep -q "libaura_qjs.so"; then
+              echo "::error::Falta libaura_qjs.so en $apk"
+              exit 1
+            fi
+            if ! unzip -l "$apk" | grep -q "libpython3.11.so"; then
+              echo "::error::Falta libpython3.11.so (Chaquopy Python 3.11) en $apk"
+              exit 1
+            fi
+            if ! unzip -l "$apk" | grep -q "libchaquopy_java.so"; then
+              echo "::error::Falta libchaquopy_java.so (Chaquopy JNI) en $apk"
+              exit 1
+            fi
+            if ! unzip -l "$apk" | grep -q "assets/chaquopy/"; then
+              echo "::error::Faltan los assets empaquetados de Chaquopy (assets/chaquopy/) en $apk"
+              exit 1
+            fi
+          done
+
       - name: Subir artefacto APK Debug
         uses: actions/upload-artifact@v4
         with:

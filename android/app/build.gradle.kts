@@ -138,6 +138,7 @@ dependencies {
     implementation(project(":feature:equalizer"))
     implementation(project(":feature:effects"))
     implementation(project(":feature:downloader"))
+    implementation(project(":feature:onboarding"))
 
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.lifecycle.runtime.ktx)

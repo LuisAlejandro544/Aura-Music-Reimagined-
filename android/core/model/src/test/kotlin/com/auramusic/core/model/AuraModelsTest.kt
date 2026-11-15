@@ -529,4 +529,43 @@ class AuraModelsTest {
         assertFalse(SystemFolderHelper.isSupportedAudioFileName("aura_biblioteca.json"))
         assertFalse(SystemFolderHelper.isSupportedAudioFileName("descarga.mp3.tmp"))
     }
+
+    @Test
+    fun `onboarding helper tracks multi-platform summary and pending permissions accurately`() {
+        val summary = OnboardingHelper.buildSupportedPlatformsSummary()
+        assertTrue(summary.contains("YouTube"))
+        assertTrue(summary.contains("TikTok"))
+        assertTrue(summary.contains("Instagram"))
+
+        assertEquals(
+            2,
+            OnboardingHelper.countPendingInteractivePermissions(
+                OnboardingPermissionStatus(
+                    notificationsGranted = false,
+                    notificationsRequiredBySystem = true,
+                    storageGranted = false,
+                ),
+            ),
+        )
+        assertEquals(
+            1,
+            OnboardingHelper.countPendingInteractivePermissions(
+                OnboardingPermissionStatus(
+                    notificationsGranted = false,
+                    notificationsRequiredBySystem = false,
+                    storageGranted = false,
+                ),
+            ),
+        )
+        assertEquals(
+            0,
+            OnboardingHelper.countPendingInteractivePermissions(
+                OnboardingPermissionStatus(
+                    notificationsGranted = true,
+                    notificationsRequiredBySystem = true,
+                    storageGranted = true,
+                ),
+            ),
+        )
+    }
 }

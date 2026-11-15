@@ -1616,3 +1616,48 @@ object SystemFolderHelper {
         return ext in SUPPORTED_AUDIO_EXTENSIONS
     }
 }
+
+/**
+ * Páginas del flujo de bienvenida inicial (mostrado únicamente la primera vez que se instala la app).
+ */
+enum class OnboardingPage {
+    WELCOME_GUIDE,
+    PERMISSIONS,
+}
+
+/**
+ * Estado en vivo de los permisos reales que utiliza Aura Music durante el onboarding.
+ */
+data class OnboardingPermissionStatus(
+    val notificationsGranted: Boolean = false,
+    val notificationsRequiredBySystem: Boolean = true,
+    val storageGranted: Boolean = false,
+) {
+    val isNotificationReady: Boolean
+        get() = !notificationsRequiredBySystem || notificationsGranted
+}
+
+/**
+ * Reglas y catálogos puros compartidos entre el onboarding inicial y el descargador multipágina.
+ */
+object OnboardingHelper {
+    val SUPPORTED_YTDLP_PLATFORMS = listOf(
+        "YouTube",
+        "TikTok",
+        "Instagram",
+        "Facebook",
+        "SoundCloud",
+        "X (Twitter)",
+    )
+
+    fun buildSupportedPlatformsSummary(): String =
+        "${SUPPORTED_YTDLP_PLATFORMS.joinToString(", ")} y cientos de sitios más compatibles con yt-dlp."
+
+    fun countPendingInteractivePermissions(status: OnboardingPermissionStatus): Int {
+        var pending = 0
+        if (!status.isNotificationReady) pending += 1
+        if (!status.storageGranted) pending += 1
+        return pending
+    }
+}
+

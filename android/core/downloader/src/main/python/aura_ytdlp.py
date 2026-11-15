@@ -37,14 +37,17 @@ def _meta_file_path(updates_dir: str, pkg_name: str) -> str:
 
 
 def ensure_updates_in_sys_path(updates_dir: str) -> None:
-    """Coloca las carpetas de actualizaciones locales al frente de sys.path."""
+    """Coloca las carpetas válidas de actualizaciones locales al frente de sys.path."""
     if not updates_dir:
         return
     os.makedirs(updates_dir, exist_ok=True)
-    # Inserta primero yt_dlp_ejs y luego yt_dlp en orden inverso para prioridad 0/1.
+    # Inserta primero yt_dlp_ejs y luego yt_dlp en orden inverso para prioridad 0/1,
+    # comprobando __init__.py para evitar que una carpeta vacía tape el paquete del APK.
     for pkg_name in reversed(PYPI_PACKAGES):
         pkg_root = _updates_pkg_dir(updates_dir, pkg_name)
-        if os.path.isdir(pkg_root):
+        module_prefix = PACKAGE_DIR_MAP[pkg_name][1]
+        init_file = os.path.join(pkg_root, module_prefix, "__init__.py")
+        if os.path.isfile(init_file):
             if pkg_root in sys.path:
                 sys.path.remove(pkg_root)
             sys.path.insert(0, pkg_root)
@@ -72,29 +75,39 @@ def _read_installed_meta(updates_dir: str, pkg_name: str) -> dict:
     return {}
 
 
-def _get_active_yt_dlp_version(updates_dir: str) -> str:
+def _probe_yt_dlp_version(updates_dir: str) -> tuple[str, str | None]:
     ensure_updates_in_sys_path(updates_dir)
     try:
         import yt_dlp.version as ytdlp_ver
 
-        return str(getattr(ytdlp_ver, "__version__", "desconocida"))
-    except (ImportError, AttributeError):
-        return "no disponible"
+        return str(getattr(ytdlp_ver, "__version__", "desconocida")), None
+    except Exception as exc:  # noqa: BLE001 - Diagnóstico visible en UI móvil
+        return "no disponible", f"{type(exc).__name__}: {exc}"
 
 
-def _get_active_ejs_version(updates_dir: str) -> str:
+def _probe_ejs_version(updates_dir: str) -> tuple[str, str | None]:
     ensure_updates_in_sys_path(updates_dir)
     try:
         import yt_dlp_ejs._version as ejs_ver
 
-        return str(getattr(ejs_ver, "__version__", "desconocida"))
+        return str(getattr(ejs_ver, "__version__", "desconocida")), None
     except (ImportError, AttributeError):
         try:
             import yt_dlp_ejs
 
-            return str(getattr(yt_dlp_ejs, "__version__", "instalada"))
-        except (ImportError, AttributeError):
-            return "no disponible"
+            return str(getattr(yt_dlp_ejs, "__version__", "instalada")), None
+        except Exception as exc:  # noqa: BLE001 - Diagnóstico visible en UI móvil
+            return "no disponible", f"{type(exc).__name__}: {exc}"
+
+
+def _get_active_yt_dlp_version(updates_dir: str) -> str:
+    ver, _ = _probe_yt_dlp_version(updates_dir)
+    return ver
+
+
+def _get_active_ejs_version(updates_dir: str) -> str:
+    ver, _ = _probe_ejs_version(updates_dir)
+    return ver
 
 
 def get_engine_versions(updates_dir: str) -> str:
@@ -102,16 +115,20 @@ def get_engine_versions(updates_dir: str) -> str:
     ensure_updates_in_sys_path(updates_dir)
     ytdlp_meta = _read_installed_meta(updates_dir, "yt-dlp")
     ejs_meta = _read_installed_meta(updates_dir, "yt-dlp-ejs")
+    yt_dlp_ver, yt_dlp_err = _probe_yt_dlp_version(updates_dir)
+    ejs_ver, ejs_err = _probe_ejs_version(updates_dir)
     py_ver = (
         f"Python {sys.version_info.major}."
         f"{sys.version_info.minor}.{sys.version_info.micro}"
     )
     payload = {
         "python_version": py_ver,
-        "yt_dlp_version": _get_active_yt_dlp_version(updates_dir),
-        "yt_dlp_ejs_version": _get_active_ejs_version(updates_dir),
+        "yt_dlp_version": yt_dlp_ver,
+        "yt_dlp_ejs_version": ejs_ver,
         "yt_dlp_updated_at": ytdlp_meta.get("updated_at"),
         "yt_dlp_ejs_updated_at": ejs_meta.get("updated_at"),
+        "yt_dlp_error": yt_dlp_err,
+        "yt_dlp_ejs_error": ejs_err,
     }
     return json.dumps(payload)
 
@@ -587,7 +604,8 @@ def inspect_audio_preview(
             or info.get("creator")
             or info.get("uploader")
             or info.get("channel")
-            or "YouTube"
+            or info.get("extractor_key")
+            or "Descarga web"
         )
         duration_sec = info.get("duration") or 0
         duration_ms = int(float(duration_sec) * 1000) if duration_sec else 0
@@ -837,7 +855,8 @@ def download_audio(
             or info.get("creator")
             or info.get("uploader")
             or info.get("channel")
-            or "YouTube"
+            or info.get("extractor_key")
+            or "Descarga web"
         )
         album = info.get("album") or "Descargas Aura"
         title = info.get("track") or info.get("title") or os.path.basename(audio_path)

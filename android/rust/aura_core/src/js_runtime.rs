@@ -10,7 +10,7 @@ use std::sync::{Arc, Mutex};
 use rquickjs::{CatchResultExt, Context, Function, Object, Runtime};
 
 /// Versión reportada de QuickJS-NG compatible con la detección de `yt-dlp`.
-pub const QUICKJS_VERSION_STRING: &str = "QuickJS-ng version 0.14.0";
+pub const QUICKJS_VERSION_STRING: &str = crate::QUICKJS_VERSION_STRING;
 
 /// Resultado estructurado de la ejecución de un script JavaScript en QuickJS-NG.
 #[derive(Debug, Clone, PartialEq, Eq)]

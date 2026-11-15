@@ -194,14 +194,15 @@ fun DownloaderScreen(
                         Spacer(modifier = Modifier.width(14.dp))
                         Column {
                             Text(
-                                text = "Extracción directa de audio",
+                                text = "Extracción directa multipágina",
                                 style = MaterialTheme.typography.titleMedium,
                                 fontWeight = FontWeight.Bold,
                                 color = MaterialTheme.colorScheme.onPrimaryContainer,
                             )
                             Text(
-                                text = "Analiza el enlace antes de descargar. Al confirmar, la descarga sigue " +
-                                    "en segundo plano con notificación incluso si sales de Aura Music.",
+                                text = "Compatible con YouTube, TikTok, Instagram, Facebook, X, SoundCloud y " +
+                                    "cientos de páginas web más mediante yt-dlp. Analiza el enlace antes de " +
+                                    "descargar y continúa en segundo plano incluso si sales de Aura Music.",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.85f),
                             )
@@ -221,11 +222,18 @@ fun DownloaderScreen(
                         modifier = Modifier.padding(16.dp),
                         verticalArrangement = Arrangement.spacedBy(12.dp),
                     ) {
-                        Text(
-                            text = "Enlace de audio",
-                            style = MaterialTheme.typography.titleSmall,
-                            fontWeight = FontWeight.Bold,
-                        )
+                        Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                            Text(
+                                text = "Enlace de audio",
+                                style = MaterialTheme.typography.titleSmall,
+                                fontWeight = FontWeight.Bold,
+                            )
+                            Text(
+                                text = "Funciona con enlaces de YouTube, TikTok, Instagram, Facebook, SoundCloud, X y más sitios compatibles.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
 
                         OutlinedTextField(
                             value = urlInput,
@@ -237,8 +245,8 @@ fun DownloaderScreen(
                             },
                             modifier = Modifier.fillMaxWidth(),
                             enabled = !downloadState.isBusy,
-                            label = { Text("URL de YouTube o enlace compatible") },
-                            placeholder = { Text("https://www.youtube.com/watch?v=...") },
+                            label = { Text("URL de YouTube, TikTok, Instagram o web") },
+                            placeholder = { Text("https://youtube.com/... • tiktok.com/... • instagram.com/...") },
                             leadingIcon = {
                                 Icon(Icons.Rounded.Link, contentDescription = null)
                             },

@@ -15,6 +15,13 @@ crate-type = ["cdylib", "rlib"]
 [[bin]]
 name = "aura_qjs"
 path = "src/bin/aura_qjs.rs"
+required-features = ["js-runtime"]
+
+[features]
+# `js-runtime` mantiene QuickJS-NG habilitado por defecto para `cargo test` y el binario `aura_qjs`.
+# Gradle compila `libaura_core.so` con `--no-default-features` para no duplicar QuickJS-NG en el APK.
+default = ["js-runtime"]
+js-runtime = ["dep:rquickjs"]
 
 [dependencies]
 jni = "0.22.4"
@@ -23,13 +30,22 @@ tiny-skia = "0.12.0"
 sha2 = "0.11.1"
 rand = "0.10.4"
 rand_chacha = "0.10.0"
-rquickjs = { version = "0.14.0", features = ["bindgen"] }
-log = "0.4.35"
+rquickjs = { version = "0.14.0", features = ["bindgen"], optional = true }
+log = { version = "0.4.35", features = ["release_max_level_warn"] }
 android_logger = "0.15.1"
 
 [profile.release]
+# Mantiene optimización máxima para bucles DSP de audio propios de aura_core mientras poda símbolos y metadatos.
 opt-level = 3
 lto = "fat"
 codegen-units = 1
 panic = "abort"
 strip = "symbols"
+overflow-checks = false
+debug-assertions = false
+incremental = false
+
+# Optimiza al máximo el tamaño de las dependencias externas (QuickJS-NG, lofty, tiny-skia, jni)
+# reduciendo el peso de libaura_core.so y libaura_qjs.so sin degradar el DSP propio de aura_core.
+[profile.release.package."*"]
+opt-level = "z"

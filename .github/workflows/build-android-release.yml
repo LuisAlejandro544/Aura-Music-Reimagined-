@@ -165,7 +165,7 @@ jobs:
             exit 1
           fi
 
-      - name: Verificar firma Release, librerías Rust/QuickJS y exclusión de x86_64
+      - name: Verificar firma Release, librerías Rust/QuickJS/Chaquopy y exclusión de x86_64
         env:
           APK_MODE: ${{ inputs.apk_mode }}
         run: |
@@ -183,6 +183,18 @@ jobs:
             fi
             if ! unzip -l "$apk" | grep -q "libaura_qjs.so"; then
               echo "::error::Falta libaura_qjs.so en $apk"
+              exit 1
+            fi
+            if ! unzip -l "$apk" | grep -q "libpython3.11.so"; then
+              echo "::error::Falta libpython3.11.so (Chaquopy Python 3.11) en $apk"
+              exit 1
+            fi
+            if ! unzip -l "$apk" | grep -q "libchaquopy_java.so"; then
+              echo "::error::Falta libchaquopy_java.so (Chaquopy JNI) en $apk"
+              exit 1
+            fi
+            if ! unzip -l "$apk" | grep -q "assets/chaquopy/"; then
+              echo "::error::Faltan los assets empaquetados de Chaquopy (assets/chaquopy/) en $apk"
               exit 1
             fi
           done

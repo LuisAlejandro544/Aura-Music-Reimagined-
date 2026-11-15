@@ -45,7 +45,17 @@ class YtDlpAudioDownloader(
     private val _downloadState = MutableStateFlow(DownloadState())
     val downloadState: StateFlow<DownloadState> = _downloadState.asStateFlow()
 
-    private val _engineStatus = MutableStateFlow(DownloaderEngineStatus())
+    private val _engineStatus = MutableStateFlow(
+        AuraDownloaderIpc.readCachedEngineVersions(context)?.let { cached ->
+            DownloaderEngineStatus(
+                pythonVersion = cached.pythonVersion,
+                ytDlpVersion = cached.ytDlpVersion,
+                ytDlpEjsVersion = cached.ytDlpEjsVersion,
+                ytDlpUpdatedAt = cached.ytDlpUpdatedAt,
+                ytDlpEjsUpdatedAt = cached.ytDlpEjsUpdatedAt,
+            )
+        } ?: DownloaderEngineStatus(),
+    )
     val engineStatus: StateFlow<DownloaderEngineStatus> = _engineStatus.asStateFlow()
 
     private val pythonMutex = Mutex()
@@ -132,14 +142,17 @@ class YtDlpAudioDownloader(
             AuraRustBridge.getQuickJsVersion()
         }
 
-        val pyInfo = runCatching {
+        val pyResult = runCatching {
             pythonMutex.withLock {
                 val py = ensurePythonStarted()
                 val mod = py.getModule("aura_ytdlp")
                 val rawJson = mod.callAttr("get_engine_versions", updatesDir.absolutePath).toString()
                 JSONObject(rawJson)
             }
-        }.getOrNull()
+        }
+
+        val pyInfo = pyResult.getOrNull()
+        val pyFailure = pyResult.exceptionOrNull()
 
         val pythonVer = pyInfo?.optString("python_version")?.takeIf { it.isNotBlank() }
             ?: "Python 3.11 (ligero)"
@@ -149,8 +162,23 @@ class YtDlpAudioDownloader(
             ?: "No inicializado"
         val ytDlpUpdated = pyInfo?.optString("yt_dlp_updated_at")?.takeIf { it.isNotBlank() }
         val ytDlpEjsUpdated = pyInfo?.optString("yt_dlp_ejs_updated_at")?.takeIf { it.isNotBlank() }
+        val ytDlpErr = pyInfo?.optString("yt_dlp_error")?.takeIf { it.isNotBlank() }
+        val ytDlpEjsErr = pyInfo?.optString("yt_dlp_ejs_error")?.takeIf { it.isNotBlank() }
 
-        if (pyInfo != null) {
+        val diagnosticMessage = when {
+            pyFailure != null ->
+                "Error al iniciar Python/Chaquopy: ${pyFailure.message ?: pyFailure.javaClass.simpleName}"
+            ytDlpErr != null || ytDlpEjsErr != null -> {
+                val details = listOfNotNull(
+                    ytDlpErr?.let { "yt-dlp ($it)" },
+                    ytDlpEjsErr?.let { "yt-dlp-ejs ($it)" },
+                ).joinToString(" • ")
+                "No se pudieron cargar los módulos Python: $details. Pulsa 'Buscar y actualizar ahora'."
+            }
+            else -> _engineStatus.value.updateMessage
+        }
+
+        if (pyInfo != null && ytDlpErr == null && ytDlpEjsErr == null) {
             AuraDownloaderIpc.writeCachedEngineVersions(
                 context = context,
                 pythonVersion = pythonVer,
@@ -170,6 +198,7 @@ class YtDlpAudioDownloader(
             ytDlpEjsUpdatedAt = ytDlpEjsUpdated,
             autoUpdateEnabled = autoUpdate,
             preferredQuality = quality,
+            updateMessage = diagnosticMessage,
         )
     }
 
@@ -399,7 +428,7 @@ class YtDlpAudioDownloader(
             sourceUrl = info.optString("webpage_url").takeIf { it.isNotBlank() } ?: cleanUrl,
             videoId = info.optString("video_id"),
             title = info.optString("title", "Audio sin título"),
-            channelOrArtist = info.optString("artist", "YouTube"),
+            channelOrArtist = info.optString("artist", "Descarga web"),
             durationMs = info.optLong("duration_ms", 0L),
             estimatedSizeBytes = info.optLong("estimated_size_bytes", 0L),
             audioFormatLabel = info.optString("audio_format_label"),
@@ -647,7 +676,7 @@ class YtDlpAudioDownloader(
         val thumbFile = thumbPath?.let(::File)?.takeIf { it.exists() }
             ?: preview?.localThumbnailPath?.let(::File)?.takeIf { it.exists() }
         val title = info.optString("title", preview?.title ?: "Audio descargado")
-        val artist = info.optString("artist", preview?.channelOrArtist ?: "YouTube")
+        val artist = info.optString("artist", preview?.channelOrArtist ?: "Descarga web")
         val album = info.optString("album", "Descargas Aura")
         val durationMs = info.optLong("duration_ms", preview?.durationMs ?: 0L)
 

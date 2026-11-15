@@ -16,7 +16,10 @@
 -keep class com.auramusic.core.downloader.YtDlpAudioDownloader$PyCancelBridge { *; }
 -keep interface com.auramusic.core.downloader.AuraDownloadHost { *; }
 -keep class com.auramusic.core.downloader.AuraDownloadForegroundService { *; }
+-keep class com.auramusic.core.downloader.AuraDownloaderRemoteClient { *; }
 -keep class com.auramusic.core.downloader.AuraDownloaderIpc { *; }
+-keep class com.auramusic.core.downloader.AuraDownloaderIpc$* { *; }
+-keep class com.auramusic.core.downloader.CachedEngineVersions { *; }
 -keep class com.auramusic.core.downloader.PendingDownloadedImport { *; }
 -keepclassmembers class * {
     @com.chaquo.python.* <fields>;

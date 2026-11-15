@@ -34,6 +34,7 @@ object AuraDownloaderIpc {
     const val MSG_CLEAR_STATUS = 8
     const val MSG_CLEAR_UPDATE_MESSAGE = 9
     const val MSG_CANCEL_DOWNLOAD = 10
+    const val MSG_SET_AUTO_UPDATE = 11
 
     // Eventos servicio (:downloader) -> cliente (MAIN)
     const val MSG_DOWNLOAD_STATE = 101
@@ -236,7 +237,7 @@ object AuraDownloaderIpc {
             sourceUrl = obj.optString("sourceUrl"),
             videoId = obj.optString("videoId"),
             title = obj.optString("title", "Audio sin título"),
-            channelOrArtist = obj.optString("channelOrArtist", "YouTube"),
+            channelOrArtist = obj.optString("channelOrArtist", "Descarga web"),
             durationMs = obj.optLong("durationMs", 0L),
             estimatedSizeBytes = obj.optLong("estimatedSizeBytes", 0L),
             audioFormatLabel = obj.optString("audioFormatLabel"),
@@ -321,7 +322,7 @@ data class PendingDownloadedImport(
                 audioPath = audioPath,
                 thumbnailPath = obj.optString("thumbnailPath").takeIf { it.isNotBlank() },
                 title = obj.optString("title", "Audio descargado"),
-                artist = obj.optString("artist", "YouTube"),
+                artist = obj.optString("artist", "Descarga web"),
                 album = obj.optString("album", "Descargas Aura"),
                 durationMs = obj.optLong("durationMs", 0L),
                 accentArgb = obj.optInt("accentArgb", 0xFFA78BFA.toInt()),

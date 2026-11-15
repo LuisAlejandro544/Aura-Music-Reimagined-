@@ -34,8 +34,11 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import java.util.Locale
 import java.util.concurrent.CopyOnWriteArraySet
+import java.util.concurrent.atomic.AtomicInteger
 
 /**
  * Contrato desacoplado que implementa `AuraApplication` para que el servicio en primer plano
@@ -58,21 +61,26 @@ class AuraDownloadForegroundService : Service() {
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val mainHandler = Handler(Looper.getMainLooper())
     private val boundClients = CopyOnWriteArraySet<Messenger>()
+    private val commandMutex = Mutex()
+    private val pendingCommandCount = AtomicInteger(0)
 
     private var activeDownloadJob: Job? = null
-    private var activeCommandJob: Job? = null
     private var notificationObserverJob: Job? = null
     private var ipcDownloadObserverJob: Job? = null
     private var ipcEngineObserverJob: Job? = null
     private var wakeLock: PowerManager.WakeLock? = null
+
+    @Volatile
     private var isServiceBound = false
+
+    @Volatile
     private var idleTerminationArmed = false
 
     private val idleShutdownRunnable = Runnable {
         if (!isServiceBound &&
             boundClients.isEmpty() &&
             activeDownloadJob?.isActive != true &&
-            activeCommandJob?.isActive != true
+            pendingCommandCount.get() <= 0
         ) {
             idleTerminationArmed = true
             stopSelf()
@@ -191,6 +199,10 @@ class AuraDownloadForegroundService : Service() {
                 AuraDownloaderIpc.MSG_CLEAR_STATUS -> downloader.clearDownloadStatus()
                 AuraDownloaderIpc.MSG_CLEAR_UPDATE_MESSAGE -> downloader.clearUpdateMessage()
                 AuraDownloaderIpc.MSG_CANCEL_DOWNLOAD -> downloader.requestCancelDownload()
+                AuraDownloaderIpc.MSG_SET_AUTO_UPDATE -> {
+                    val autoUpdate = data.getBoolean(AuraDownloaderIpc.KEY_AUTO_UPDATE, true)
+                    downloader.applyRemotePreferences(autoUpdateEnabled = autoUpdate)
+                }
                 else -> super.handleMessage(msg)
             }
         }
@@ -198,15 +210,23 @@ class AuraDownloadForegroundService : Service() {
 
     private val incomingMessenger = Messenger(incomingHandler)
 
+    /**
+     * Encola y ejecuta secuencialmente los comandos IPC usando [commandMutex] para que ninguna
+     * petición (`MSG_INSPECT_URL`, `MSG_CHECK_UPDATES`, etc.) se descarte mientras Chaquopy
+     * termina su inicialización bajo demanda.
+     */
     private fun launchCommand(
         downloader: YtDlpAudioDownloader,
         block: suspend () -> Unit,
     ) {
-        if (activeCommandJob?.isActive == true) return
-        activeCommandJob = serviceScope.launch {
+        pendingCommandCount.incrementAndGet()
+        serviceScope.launch {
             try {
-                block()
+                commandMutex.withLock {
+                    block()
+                }
             } finally {
+                pendingCommandCount.decrementAndGet()
                 mainHandler.post {
                     scheduleIdleShutdownIfEligible(downloader)
                 }
@@ -385,7 +405,11 @@ class AuraDownloadForegroundService : Service() {
         serviceScope.cancel()
         super.onDestroy()
 
-        if (idleTerminationArmed && isIsolatedDownloaderProcess()) {
+        if (idleTerminationArmed &&
+            !isServiceBound &&
+            boundClients.isEmpty() &&
+            isIsolatedDownloaderProcess()
+        ) {
             // Devuelve al sistema operativo el heap nativo de CPython / libpython cuando
             // el descargador terminó su trabajo y no hay UI escuchando.
             Process.killProcess(Process.myPid())
@@ -410,7 +434,7 @@ class AuraDownloadForegroundService : Service() {
         mainHandler.removeCallbacks(idleShutdownRunnable)
         val isBusy = downloader?.downloadState?.value?.isBusy == true ||
             activeDownloadJob?.isActive == true ||
-            activeCommandJob?.isActive == true
+            pendingCommandCount.get() > 0
         if (!isServiceBound && boundClients.isEmpty() && !isBusy) {
             mainHandler.postDelayed(idleShutdownRunnable, IDLE_SHUTDOWN_DELAY_MS)
         }
@@ -663,7 +687,7 @@ class AuraDownloadForegroundService : Service() {
         private const val PROGRESS_NOTIFICATION_ID = 4201
         private const val RESULT_NOTIFICATION_ID = 4202
         private const val DEFAULT_ACCENT_ARGB = 0xFFA78BFA.toInt()
-        private const val IDLE_SHUTDOWN_DELAY_MS = 2_500L
+        private const val IDLE_SHUTDOWN_DELAY_MS = 5_000L
 
         @Volatile
         private var activeServiceInstance: AuraDownloadForegroundService? = null

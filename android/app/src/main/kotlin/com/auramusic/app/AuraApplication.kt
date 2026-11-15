@@ -17,6 +17,7 @@ import com.auramusic.core.database.DownloaderPreferencesRepository
 import com.auramusic.core.database.EqualizerPreferencesRepository
 import com.auramusic.core.database.HeadphonePreferencesRepository
 import com.auramusic.core.database.MusicRepository
+import com.auramusic.core.database.OnboardingPreferencesRepository
 import com.auramusic.core.database.PlaybackPreferencesRepository
 import com.auramusic.core.database.StoragePreferencesRepository
 import com.auramusic.core.database.ThemePreferencesRepository
@@ -97,6 +98,10 @@ class AuraAppContainer(
 
     val storagePreferencesRepository: StoragePreferencesRepository by lazy {
         StoragePreferencesRepository(appContext)
+    }
+
+    val onboardingPreferencesRepository: OnboardingPreferencesRepository by lazy {
+        OnboardingPreferencesRepository(appContext)
     }
 
     val audioOutputMonitor: AuraAudioOutputMonitor by lazy {

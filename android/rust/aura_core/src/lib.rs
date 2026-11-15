@@ -16,11 +16,15 @@ mod artwork;
 mod crossfeed;
 mod delete_fx;
 mod equalizer;
+#[cfg(feature = "js-runtime")]
 pub mod js_runtime;
 mod metadata;
 mod palette;
 mod reverb;
 mod spatial_8d;
+
+/// Versión reportada de QuickJS-NG compatible con la detección de `yt-dlp` en `libaura_qjs.so`.
+pub const QUICKJS_VERSION_STRING: &str = "QuickJS-ng version 0.14.0";
 
 /// Inicializa el logger nativo de Android la primera vez que se invoca el puente.
 fn init_android_logger() {
@@ -54,7 +58,7 @@ pub extern "system" fn Java_com_auramusic_core_rust_AuraRustBridge_nativeGetEngi
         .resolve::<ThrowRuntimeExAndDefault>()
 }
 
-/// Devuelve la versión del motor QuickJS-NG embebido en Rust (`rquickjs`).
+/// Devuelve la versión del motor QuickJS-NG (`libaura_qjs.so`) sin enlazar `rquickjs` dentro de `libaura_core.so`.
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_com_auramusic_core_rust_AuraRustBridge_nativeGetQuickJsVersion<
     'local,
@@ -66,13 +70,14 @@ pub extern "system" fn Java_com_auramusic_core_rust_AuraRustBridge_nativeGetQuic
     unowned_env
         .with_env(|env| -> jni::errors::Result<JString<'local>> {
             Ok(env
-                .new_string(js_runtime::QUICKJS_VERSION_STRING)
+                .new_string(QUICKJS_VERSION_STRING)
                 .unwrap_or_default())
         })
         .resolve::<ThrowRuntimeExAndDefault>()
 }
 
-/// Evalúa un script JavaScript en QuickJS-NG desde Rust y devuelve la salida estándar o error.
+/// Evalúa un script JavaScript en QuickJS-NG cuando `js-runtime` está compilado en la librería,
+/// o indica que la ejecución JS se realiza mediante el binario dedicado `libaura_qjs.so`.
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_com_auramusic_core_rust_AuraRustBridge_nativeEvalQuickJs<'local>(
     mut unowned_env: EnvUnowned<'local>,
@@ -82,20 +87,30 @@ pub extern "system" fn Java_com_auramusic_core_rust_AuraRustBridge_nativeEvalQui
     init_android_logger();
     unowned_env
         .with_env(|env| -> jni::errors::Result<JString<'local>> {
-            let script_str = match script.try_to_string(env) {
-                Ok(s) => s,
-                Err(err) => {
-                    let msg = format!("ERROR: No se pudo leer script JNI: {err:?}");
-                    return Ok(env.new_string(msg).unwrap_or_default());
-                }
-            };
+            #[cfg(feature = "js-runtime")]
+            {
+                let script_str = match script.try_to_string(env) {
+                    Ok(s) => s,
+                    Err(err) => {
+                        let msg = format!("ERROR: No se pudo leer script JNI: {err:?}");
+                        return Ok(env.new_string(msg).unwrap_or_default());
+                    }
+                };
 
-            let output = match js_runtime::eval_script_with_args(&script_str, &[]) {
-                Ok(res) => res.stdout,
-                Err(err) => format!("ERROR: {err}"),
-            };
+                let output = match js_runtime::eval_script_with_args(&script_str, &[]) {
+                    Ok(res) => res.stdout,
+                    Err(err) => format!("ERROR: {err}"),
+                };
 
-            Ok(env.new_string(output).unwrap_or_default())
+                Ok(env.new_string(output).unwrap_or_default())
+            }
+
+            #[cfg(not(feature = "js-runtime"))]
+            {
+                let _ = &script;
+                let msg = "ERROR: QuickJS-NG se ejecuta mediante el binario dedicado libaura_qjs.so en esta compilación.";
+                Ok(env.new_string(msg).unwrap_or_default())
+            }
         })
         .resolve::<ThrowRuntimeExAndDefault>()
 }

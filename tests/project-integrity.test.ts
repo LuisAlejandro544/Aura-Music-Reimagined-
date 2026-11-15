@@ -1899,3 +1899,194 @@ test('Release v1.0.0 workflow, Rust dead-code pruning, ProGuard rules for yt-dlp
   assert.match(structure, /build-android-release\.yml/);
   assert.match(structure, /lint-and-audit\.yml/);
 });
+
+test('isolated downloader IPC, command queue, Python version probing, and Chaquopy APK checks prevent stuck engine states', () => {
+  const ipcKt = fs.readFileSync(
+    path.join(rootDir, 'android/core/downloader/src/main/kotlin/com/auramusic/core/downloader/AuraDownloaderIpc.kt'),
+    'utf8',
+  );
+  const remoteClientKt = fs.readFileSync(
+    path.join(rootDir, 'android/core/downloader/src/main/kotlin/com/auramusic/core/downloader/AuraDownloaderRemoteClient.kt'),
+    'utf8',
+  );
+  const serviceKt = fs.readFileSync(
+    path.join(rootDir, 'android/core/downloader/src/main/kotlin/com/auramusic/core/downloader/AuraDownloadForegroundService.kt'),
+    'utf8',
+  );
+  const ytDlpKt = fs.readFileSync(
+    path.join(rootDir, 'android/core/downloader/src/main/kotlin/com/auramusic/core/downloader/YtDlpAudioDownloader.kt'),
+    'utf8',
+  );
+  const auraYtdlpPy = fs.readFileSync(
+    path.join(rootDir, 'android/core/downloader/src/main/python/aura_ytdlp.py'),
+    'utf8',
+  );
+  const libCoordKt = fs.readFileSync(
+    path.join(rootDir, 'android/app/src/main/kotlin/com/auramusic/app/AuraLibraryCoordinator.kt'),
+    'utf8',
+  );
+  const dlRules = fs.readFileSync(
+    path.join(rootDir, 'android/core/downloader/consumer-rules.pro'),
+    'utf8',
+  );
+  const debugWorkflow = fs.readFileSync(
+    path.join(rootDir, '.github/workflows/build-android-apk.yml'),
+    'utf8',
+  );
+  const releaseWorkflow = fs.readFileSync(
+    path.join(rootDir, '.github/workflows/build-android-release.yml'),
+    'utf8',
+  );
+
+  // 1. IPC de auto-actualización sin machacar versiones en caché
+  assert.match(ipcKt, /const val MSG_SET_AUTO_UPDATE\s*=\s*11/);
+  assert.match(remoteClientKt, /suspend fun setAutoUpdateEnabled\(/);
+  assert.match(libCoordKt, /downloaderClient\.setAutoUpdateEnabled\(enabled\)/);
+  assert.match(remoteClientKt, /PLACEHOLDER_ENGINE_STATES/);
+
+  // 2. Recuperación segura del enlace IPC si :downloader muere, falla bindService o tarda en conectar
+  assert.match(remoteClientKt, /override fun onBindingDied\(/);
+  assert.match(remoteClientKt, /override fun onNullBinding\(/);
+  assert.match(remoteClientKt, /handleRemoteConnectionLost\(/);
+  assert.match(remoteClientKt, /recoverPendingUiAfterBindFailure\(/);
+  assert.match(remoteClientKt, /awaitingInspectAck/);
+  assert.match(remoteClientKt, /awaitingUpdateAck/);
+
+  // 3. Cola secuencial de comandos en AuraDownloadForegroundService sin descartar MSG_INSPECT_URL / MSG_CHECK_UPDATES
+  assert.match(serviceKt, /commandMutex\s*=\s*Mutex\(\)/);
+  assert.match(serviceKt, /pendingCommandCount/);
+  assert.match(serviceKt, /AuraDownloaderIpc\.MSG_SET_AUTO_UPDATE/);
+  assert.match(serviceKt, /!isServiceBound && boundClients\.isEmpty\(\)/);
+
+  // 4. Diagnóstico explícito de errores Python/Chaquopy y protección contra carpetas py_updates vacías
+  assert.doesNotMatch(ytDlpKt, /runCatching\s*\{\s*callPythonEngine\(\s*"get_engine_versions"\s*\)\s*\}\.getOrNull\(\)/);
+  assert.match(ytDlpKt, /yt_dlp_error/);
+  assert.match(ytDlpKt, /yt_dlp_ejs_error/);
+  assert.match(auraYtdlpPy, /os\.path\.isfile\(init_file\)/);
+  assert.match(auraYtdlpPy, /__init__\.py/);
+  assert.match(auraYtdlpPy, /_probe_yt_dlp_version/);
+  assert.match(auraYtdlpPy, /_probe_ejs_version/);
+
+  // 5. Reglas R8 y validación de empaquetado Chaquopy en workflows Debug y Release
+  assert.match(dlRules, /AuraDownloaderRemoteClient/);
+  assert.match(dlRules, /CachedEngineVersions/);
+  for (const wf of [debugWorkflow, releaseWorkflow]) {
+    assert.match(wf, /libpython3\.11\.so/);
+    assert.match(wf, /libchaquopy_java\.so/);
+    assert.match(wf, /assets\/chaquopy\//);
+  }
+});
+
+test('downloader explains multi-platform yt-dlp support and first-launch onboarding burns to permissions page using Rust', () => {
+  const settingsGradle = fs.readFileSync(path.join(rootDir, 'android/settings.gradle.kts'), 'utf8');
+  const appGradle = fs.readFileSync(path.join(rootDir, 'android/app/build.gradle.kts'), 'utf8');
+  const onboardingGradlePath = path.join(rootDir, 'android/feature/onboarding/build.gradle.kts');
+  const onboardingScreenPath = path.join(
+    rootDir,
+    'android/feature/onboarding/src/main/kotlin/com/auramusic/feature/onboarding/OnboardingScreen.kt',
+  );
+  const modelsKt = fs.readFileSync(
+    path.join(rootDir, 'android/core/model/src/main/kotlin/com/auramusic/core/model/AuraModels.kt'),
+    'utf8',
+  );
+  const modelsTestKt = fs.readFileSync(
+    path.join(rootDir, 'android/core/model/src/test/kotlin/com/auramusic/core/model/AuraModelsTest.kt'),
+    'utf8',
+  );
+  const reposKt = fs.readFileSync(
+    path.join(rootDir, 'android/core/database/src/main/kotlin/com/auramusic/core/database/AuraRepositories.kt'),
+    'utf8',
+  );
+  const appKt = fs.readFileSync(
+    path.join(rootDir, 'android/app/src/main/kotlin/com/auramusic/app/AuraApplication.kt'),
+    'utf8',
+  );
+  const vmKt = fs.readFileSync(
+    path.join(rootDir, 'android/app/src/main/kotlin/com/auramusic/app/AuraViewModel.kt'),
+    'utf8',
+  );
+  const mainKt = fs.readFileSync(
+    path.join(rootDir, 'android/app/src/main/kotlin/com/auramusic/app/MainActivity.kt'),
+    'utf8',
+  );
+  const downloaderScreenKt = fs.readFileSync(
+    path.join(rootDir, 'android/feature/downloader/src/main/kotlin/com/auramusic/feature/downloader/DownloaderScreen.kt'),
+    'utf8',
+  );
+  const auraYtdlpPy = fs.readFileSync(
+    path.join(rootDir, 'android/core/downloader/src/main/python/aura_ytdlp.py'),
+    'utf8',
+  );
+
+  // 1. Soporte multipágina visible en DownloaderScreen + metadatos sin asumir solo YouTube
+  assert.match(downloaderScreenKt, /TikTok/);
+  assert.match(downloaderScreenKt, /Instagram/);
+  assert.match(downloaderScreenKt, /SoundCloud/);
+  assert.match(auraYtdlpPy, /extractor_key/);
+  assert.match(auraYtdlpPy, /Descarga web/);
+
+  // 2. Módulo dedicado :feature:onboarding dependiendo únicamente de :core:model
+  assert.match(settingsGradle, /include\(":feature:onboarding"\)/);
+  assert.match(appGradle, /project\(":feature:onboarding"\)/);
+  assert.ok(fs.existsSync(onboardingGradlePath), 'Missing android/feature/onboarding/build.gradle.kts');
+  assert.ok(fs.existsSync(onboardingScreenPath), 'Missing OnboardingScreen.kt');
+  const onboardingGradle = fs.readFileSync(onboardingGradlePath, 'utf8');
+  assert.match(onboardingGradle, /project\(":core:model"\)/);
+  assert.doesNotMatch(onboardingGradle, /project\(":core:rust"\)/);
+
+  // 3. Persistencia DataStore para mostrar el onboarding solo la primera vez
+  assert.match(modelsKt, /enum class OnboardingPage/);
+  assert.match(modelsKt, /data class OnboardingPermissionStatus/);
+  assert.match(modelsKt, /object OnboardingHelper/);
+  assert.match(modelsTestKt, /onboarding helper tracks multi-platform summary/);
+  assert.match(reposKt, /class OnboardingPreferencesRepository/);
+  assert.match(reposKt, /booleanPreferencesKey\("onboarding_completed"\)/);
+  assert.match(reposKt, /prefs\[onboardingCompletedKey\]\s*\?:\s*false/);
+  assert.match(appKt, /val onboardingPreferencesRepository:\s*OnboardingPreferencesRepository/);
+  assert.match(vmKt, /val onboardingCompleted:\s*StateFlow<Boolean>/);
+  assert.match(vmKt, /fun completeOnboarding\(\)/);
+
+  // 4. MainActivity integra onboarding antes de AuraAppRoot y sin pedir notificaciones antes de la guía
+  assert.match(mainKt, /AuraOnboardingScreen\(/);
+  assert.match(mainKt, /AuraRustBridge\.renderDeleteEffectFrame/);
+  assert.doesNotMatch(mainKt, /requestNotificationPermissionIfNeeded\(\)/);
+
+  // 5. OnboardingScreen usa el motor Rust de papel quemándose entre guía y permisos reales
+  const onboardingScreenKt = fs.readFileSync(onboardingScreenPath, 'utf8');
+  assert.match(onboardingScreenKt, /DeleteAnimationEffect\.BURNING_PAPER/);
+  assert.match(onboardingScreenKt, /rememberGraphicsLayer\(\)/);
+  assert.match(onboardingScreenKt, /deleteEffectRenderer\.renderFrame\(/);
+  assert.match(onboardingScreenKt, /WelcomeGuidePage\(/);
+  assert.match(onboardingScreenKt, /PermissionsSetupPage\(/);
+  assert.match(onboardingScreenKt, /FOREGROUND_SERVICE/);
+  assert.match(onboardingScreenKt, /INTERNET/);
+});
+
+test('release APK size optimizations avoid duplicate QuickJS-NG in libaura_core.so, fine-tune Cargo.toml, and exclude media3-ui from Release', () => {
+  const cargoToml = fs.readFileSync(path.join(rootDir, 'android/rust/aura_core/Cargo.toml'), 'utf8');
+  const rustLib = fs.readFileSync(path.join(rootDir, 'android/rust/aura_core/src/lib.rs'), 'utf8');
+  const rustGradle = fs.readFileSync(path.join(rootDir, 'android/core/rust/build.gradle.kts'), 'utf8');
+  const playerGradle = fs.readFileSync(path.join(rootDir, 'android/core/player/build.gradle.kts'), 'utf8');
+  const catalog = fs.readFileSync(path.join(rootDir, 'android/gradle/libs.versions.toml'), 'utf8');
+
+  // 1. rquickjs es opcional bajo feature js-runtime y solo requerido por aura_qjs
+  assert.match(cargoToml, /required-features\s*=\s*\["js-runtime"\]/);
+  assert.match(cargoToml, /js-runtime\s*=\s*\["dep:rquickjs"\]/);
+  assert.match(cargoToml, /rquickjs\s*=\s*\{[^}]*optional\s*=\s*true/);
+  assert.match(rustLib, /#\[cfg\(feature\s*=\s*"js-runtime"\)\]/);
+  assert.match(rustGradle, /buildRustQuickJsBin/);
+  assert.match(rustGradle, /--features[\s\S]*js-runtime[\s\S]*--bin[\s\S]*aura_qjs/);
+  assert.match(rustGradle, /--no-default-features[\s\S]*--lib/);
+
+  // 2. Ajuste fino en Cargo.toml para tamaño de dependencias sin sacrificar DSP propio
+  assert.match(cargoToml, /release_max_level_warn/);
+  assert.match(cargoToml, /\[profile\.release\.package\."\*"]\s*[\r\n]+opt-level\s*=\s*"z"/);
+  assert.match(cargoToml, /lto\s*=\s*"fat"/);
+  assert.match(cargoToml, /panic\s*=\s*"abort"/);
+  assert.match(cargoToml, /strip\s*=\s*"symbols"/);
+
+  // 3. media3-ui presente en Debug/catálogo pero excluido de Release en :core:player
+  assert.match(catalog, /androidx-media3-ui\s*=/);
+  assert.match(playerGradle, /debugImplementation\(libs\.androidx\.media3\.ui\)/);
+  assert.doesNotMatch(playerGradle, /(^|\n)\s*implementation\(libs\.androidx\.media3\.ui\)/);
+});

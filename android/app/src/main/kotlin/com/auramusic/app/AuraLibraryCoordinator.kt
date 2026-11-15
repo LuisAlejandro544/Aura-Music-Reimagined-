@@ -287,8 +287,8 @@ class AuraLibraryCoordinator(
 
     fun setDownloaderAutoUpdate(enabled: Boolean) {
         scope.launch {
-            downloaderPreferencesRepository.setAutoUpdateEnabled(enabled)
-            downloaderClient.refreshCachedStatus()
+            // Actualiza DataStore, la UI local sin sobreescribir versiones y notifica a :downloader.
+            downloaderClient.setAutoUpdateEnabled(enabled)
         }
     }
 

@@ -633,3 +633,25 @@ class StoragePreferencesRepository(
         }
     }
 }
+
+/**
+ * Repositorio en Jetpack DataStore que registra si el usuario ya completó
+ * la guía de bienvenida y configuración inicial de permisos tras instalar la app.
+ */
+class OnboardingPreferencesRepository(
+    private val context: Context,
+) {
+    private val onboardingCompletedKey = booleanPreferencesKey("onboarding_completed")
+
+    val onboardingCompleted: Flow<Boolean> = context.auraSettingsDataStore.data.map { prefs ->
+        prefs[onboardingCompletedKey] ?: false
+    }
+
+    suspend fun markOnboardingCompleted() {
+        withContext(Dispatchers.IO) {
+            context.auraSettingsDataStore.edit { prefs ->
+                prefs[onboardingCompletedKey] = true
+            }
+        }
+    }
+}
