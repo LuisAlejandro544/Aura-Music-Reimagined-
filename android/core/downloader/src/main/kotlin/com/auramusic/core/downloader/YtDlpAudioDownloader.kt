@@ -55,7 +55,7 @@ class YtDlpAudioDownloader(
     private var cachedAutoUpdateEnabled: Boolean = true
 
     @Volatile
-    private var cachedPreferredQuality: AudioDownloadQuality = AudioDownloadQuality.BALANCED_128
+    private var cachedPreferredQuality: AudioDownloadQuality = AudioDownloadQuality.MAX
 
     @Volatile
     private var cachedLastUpdateCheckEpochMs: Long = 0L

@@ -425,8 +425,12 @@ class AuraSystemStorageManager(
             )
         }
 
-        // 2. Espejo de versiones del motor de descargas si existe (`engine_versions.json`).
-        val internalVersionsJson = File(context.filesDir, SystemFolderHelper.ENGINE_VERSIONS_JSON_FILE_NAME)
+        // 2. Espejo de versiones del motor de descargas si existe (`py_updates/engine_versions.json`).
+        val internalVersionsJson = File(
+            File(context.filesDir, "py_updates"),
+            SystemFolderHelper.ENGINE_VERSIONS_JSON_FILE_NAME,
+        ).takeIf { it.exists() && it.length() > 0L }
+            ?: File(context.filesDir, SystemFolderHelper.ENGINE_VERSIONS_JSON_FILE_NAME)
         if (internalVersionsJson.exists() && internalVersionsJson.length() > 0L) {
             copyFileAtomically(
                 src = internalVersionsJson,

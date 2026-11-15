@@ -1664,4 +1664,49 @@ test('optional system folder (Aura Music) is disabled by default, migrates track
   assert.match(rootKt, /SettingsSystemFolderScreen\(/);
 });
 
+test('cross-module Kotlin API contracts stay aligned across player, downloader, app, and importer', () => {
+  const playbackServiceKt = fs.readFileSync(
+    path.join(rootDir, 'android/core/player/src/main/kotlin/com/auramusic/core/player/AuraPlaybackService.kt'),
+    'utf8',
+  );
+  const downloaderIpcKt = fs.readFileSync(
+    path.join(rootDir, 'android/core/downloader/src/main/kotlin/com/auramusic/core/downloader/AuraDownloaderIpc.kt'),
+    'utf8',
+  );
+  const ytDlpDownloaderKt = fs.readFileSync(
+    path.join(rootDir, 'android/core/downloader/src/main/kotlin/com/auramusic/core/downloader/YtDlpAudioDownloader.kt'),
+    'utf8',
+  );
+  const appKt = fs.readFileSync(
+    path.join(rootDir, 'android/app/src/main/kotlin/com/auramusic/app/AuraApplication.kt'),
+    'utf8',
+  );
+  const systemManagerKt = fs.readFileSync(
+    path.join(rootDir, 'android/core/importer/src/main/kotlin/com/auramusic/core/importer/AuraSystemStorageManager.kt'),
+    'utf8',
+  );
+
+  // 1. AuraRustBridge.setEqualizerConfig recibe List<Float>, no FloatArray
+  assert.match(playbackServiceKt, /AuraRustBridge\.setEqualizerConfig\(eq\.isEnabled,\s*eq\.bandGainsDb\)/);
+  assert.doesNotMatch(playbackServiceKt, /setEqualizerConfig\([^)]*\.toFloatArray\(\)/);
+
+  // 2. Track usa addedAt (no addedAtEpochMs) como propiedad y parámetro nombrado
+  assert.match(downloaderIpcKt, /track\.addedAt/);
+  assert.match(downloaderIpcKt, /addedAt\s*=/);
+  assert.doesNotMatch(downloaderIpcKt, /track\.addedAtEpochMs|addedAtEpochMs\s*=/);
+
+  // 3. AudioDownloadQuality usa MAX / BALANCED / DATA_SAVER (sin BALANCED_128)
+  assert.match(ytDlpDownloaderKt, /AudioDownloadQuality\.MAX/);
+  assert.doesNotMatch(ytDlpDownloaderKt, /BALANCED_128/);
+
+  // 4. MemoryTrimAction expone flags booleanos en vez de constantes enum
+  assert.match(appKt, /action\.clearImageMemoryCache/);
+  assert.match(appKt, /action\.clearDynamicColorCache/);
+  assert.match(appKt, /action\.clearTransientControllerCaches/);
+  assert.doesNotMatch(appKt, /MemoryTrimAction\.(NONE|TRIM_HALF|CLEAR_MEMORY_CACHE_AND_BITMAPS)/);
+
+  // 5. AuraSystemStorageManager busca engine_versions.json dentro de py_updates primero
+  assert.match(systemManagerKt, /File\(context\.filesDir,\s*"py_updates"\)/);
+});
+
 

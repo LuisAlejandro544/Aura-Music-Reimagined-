@@ -260,7 +260,7 @@ object AuraDownloaderIpc {
         put("isProceduralCover", track.isProceduralCover)
         put("isLiked", track.isLiked)
         put("trackFingerprint", track.trackFingerprint)
-        put("addedAtEpochMs", track.addedAtEpochMs)
+        put("addedAt", track.addedAt)
     }
 
     private fun trackFromJsonObject(obj: JSONObject): Track = Track(
@@ -274,7 +274,10 @@ object AuraDownloaderIpc {
         isProceduralCover = obj.optBoolean("isProceduralCover", false),
         isLiked = obj.optBoolean("isLiked", false),
         trackFingerprint = obj.optString("trackFingerprint"),
-        addedAtEpochMs = obj.optLong("addedAtEpochMs", 0L),
+        addedAt = obj.optLong(
+            "addedAt",
+            obj.optLong("addedAtEpochMs", System.currentTimeMillis()),
+        ),
     )
 }
 

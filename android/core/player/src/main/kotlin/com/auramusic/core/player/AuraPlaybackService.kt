@@ -876,7 +876,8 @@ class AuraPlaybackService : MediaSessionService() {
                 AuraPlayerIpcContract.ACTION_SYNC_EQUALIZER -> {
                     val eq = AuraPlayerIpcContract.equalizerFromBundle(args)
                     serviceScope.launch(Dispatchers.Default) {
-                        AuraRustBridge.setEqualizerConfig(eq.isEnabled, eq.bandGainsDb.toFloatArray())
+                        // Pasa la lista de ganancias directamente al puente Rust JNI (List<Float>).
+                        AuraRustBridge.setEqualizerConfig(eq.isEnabled, eq.bandGainsDb)
                     }
                     provider?.onSyncEqualizer(eq)
                 }

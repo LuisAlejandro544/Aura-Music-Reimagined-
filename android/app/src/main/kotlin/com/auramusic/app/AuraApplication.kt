@@ -347,17 +347,16 @@ class AuraApplication :
         super.onTrimMemory(level)
         if (processRole != AuraProcessRole.MAIN) return
 
-        when (MemoryTrimPolicy.resolve(level)) {
-            MemoryTrimAction.NONE -> Unit
-            MemoryTrimAction.TRIM_HALF,
-            MemoryTrimAction.CLEAR_MEMORY_CACHE_AND_BITMAPS,
-            -> {
-                cachedMainImageLoader?.memoryCache?.clear()
-                clearCoverColorCache()
-                if (::container.isInitialized) {
-                    container.playerController.trimMemoryIfDetached()
-                }
-            }
+        // Ejecuta la purga selectiva de cachés visuales según los flags booleanos de MemoryTrimAction.
+        val action: MemoryTrimAction = MemoryTrimPolicy.resolve(level)
+        if (action.clearImageMemoryCache) {
+            cachedMainImageLoader?.memoryCache?.clear()
+        }
+        if (action.clearDynamicColorCache) {
+            clearCoverColorCache()
+        }
+        if (action.clearTransientControllerCaches && ::container.isInitialized) {
+            container.playerController.trimMemoryIfDetached()
         }
     }
 
