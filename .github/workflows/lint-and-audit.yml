@@ -107,9 +107,15 @@ jobs:
       - name: 1. Auditar integridad estructural, Web y esquemas Room
         run: |
           set +e
+          ROOT_DIR="$PWD"
           {
-            echo "=== npm ci ==="
-            npm ci
+            if [ -f package-lock.json ]; then
+              echo "=== npm ci ==="
+              npm ci
+            else
+              echo "=== npm install (sin package-lock.json) ==="
+              npm install --no-audit --no-fund
+            fi
             RC_NPM=$?
             echo "=== tests/project-integrity.test.ts ==="
             npx --yes tsx --test tests/project-integrity.test.ts
@@ -118,12 +124,13 @@ jobs:
             npm run lint && npm run build
             RC_WEB=$?
             RC=$((RC_NPM + RC_INT + RC_WEB))
-          } > audit-logs/integrity-and-web.log 2>&1
-          python3 -c "import json; p='audit-logs/exit-codes.json'; d=json.load(open(p)); d['integrity-and-web']=$RC; json.dump(d, open(p,'w'))"
+          } > "$ROOT_DIR/audit-logs/integrity-and-web.log" 2>&1
+          python3 -c "import json, os, sys; p=sys.argv[1]; os.makedirs(os.path.dirname(p), exist_ok=True); d=json.load(open(p)) if os.path.exists(p) else {}; d[sys.argv[2]]=int(sys.argv[3]); json.dump(d, open(p,'w'))" "$ROOT_DIR/audit-logs/exit-codes.json" "integrity-and-web" "${RC:-1}"
 
       - name: 2. Lint y compilación de Python (py_compile, ruff, mypy)
         run: |
           set +e
+          ROOT_DIR="$PWD"
           PY_TARGETS="android/core/downloader/src/main/python/aura_ytdlp.py .github/scripts/check_outdated_deps.py .github/scripts/generate_audit_report.py"
           {
             echo "=== python3 -m py_compile ==="
@@ -142,49 +149,58 @@ jobs:
             mypy --ignore-missing-imports $PY_TARGETS
             RC_MYPY=$?
             RC=$((RC_PYC + RC_RUFF + RC_FMT + RC_MYPY))
-          } > audit-logs/python-lint.log 2>&1
-          python3 -c "import json; p='audit-logs/exit-codes.json'; d=json.load(open(p)); d['python-lint']=$RC; json.dump(d, open(p,'w'))"
+          } > "$ROOT_DIR/audit-logs/python-lint.log" 2>&1
+          python3 -c "import json, os, sys; p=sys.argv[1]; os.makedirs(os.path.dirname(p), exist_ok=True); d=json.load(open(p)) if os.path.exists(p) else {}; d[sys.argv[2]]=int(sys.argv[3]); json.dump(d, open(p,'w'))" "$ROOT_DIR/audit-logs/exit-codes.json" "python-lint" "${RC:-1}"
 
       - name: 3. Lint, tests y check multi-ABI de Rust (fmt, check, clippy, test, cargo-ndk)
         env:
           RUN_NDK: ${{ inputs.run_rust_ndk_check }}
         run: |
           set +e
+          ROOT_DIR="$PWD"
           {
-            cd android/rust/aura_core
-            echo "=== cargo fetch ==="
-            cargo fetch
-            RC_FETCH=$?
-            echo ""
-            echo "=== cargo fmt --check ==="
-            cargo fmt --all -- --check
-            RC_FMT=$?
-            echo ""
-            echo "=== cargo check --all-targets ==="
-            cargo check --all-targets
-            RC_CHK=$?
-            echo ""
-            echo "=== cargo clippy --all-targets ==="
-            cargo clippy --all-targets -- -W clippy::all
-            RC_CLIPPY=$?
-            echo ""
-            echo "=== cargo test ==="
-            cargo test
-            RC_TEST=$?
-            RC_NDK=0
-            if [ "$RUN_NDK" = "true" ]; then
+            cd "$ROOT_DIR/android/rust/aura_core"
+            RC_CD=$?
+            if [ "$RC_CD" -eq 0 ]; then
+              echo "=== cargo fetch ==="
+              cargo fetch
+              RC_FETCH=$?
               echo ""
-              echo "=== cargo ndk check (32 y 64 bits) ==="
-              cargo ndk -t armeabi-v7a -t arm64-v8a -t x86_64 --platform 26 check --lib --bin aura_qjs
-              RC_NDK=$?
+              echo "=== cargo fmt --check ==="
+              cargo fmt --all -- --check
+              RC_FMT=$?
+              echo ""
+              echo "=== cargo check --all-targets ==="
+              cargo check --all-targets
+              RC_CHK=$?
+              echo ""
+              echo "=== cargo clippy --all-targets ==="
+              cargo clippy --all-targets -- -W clippy::all
+              RC_CLIPPY=$?
+              echo ""
+              echo "=== cargo test ==="
+              cargo test
+              RC_TEST=$?
+              RC_NDK=0
+              if [ "$RUN_NDK" = "true" ]; then
+                echo ""
+                echo "=== cargo ndk check (32 y 64 bits) ==="
+                cargo ndk -t armeabi-v7a -t arm64-v8a -t x86_64 --platform 26 check --lib --bin aura_qjs
+                RC_NDK=$?
+              fi
+              RC=$((RC_FETCH + RC_FMT + RC_CHK + RC_CLIPPY + RC_TEST + RC_NDK))
+            else
+              echo "No se pudo acceder a android/rust/aura_core"
+              RC=1
             fi
-            RC=$((RC_FETCH + RC_FMT + RC_CHK + RC_CLIPPY + RC_TEST + RC_NDK))
-          } > audit-logs/rust-lint-and-test.log 2>&1
-          python3 -c "import json; p='audit-logs/exit-codes.json'; d=json.load(open(p)); d['rust-lint-and-test']=$RC; json.dump(d, open(p,'w'))"
+          } > "$ROOT_DIR/audit-logs/rust-lint-and-test.log" 2>&1
+          cd "$ROOT_DIR"
+          python3 -c "import json, os, sys; p=sys.argv[1]; os.makedirs(os.path.dirname(p), exist_ok=True); d=json.load(open(p)) if os.path.exists(p) else {}; d[sys.argv[2]]=int(sys.argv[3]); json.dump(d, open(p,'w'))" "$ROOT_DIR/audit-logs/exit-codes.json" "rust-lint-and-test" "${RC:-1}"
 
       - name: 4. Lint estático de Kotlin con ktlint
         run: |
           set +e
+          ROOT_DIR="$PWD"
           {
             if [ -x /tmp/ktlint ]; then
               /tmp/ktlint "android/**/src/**/*.kt"
@@ -193,35 +209,38 @@ jobs:
               echo "ktlint no estuvo disponible en este runner."
               RC=0
             fi
-          } > audit-logs/kotlin-ktlint.log 2>&1
-          python3 -c "import json; p='audit-logs/exit-codes.json'; d=json.load(open(p)); d['kotlin-ktlint']=$RC; json.dump(d, open(p,'w'))"
+          } > "$ROOT_DIR/audit-logs/kotlin-ktlint.log" 2>&1
+          python3 -c "import json, os, sys; p=sys.argv[1]; os.makedirs(os.path.dirname(p), exist_ok=True); d=json.load(open(p)) if os.path.exists(p) else {}; d[sys.argv[2]]=int(sys.argv[3]); json.dump(d, open(p,'w'))" "$ROOT_DIR/audit-logs/exit-codes.json" "kotlin-ktlint" "${RC:-1}"
 
       - name: 5. Ejecutar Android Lint en todos los módulos (--continue)
         run: |
           set +e
-          chmod +x android/gradlew
+          ROOT_DIR="$PWD"
+          chmod +x "$ROOT_DIR/android/gradlew"
           (
-            cd android
+            cd "$ROOT_DIR/android"
             ./gradlew lintDebug --continue --no-daemon --no-build-cache --warning-mode all
-          ) > audit-logs/gradle-lint.log 2>&1
+          ) > "$ROOT_DIR/audit-logs/gradle-lint.log" 2>&1
           RC=$?
-          python3 -c "import json; p='audit-logs/exit-codes.json'; d=json.load(open(p)); d['gradle-lint']=$RC; json.dump(d, open(p,'w'))"
+          python3 -c "import json, os, sys; p=sys.argv[1]; os.makedirs(os.path.dirname(p), exist_ok=True); d=json.load(open(p)) if os.path.exists(p) else {}; d[sys.argv[2]]=int(sys.argv[3]); json.dump(d, open(p,'w'))" "$ROOT_DIR/audit-logs/exit-codes.json" "gradle-lint" "${RC:-1}"
 
       - name: 6. Compilar APK Debug y ejecutar Unit Tests (--continue, sigue compilando tras errores)
         if: ${{ inputs.compile_apk }}
         run: |
           set +e
-          chmod +x android/gradlew
+          ROOT_DIR="$PWD"
+          chmod +x "$ROOT_DIR/android/gradlew"
           (
-            cd android
+            cd "$ROOT_DIR/android"
             ./gradlew assembleDebug testDebugUnitTest -PauraAbis=armeabi-v7a,arm64-v8a,x86_64 --continue --no-daemon --no-build-cache --warning-mode all
-          ) > audit-logs/gradle-compile-and-test.log 2>&1
+          ) > "$ROOT_DIR/audit-logs/gradle-compile-and-test.log" 2>&1
           RC=$?
-          python3 -c "import json; p='audit-logs/exit-codes.json'; d=json.load(open(p)); d['gradle-compile-and-test']=$RC; json.dump(d, open(p,'w'))"
+          python3 -c "import json, os, sys; p=sys.argv[1]; os.makedirs(os.path.dirname(p), exist_ok=True); d=json.load(open(p)) if os.path.exists(p) else {}; d[sys.argv[2]]=int(sys.argv[3]); json.dump(d, open(p,'w'))" "$ROOT_DIR/audit-logs/exit-codes.json" "gradle-compile-and-test" "${RC:-1}"
 
       - name: 7. Verificar consistencia de esquemas Room tras KSP
         run: |
           set +e
+          ROOT_DIR="$PWD"
           {
             echo "=== Estado de android/core/database/schemas/ ==="
             find android/core/database/schemas -type f -print
@@ -230,19 +249,20 @@ jobs:
             git diff --stat android/core/database/schemas/
             git diff android/core/database/schemas/
             RC=0
-          } > audit-logs/room-schema-diff.log 2>&1
-          python3 -c "import json; p='audit-logs/exit-codes.json'; d=json.load(open(p)); d['room-schema-diff']=$RC; json.dump(d, open(p,'w'))"
+          } > "$ROOT_DIR/audit-logs/room-schema-diff.log" 2>&1
+          python3 -c "import json, os, sys; p=sys.argv[1]; os.makedirs(os.path.dirname(p), exist_ok=True); d=json.load(open(p)) if os.path.exists(p) else {}; d[sys.argv[2]]=int(sys.argv[3]); json.dump(d, open(p,'w'))" "$ROOT_DIR/audit-logs/exit-codes.json" "room-schema-diff" "${RC:-0}"
 
       - name: 8. Auditar dependencias desactualizadas (Gradle, Rust, Python)
         if: ${{ inputs.check_outdated_deps }}
         run: |
           set +e
-          python3 .github/scripts/check_outdated_deps.py \
-            --root . \
-            --output-json audit-logs/outdated-deps.json \
-            --output-log audit-logs/outdated-deps.log
+          ROOT_DIR="$PWD"
+          python3 "$ROOT_DIR/.github/scripts/check_outdated_deps.py" \
+            --root "$ROOT_DIR" \
+            --output-json "$ROOT_DIR/audit-logs/outdated-deps.json" \
+            --output-log "$ROOT_DIR/audit-logs/outdated-deps.log"
           RC=$?
-          python3 -c "import json; p='audit-logs/exit-codes.json'; d=json.load(open(p)); d['outdated-deps']=$RC; json.dump(d, open(p,'w'))"
+          python3 -c "import json, os, sys; p=sys.argv[1]; os.makedirs(os.path.dirname(p), exist_ok=True); d=json.load(open(p)) if os.path.exists(p) else {}; d[sys.argv[2]]=int(sys.argv[3]); json.dump(d, open(p,'w'))" "$ROOT_DIR/audit-logs/exit-codes.json" "outdated-deps" "${RC:-1}"
 
       - name: 9. Construir página HTML interactiva y paquete .zip de auditoría
         if: always()
