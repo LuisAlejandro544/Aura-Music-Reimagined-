@@ -1,10 +1,12 @@
 package com.auramusic.core.player
 
 import android.content.Intent
+import android.net.Uri
 import android.os.Bundle
 import android.view.KeyEvent
 import androidx.annotation.OptIn
 import androidx.core.content.IntentCompat
+import java.io.File
 import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
@@ -91,7 +93,7 @@ internal class AuraMediaSessionCallback(
 
     /**
      * Restaura las URIs reproducibles al establecer una cola nueva completa (`setMediaItems`)
-     * preservando el índice inicial y la posición solicitada por el controlador.
+     * preservando un índice inicial válido y la posición solicitada por el controlador.
      */
     override fun onSetMediaItems(
         mediaSession: MediaSession,
@@ -101,8 +103,13 @@ internal class AuraMediaSessionCallback(
         startPositionMs: Long,
     ): ListenableFuture<MediaSession.MediaItemsWithStartPosition> {
         val resolvedItems = resolvePlayableMediaItems(mediaItems)
+        val safeStartIndex = if (resolvedItems.isEmpty()) {
+            0
+        } else {
+            startIndex.coerceIn(0, resolvedItems.lastIndex)
+        }
         return Futures.immediateFuture(
-            MediaSession.MediaItemsWithStartPosition(resolvedItems, startIndex, startPositionMs),
+            MediaSession.MediaItemsWithStartPosition(resolvedItems, safeStartIndex, startPositionMs),
         )
     }
 
@@ -110,8 +117,14 @@ internal class AuraMediaSessionCallback(
         mediaItems: List<MediaItem>,
     ): MutableList<MediaItem> =
         mediaItems.map { item ->
-            val resolvedUri = item.localConfiguration?.uri ?: item.requestMetadata.mediaUri
-            if (item.localConfiguration == null && resolvedUri != null) {
+            val rawUri = item.localConfiguration?.uri ?: item.requestMetadata.mediaUri
+            val resolvedUri = if (rawUri != null && rawUri.scheme.isNullOrBlank()) {
+                val path = rawUri.path ?: rawUri.toString()
+                if (path.startsWith("/")) Uri.fromFile(File(path)) else rawUri
+            } else {
+                rawUri
+            }
+            if (resolvedUri != null && item.localConfiguration?.uri != resolvedUri) {
                 item.buildUpon()
                     .setUri(resolvedUri)
                     .build()

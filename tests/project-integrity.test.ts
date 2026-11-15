@@ -2287,3 +2287,47 @@ test('cross-process Media3 playback preserves playable URIs via RequestMetadata,
   assert.match(playerRules, /AuraMediaSessionCallback/);
 });
 
+test('yt-dlp downloads exclude unplayable HLS/DASH manifests, imported SAF tracks persist locally, and large Binder queues stream in chunks', () => {
+  const importerKt = fs.readFileSync(
+    path.join(rootDir, 'android/core/importer/src/main/kotlin/com/auramusic/core/importer/AudioImporter.kt'),
+    'utf8',
+  );
+  const systemManagerKt = fs.readFileSync(
+    path.join(rootDir, 'android/core/importer/src/main/kotlin/com/auramusic/core/importer/AuraSystemStorageManager.kt'),
+    'utf8',
+  );
+  const auraYtdlpPy = fs.readFileSync(
+    path.join(rootDir, 'android/core/downloader/src/main/python/aura_ytdlp.py'),
+    'utf8',
+  );
+  const controllerKt = fs.readFileSync(
+    path.join(rootDir, 'android/core/player/src/main/kotlin/com/auramusic/core/player/AuraPlayerController.kt'),
+    'utf8',
+  );
+  const callbackKt = fs.readFileSync(
+    path.join(rootDir, 'android/core/player/src/main/kotlin/com/auramusic/core/player/AuraMediaSessionCallback.kt'),
+    'utf8',
+  );
+
+  // 1. AudioImporter verifica permisos SAF persistentes, copia a imported_audio si faltan y retorna Track con ID real
+  assert.match(importerKt, /fun hasPersistedReadPermission\(/);
+  assert.match(importerKt, /"imported_audio"/);
+  assert.match(importerKt, /pfd\.statSize\.coerceAtLeast\(0L\)/);
+  assert.match(importerKt, /repository\.insertTrackAndGet\(track\)/);
+  assert.match(systemManagerKt, /"imported_audio"/);
+
+  // 2. aura_ytdlp.py filtra flujos segmentados (HLS/DASH/MHTML) incompatibles con ExoPlayer sin FFmpeg
+  assert.match(auraYtdlpPy, /_DISALLOWED_PROTOCOLS/);
+  assert.match(auraYtdlpPy, /http_dash_segments/);
+  assert.match(auraYtdlpPy, /_PROGRESSIVE_PROTO_FILTER/);
+  assert.match(auraYtdlpPy, /def _is_playable_format\(/);
+
+  // 3. AuraPlayerController carga colas grandes en bloques, reintenta conexión en frío y AuraMediaSessionCallback acota startIndex
+  assert.match(controllerKt, /INITIAL_QUEUE_WINDOW_SIZE/);
+  assert.match(controllerKt, /player\.addMediaItems\(/);
+  assert.match(controllerKt, /activeQueueWindowOffset/);
+  assert.match(controllerKt, /retryDelaysMs/);
+  assert.match(callbackKt, /startIndex\.coerceIn\(0,\s*resolvedItems\.lastIndex\)/);
+});
+
+

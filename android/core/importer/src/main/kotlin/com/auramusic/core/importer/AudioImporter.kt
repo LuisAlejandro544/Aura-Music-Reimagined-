@@ -75,7 +75,11 @@ class AudioImporter(
                     )
                 }
             }
-            processAudioUris(uris, accentArgb)
+            processAudioUris(
+                uris = uris,
+                accentArgb = accentArgb,
+                treeUriPersisted = false,
+            )
         }
     }
 
@@ -90,6 +94,7 @@ class AudioImporter(
                     Intent.FLAG_GRANT_READ_URI_PERMISSION,
                 )
             }
+            val treePersisted = hasPersistedReadPermission(treeUri)
 
             _progress.value = ImportProgress(
                 isImporting = true,
@@ -107,7 +112,11 @@ class AudioImporter(
 
             val audioUris = mutableListOf<Uri>()
             collectAudioFilesRecursively(rootDoc, audioUris)
-            processAudioUris(audioUris, accentArgb)
+            processAudioUris(
+                uris = audioUris,
+                accentArgb = accentArgb,
+                treeUriPersisted = treePersisted,
+            )
         }
     }
 
@@ -209,7 +218,17 @@ class AudioImporter(
 
         val contentUri = Uri.fromFile(finalAudioFile).toString()
         if (contentUri in dbUris || fingerprint in dbFingerprints) {
-            return@withContext null
+            val existing = repository.findTrackByUriOrFingerprint(contentUri, fingerprint)
+            if (existing != null) {
+                // Evita dejar archivos duplicados si la pista ya estaba registrada con otra ruta.
+                if (existing.contentUri != contentUri && finalAudioFile.exists()) {
+                    runCatching { finalAudioFile.delete() }
+                }
+                if (thumbnailFile != null && thumbnailFile.exists()) {
+                    runCatching { thumbnailFile.delete() }
+                }
+                return@withContext existing
+            }
         }
 
         val embeddedBytes = metadata?.embeddedCoverBytes
@@ -262,8 +281,8 @@ class AudioImporter(
             isLiked = false,
             trackFingerprint = fingerprint,
         )
-        repository.insertTracks(listOf(track))
-        track
+        // Retorna la entidad ya insertada con su ID real en Room para que "Reproducir ahora" funcione de inmediato.
+        repository.insertTrackAndGet(track)
     }
 
     /**
@@ -367,8 +386,22 @@ class AudioImporter(
         repository.insertTrackAndGet(trackToSave)
     }
 
-    private fun copyExternalUriToOpenedAudio(uri: Uri): File? {
-        val openedDir = File(context.filesDir, "opened_audio").apply { mkdirs() }
+    private fun hasPersistedReadPermission(uri: Uri): Boolean =
+        uri.scheme != "content" ||
+            context.contentResolver.persistedUriPermissions.any {
+                it.uri == uri && it.isReadPermission
+            }
+
+    private fun copyExternalUriToOpenedAudio(uri: Uri): File? =
+        copyContentUriToManagedDir(uri, dirName = "opened_audio")
+
+    /**
+     * Copia una URI `content://` sin permiso persistible hacia un directorio privado administrado
+     * por la app (`imported_audio` u `opened_audio`) para garantizar que el proceso aislado `:player`
+     * pueda leerla en cualquier momento sin `SecurityException`.
+     */
+    private fun copyContentUriToManagedDir(uri: Uri, dirName: String): File? {
+        val targetDir = File(context.filesDir, dirName).apply { mkdirs() }
         val docFile = DocumentFile.fromSingleUri(context, uri)
         val mime = context.contentResolver.getType(uri).orEmpty()
         val extFromName = docFile?.name?.substringAfterLast('.', "")?.lowercase().orEmpty()
@@ -381,7 +414,7 @@ class AudioImporter(
             .takeIf { it.length in 2..6 && it.all(Char::isLetterOrDigit) }
             ?: "mp3"
 
-        val tempFile = File(openedDir, "tmp_${System.currentTimeMillis()}.$extension")
+        val tempFile = File(targetDir, "tmp_${System.currentTimeMillis()}_${System.nanoTime() and 0xFFFF}.$extension")
         return runCatching {
             val copiedBytes = context.contentResolver.openInputStream(uri)?.use { input ->
                 FileOutputStream(tempFile).use { output ->
@@ -401,10 +434,39 @@ class AudioImporter(
         }
     }
 
+    private fun finalizeLocalImportedFile(
+        copiedFile: File,
+        track: Track,
+        systemFolderActive: Boolean,
+    ): File {
+        if (!copiedFile.exists()) return copiedFile
+        val ext = copiedFile.extension.ifBlank { "mp3" }
+        if (systemFolderActive) {
+            return moveFileIntoSystemMusicFolder(
+                sourceFile = copiedFile,
+                title = track.title,
+                artist = track.artist,
+                fingerprint = track.trackFingerprint,
+            ) ?: copiedFile
+        }
+        val importedDir = File(context.filesDir, "imported_audio").apply { mkdirs() }
+        val stableFile = File(importedDir, "imp_${track.trackFingerprint.take(24)}.$ext")
+        if (stableFile == copiedFile) return copiedFile
+        if (stableFile.exists() && stableFile.length() > 0L) {
+            runCatching { copiedFile.delete() }
+            return stableFile
+        }
+        return if (copiedFile.renameTo(stableFile)) {
+            stableFile
+        } else {
+            copiedFile
+        }
+    }
+
     /**
      * Elimina el archivo de audio si pertenece a los directorios internos administrados
-     * (`filesDir/downloads`, `filesDir/opened_audio`) o a `Aura Music/Música` cuando la carpeta
-     * del sistema está activa (evitando que vuelva a importarse automáticamente al reiniciar).
+     * (`filesDir/downloads`, `filesDir/opened_audio`, `filesDir/imported_audio`) o a `Aura Music/Música`
+     * cuando la carpeta del sistema está activa (evitando que vuelva a importarse automáticamente al reiniciar).
      */
     suspend fun deleteOwnedDownloadFileIfExists(contentUri: String) = withContext(Dispatchers.IO) {
         val parsed = runCatching { contentUri.toUri() }.getOrNull() ?: return@withContext
@@ -416,6 +478,7 @@ class AudioImporter(
         val ownedDirs = buildList {
             add(File(context.filesDir, "downloads"))
             add(File(context.filesDir, "opened_audio"))
+            add(File(context.filesDir, "imported_audio"))
             if (isSystemFolderActive()) {
                 add(AuraSystemStorageManager.getMusicDir())
                 add(AuraSystemStorageManager.getRootDir())
@@ -540,7 +603,11 @@ class AudioImporter(
         }.getOrNull()
     }
 
-    private suspend fun processAudioUris(uris: List<Uri>, accentArgb: Int) {
+    private suspend fun processAudioUris(
+        uris: List<Uri>,
+        accentArgb: Int,
+        treeUriPersisted: Boolean = false,
+    ) {
         val total = uris.size
         if (total == 0) {
             _progress.value = ImportProgress(
@@ -557,6 +624,8 @@ class AudioImporter(
             importedCount = 0,
             skippedDuplicates = 0,
         )
+
+        val systemFolderActive = isSystemFolderActive()
 
         // Una sola consulta por lotes a Room en lugar de consultar canción por canción.
         val (dbUris, dbFingerprints) = repository.getAllTrackIdentities()
@@ -594,15 +663,52 @@ class AudioImporter(
             pendingUris.map { uri ->
                 async(Dispatchers.IO) {
                     semaphore.withPermit {
-                        val parsed = extractTrackWithCover(uri, accentArgb)
-                        if (parsed != null) {
+                        // Si el proveedor SAF no otorgó permiso persistible, copiamos el audio a
+                        // filesDir/imported_audio para que el proceso :player nunca falle por SecurityException.
+                        val needsLocalCopy = uri.scheme == "content" &&
+                            !treeUriPersisted &&
+                            !hasPersistedReadPermission(uri)
+                        val copiedFile = if (needsLocalCopy) {
+                            copyContentUriToManagedDir(uri, dirName = "imported_audio")
+                        } else {
+                            null
+                        }
+                        val sourceUri = if (copiedFile != null) Uri.fromFile(copiedFile) else uri
+
+                        val parsed = extractTrackWithCover(sourceUri, accentArgb)
+                        if (parsed == null) {
+                            if (copiedFile != null && copiedFile.exists()) {
+                                runCatching { copiedFile.delete() }
+                            }
+                        } else {
+                            var isNewTrack = false
+                            var stabilizedTrack = parsed
                             stateMutex.withLock {
                                 if (seenFingerprints.add(parsed.trackFingerprint)) {
-                                    tracksToInsert.add(parsed)
-                                    importedCounter.incrementAndGet()
+                                    isNewTrack = true
                                 } else {
                                     skippedCounter.incrementAndGet()
                                 }
+                            }
+                            if (isNewTrack) {
+                                if (copiedFile != null) {
+                                    val finalFile = finalizeLocalImportedFile(
+                                        copiedFile = copiedFile,
+                                        track = parsed,
+                                        systemFolderActive = systemFolderActive,
+                                    )
+                                    stabilizedTrack = parsed.copy(contentUri = Uri.fromFile(finalFile).toString())
+                                }
+                                stateMutex.withLock {
+                                    if (seenUris.add(stabilizedTrack.contentUri) || copiedFile == null) {
+                                        tracksToInsert.add(stabilizedTrack)
+                                        importedCounter.incrementAndGet()
+                                    } else {
+                                        skippedCounter.incrementAndGet()
+                                    }
+                                }
+                            } else if (copiedFile != null && copiedFile.exists()) {
+                                runCatching { copiedFile.delete() }
                             }
                         }
                         val done = processedCounter.incrementAndGet()
@@ -753,11 +859,15 @@ class AudioImporter(
         val docFile = if (localFile == null) DocumentFile.fromSingleUri(context, uri) else null
         val rawFallbackName = localFile?.nameWithoutExtension ?: docFile?.name?.substringBeforeLast('.')
         val fallbackName = rawFallbackName?.takeIf { it.isNotBlank() } ?: "Pista local"
-        val sizeBytes = localFile?.length() ?: docFile?.length() ?: 0L
+        val initialSizeBytes = localFile?.length() ?: docFile?.length() ?: 0L
 
         return try {
             // Rust lee el audio directamente desde el descriptor POSIX sin copiar el archivo en RAM.
+            var resolvedSizeBytes = initialSizeBytes
             val metadata = context.contentResolver.openFileDescriptor(uri, "r")?.use { pfd ->
+                if (resolvedSizeBytes <= 0L) {
+                    resolvedSizeBytes = pfd.statSize.coerceAtLeast(0L)
+                }
                 AuraRustBridge.extractAudioMetadata(pfd.fd)
             } ?: return null
 
@@ -771,7 +881,7 @@ class AudioImporter(
                 title = title,
                 artist = artist,
                 durationMs = durationMs,
-                sizeBytes = sizeBytes,
+                sizeBytes = resolvedSizeBytes,
             )
 
             val coversDir = coversDirOverride ?: resolveCoversDirectory(isSystemFolderActive())

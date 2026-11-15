@@ -276,6 +276,7 @@ class AuraSystemStorageManager(
         val coversCanonical = runCatching { coversDir.canonicalPath }.getOrNull() ?: coversDir.absolutePath
         val ownedDownloadDir = runCatching { File(context.filesDir, "downloads").canonicalPath }.getOrNull()
         val ownedOpenedDir = runCatching { File(context.filesDir, "opened_audio").canonicalPath }.getOrNull()
+        val ownedImportedDir = runCatching { File(context.filesDir, "imported_audio").canonicalPath }.getOrNull()
 
         var migratedCount = 0
 
@@ -306,7 +307,9 @@ class AuraSystemStorageManager(
                             oldCanonical?.startsWith(ownedDownloadDir + File.separator) == true
                         val inOpenedDir = ownedOpenedDir != null &&
                             oldCanonical?.startsWith(ownedOpenedDir + File.separator) == true
-                        val isOwned = inDownloadsDir || inOpenedDir
+                        val inImportedDir = ownedImportedDir != null &&
+                            oldCanonical?.startsWith(ownedImportedDir + File.separator) == true
+                        val isOwned = inDownloadsDir || inOpenedDir || inImportedDir
                         if (isOwned && oldCanonical != runCatching { destFile.canonicalPath }.getOrNull()) {
                             oldManagedAudioToDelete = oldFile
                         }

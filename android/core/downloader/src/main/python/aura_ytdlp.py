@@ -320,6 +320,40 @@ _EXOPLAYER_AUDIO_EXTS = {
     "wav",
 }
 
+# Protocolos y manifiestos segmentados que requieren FFmpeg o extractores HLS/DASH para
+# remuxearse; se excluyen explícitamente porque :core:player usa ExoPlayer puro progresivo.
+_DISALLOWED_PROTOCOLS = {
+    "mhtml",
+    "m3u8",
+    "m3u8_native",
+    "http_dash_segments",
+    "ism",
+    "f4m",
+    "rtmp",
+    "rtsp",
+    "rtmpe",
+    "mms",
+}
+_DISALLOWED_EXTS = {"m3u8", "mpd", "f4m", "ism", "ts", "mhtml"}
+_PROGRESSIVE_PROTO_FILTER = (
+    "[protocol!*=m3u8][protocol!=http_dash_segments]"
+    "[protocol!=mhtml][protocol!=ism][protocol!=f4m]"
+    "[protocol!*=rtmp][protocol!*=rtsp]"
+)
+
+
+def _is_playable_format(fmt: dict) -> bool:
+    """Comprueba si el formato es un stream progresivo compatible con Media3 ExoPlayer sin FFmpeg."""
+    if not fmt:
+        return False
+    proto = str(fmt.get("protocol") or "").strip().lower()
+    if proto in _DISALLOWED_PROTOCOLS or "m3u8" in proto or "dash" in proto:
+        return False
+    ext = str(fmt.get("ext") or "").strip().lower()
+    if ext in _DISALLOWED_EXTS:
+        return False
+    return fmt.get("acodec") not in (None, "none")
+
 
 def _humanize_codec(acodec: str | None) -> str:
     raw = str(acodec or "").strip().lower()
@@ -342,33 +376,41 @@ def _build_format_selector(
     quality_key: str | None,
     format_id: str | None = None,
 ) -> str:
-    """Construye selector de formato compatible con Media3 ExoPlayer sin FFmpeg."""
-    fallback = "bestaudio[ext=m4a]/bestaudio[ext=webm]/bestaudio/best"
+    """Construye selector progresivo compatible con Media3 ExoPlayer sin FFmpeg."""
+    p = _PROGRESSIVE_PROTO_FILTER
+    fallback = (
+        f"bestaudio[ext=m4a]{p}/bestaudio[ext=webm]{p}/bestaudio[ext=mp3]{p}/"
+        f"bestaudio[ext=ogg]{p}/bestaudio[ext=opus]{p}/bestaudio{p}/"
+        f"best[ext=mp4][acodec!=none]{p}/best[ext=webm][acodec!=none]{p}/"
+        f"best[acodec!=none]{p}"
+    )
     clean_id = str(format_id or "").strip()
     if clean_id and all(ch.isalnum() or ch in ("-", "_", ".", "+") for ch in clean_id):
         return f"{clean_id}/{fallback}"
 
     key = str(quality_key or "max").strip().lower()
     if key == "data_saver":
-        return f"worstaudio[abr>=48]/bestaudio[abr<=96]/worstaudio/{fallback}"
+        return (
+            f"worstaudio[abr>=48]{p}/bestaudio[abr<=96]{p}/"
+            f"worstaudio{p}/{fallback}"
+        )
     if key == "balanced":
         return (
-            "bestaudio[abr<=160][ext=m4a]/bestaudio[abr<=160][ext=webm]/"
-            f"bestaudio[abr<=160]/{fallback}"
+            f"bestaudio[abr<=160][ext=m4a]{p}/bestaudio[abr<=160][ext=webm]{p}/"
+            f"bestaudio[abr<=160]{p}/{fallback}"
         )
     return fallback
 
 
 def _extract_available_audio_formats(info: dict) -> list[dict]:
-    """Extrae y ordena flujos de solo audio disponibles en el enlace (M4A/Opus/etc.)."""
+    """Extrae y ordena flujos progresivos de solo audio disponibles en el enlace (M4A/Opus/etc.)."""
     formats = info.get("formats") or []
     audio_only = [
         f
         for f in formats
         if f.get("format_id")
-        and f.get("acodec") not in (None, "none")
         and f.get("vcodec") in (None, "none")
-        and str(f.get("protocol") or "").lower() != "mhtml"
+        and _is_playable_format(f)
     ]
 
     if not audio_only:
@@ -377,9 +419,9 @@ def _extract_available_audio_formats(info: dict) -> list[dict]:
             audio_only = [
                 f
                 for f in requested
-                if f.get("format_id") and f.get("acodec") not in (None, "none")
+                if f.get("format_id") and _is_playable_format(f)
             ]
-        elif info.get("format_id") and info.get("acodec") not in (None, "none"):
+        elif info.get("format_id") and _is_playable_format(info):
             audio_only = [info]
 
     candidates_by_signature: dict[
@@ -479,8 +521,9 @@ def _resolve_audio_size_and_format(info: dict) -> tuple[int, str]:
     selected = None
     requested = info.get("requested_formats") or []
     if requested and isinstance(requested, list):
-        selected = requested[0]
-    elif info.get("acodec") not in (None, "none"):
+        playable_req = [f for f in requested if _is_playable_format(f)]
+        selected = playable_req[0] if playable_req else requested[0]
+    elif _is_playable_format(info):
         selected = info
 
     if selected is None:
@@ -488,11 +531,13 @@ def _resolve_audio_size_and_format(info: dict) -> tuple[int, str]:
         audio_only = [
             f
             for f in formats
-            if f.get("acodec") not in (None, "none")
-            and f.get("vcodec") in (None, "none")
+            if f.get("vcodec") in (None, "none") and _is_playable_format(f)
         ]
+        playable_any = [f for f in formats if _is_playable_format(f)]
         if audio_only:
             selected = audio_only[-1]
+        elif playable_any:
+            selected = playable_any[-1]
         elif formats:
             selected = formats[-1]
         else:
@@ -834,6 +879,17 @@ def download_audio(
 
         if not os.path.exists(audio_path):
             raise RuntimeError("No se encontró el archivo de audio descargado.")
+
+        downloaded_ext = os.path.splitext(audio_path)[1].lower().lstrip(".")
+        if downloaded_ext in _DISALLOWED_EXTS:
+            try:
+                os.remove(audio_path)
+            except OSError:
+                pass
+            raise RuntimeError(
+                f"El origen devolvió un manifiesto/segmento ({downloaded_ext}) incompatible "
+                "sin FFmpeg; prueba otro formato disponible en la vista previa."
+            )
 
         # Busca la miniatura descargada asociada al mismo video_id.
         thumbnail_path = None

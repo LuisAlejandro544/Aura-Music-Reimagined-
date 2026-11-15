@@ -65,9 +65,11 @@ class AuraPlayerController(
 
     private var controller: MediaController? = null
     private var connectJob: Job? = null
+    private var queueChunkLoadJob: Job? = null
     private var progressTickerJob: Job? = null
     private var sleepTimerUiTickerJob: Job? = null
     private var activeQueue: List<Track> = emptyList()
+    private var activeQueueWindowOffset: Int = 0
     private var latestLibraryTracks: List<Track> = emptyList()
     private var isUiAttached: Boolean = true
     private var pendingQueue: Pair<List<Track>, Int>? = null
@@ -92,6 +94,9 @@ class AuraPlayerController(
                 controller.removeListener(playerListener)
                 this@AuraPlayerController.controller = null
             }
+            queueChunkLoadJob?.cancel()
+            queueChunkLoadJob = null
+            activeQueueWindowOffset = 0
             stopProgressTicker()
             stopSleepTimerUiTicker()
             if (pendingQueue != null || pendingActions.isNotEmpty()) {
@@ -134,7 +139,9 @@ class AuraPlayerController(
 
         override fun onPlayerError(error: PlaybackException) {
             syncStateFromPlayer()
-            val detail = error.errorCodeName.takeIf { it.isNotBlank() } ?: "ERROR_REPRODUCCION"
+            val codeName = error.errorCodeName.takeIf { it.isNotBlank() } ?: "ERROR_REPRODUCCION"
+            val causeMsg = error.cause?.localizedMessage?.trim()?.takeIf { it.isNotEmpty() }
+            val detail = if (causeMsg != null) "$codeName: $causeMsg" else codeName
             _playbackErrors.trySend("No se pudo reproducir el audio ($detail).")
         }
     }
@@ -194,7 +201,9 @@ class AuraPlayerController(
                 ComponentName(context, AuraPlaybackService::class.java),
             )
             var mediaController: MediaController? = null
-            for (attempt in 0 until 2) {
+            // Reintentos con espera progresiva para dar tiempo al arranque en frío del proceso :player.
+            val retryDelaysMs = longArrayOf(250L, 500L, 900L)
+            for (attempt in 0..retryDelaysMs.size) {
                 mediaController = runCatching {
                     MediaController.Builder(context, token)
                         .setListener(controllerListener)
@@ -202,7 +211,9 @@ class AuraPlayerController(
                         .await()
                 }.getOrNull()
                 if (mediaController != null) break
-                if (attempt == 0) delay(250L)
+                if (attempt < retryDelaysMs.size) {
+                    delay(retryDelaysMs[attempt])
+                }
             }
             if (mediaController == null) {
                 connectJob = null
@@ -274,13 +285,28 @@ class AuraPlayerController(
         }
     }
 
+    private inline fun runAfterQueueWindowReady(crossinline block: (MediaController) -> Unit) {
+        val pendingLoad = queueChunkLoadJob
+        if (pendingLoad != null && pendingLoad.isActive) {
+            scope.launch {
+                pendingLoad.join()
+                withConnectedPlayer(block)
+            }
+        } else {
+            withConnectedPlayer(block)
+        }
+    }
+
     /**
      * Carga una cola completa y comienza a reproducir la canción seleccionada.
      */
     fun playQueue(tracks: List<Track>, startIndex: Int) {
         if (tracks.isEmpty()) return
         val safeIndex = startIndex.coerceIn(0, tracks.lastIndex)
+        queueChunkLoadJob?.cancel()
+        queueChunkLoadJob = null
         activeQueue = tracks
+        activeQueueWindowOffset = 0
 
         val player = controller
         if (player == null || !player.isConnected) {
@@ -326,22 +352,27 @@ class AuraPlayerController(
             return
         }
 
-        withConnectedPlayer { player ->
+        runAfterQueueWindowReady { player ->
             if (activeQueue.isEmpty() && player.mediaItemCount > 0) {
                 activeQueue = rebuildQueueFromPlayer(player)
+                activeQueueWindowOffset = 0
             }
             if (activeQueue.isEmpty()) {
                 applyQueueToPlayer(player, listOf(track), 0)
-                return@withConnectedPlayer
+                return@runAfterQueueWindowReady
             }
 
             val result = PlaybackQueueHelper.insertPlayNext(
                 queue = activeQueue,
-                currentIndex = player.currentMediaItemIndex,
+                currentIndex = (activeQueueWindowOffset + player.currentMediaItemIndex)
+                    .coerceIn(0, activeQueue.lastIndex),
                 track = track,
             )
             activeQueue = result.queue
-            player.addMediaItem(result.insertedAt.coerceIn(0, player.mediaItemCount), track.toMediaItem())
+            player.addMediaItem(
+                (result.insertedAt - activeQueueWindowOffset).coerceIn(0, player.mediaItemCount),
+                track.toMediaItem(),
+            )
             syncStateFromPlayer()
         }
     }
@@ -357,18 +388,20 @@ class AuraPlayerController(
             return
         }
 
-        withConnectedPlayer { player ->
+        runAfterQueueWindowReady { player ->
             if (activeQueue.isEmpty() && player.mediaItemCount > 0) {
                 activeQueue = rebuildQueueFromPlayer(player)
+                activeQueueWindowOffset = 0
             }
             if (activeQueue.isEmpty()) {
                 applyQueueToPlayer(player, listOf(track), 0)
-                return@withConnectedPlayer
+                return@runAfterQueueWindowReady
             }
 
             val result = PlaybackQueueHelper.appendToQueue(
                 queue = activeQueue,
-                currentIndex = player.currentMediaItemIndex,
+                currentIndex = (activeQueueWindowOffset + player.currentMediaItemIndex)
+                    .coerceIn(0, activeQueue.lastIndex),
                 track = track,
             )
             activeQueue = result.queue
@@ -384,9 +417,17 @@ class AuraPlayerController(
         withConnectedPlayer { player ->
             if (activeQueue.isEmpty() && player.mediaItemCount > 0) {
                 activeQueue = rebuildQueueFromPlayer(player)
+                activeQueueWindowOffset = 0
             }
-            if (index !in 0 until player.mediaItemCount) return@withConnectedPlayer
-            player.seekToDefaultPosition(index)
+            if (index !in activeQueue.indices && index !in 0 until player.mediaItemCount) {
+                return@withConnectedPlayer
+            }
+            val playerIndex = index - activeQueueWindowOffset
+            if (playerIndex !in 0 until player.mediaItemCount && index in activeQueue.indices) {
+                applyQueueToPlayer(player, activeQueue, index)
+                return@withConnectedPlayer
+            }
+            player.seekToDefaultPosition(playerIndex)
             if (player.playbackState == Player.STATE_IDLE) {
                 player.prepare()
             }
@@ -399,24 +440,31 @@ class AuraPlayerController(
      * Reordena una canción dentro de la cola activa sin interrumpir el audio actual.
      */
     fun moveQueueItem(fromIndex: Int, toIndex: Int) {
-        withConnectedPlayer { player ->
+        runAfterQueueWindowReady { player ->
             if (activeQueue.isEmpty() && player.mediaItemCount > 0) {
                 activeQueue = rebuildQueueFromPlayer(player)
+                activeQueueWindowOffset = 0
             }
             if (fromIndex !in activeQueue.indices ||
                 toIndex !in activeQueue.indices ||
                 fromIndex == toIndex
             ) {
-                return@withConnectedPlayer
+                return@runAfterQueueWindowReady
+            }
+            val playerFrom = fromIndex - activeQueueWindowOffset
+            val playerTo = toIndex - activeQueueWindowOffset
+            if (playerFrom !in 0 until player.mediaItemCount || playerTo !in 0 until player.mediaItemCount) {
+                return@runAfterQueueWindowReady
             }
             val result = PlaybackQueueHelper.moveItem(
                 queue = activeQueue,
-                currentIndex = player.currentMediaItemIndex,
+                currentIndex = (activeQueueWindowOffset + player.currentMediaItemIndex)
+                    .coerceIn(0, activeQueue.lastIndex),
                 fromIndex = fromIndex,
                 toIndex = toIndex,
             )
             activeQueue = result.queue
-            player.moveMediaItem(fromIndex, toIndex)
+            player.moveMediaItem(playerFrom, playerTo)
             syncStateFromPlayer()
         }
     }
@@ -425,21 +473,25 @@ class AuraPlayerController(
      * Quita una pista de la cola de reproducción actual.
      */
     fun removeFromQueue(index: Int) {
-        withConnectedPlayer { player ->
+        runAfterQueueWindowReady { player ->
             if (activeQueue.isEmpty() && player.mediaItemCount > 0) {
                 activeQueue = rebuildQueueFromPlayer(player)
+                activeQueueWindowOffset = 0
             }
-            if (index !in activeQueue.indices || index !in 0 until player.mediaItemCount) {
-                return@withConnectedPlayer
+            val playerIndex = index - activeQueueWindowOffset
+            if (index !in activeQueue.indices || playerIndex !in 0 until player.mediaItemCount) {
+                return@runAfterQueueWindowReady
             }
             val result = PlaybackQueueHelper.removeItem(
                 queue = activeQueue,
-                currentIndex = player.currentMediaItemIndex,
+                currentIndex = (activeQueueWindowOffset + player.currentMediaItemIndex)
+                    .coerceIn(0, activeQueue.lastIndex),
                 removeIndex = index,
             )
             activeQueue = result.queue
-            player.removeMediaItem(index)
+            player.removeMediaItem(playerIndex)
             if (activeQueue.isEmpty()) {
+                activeQueueWindowOffset = 0
                 player.stop()
             }
             syncStateFromPlayer()
@@ -450,32 +502,78 @@ class AuraPlayerController(
      * Elimina todas las canciones programadas después de la pista actual.
      */
     fun clearUpcomingQueue() {
-        withConnectedPlayer { player ->
+        runAfterQueueWindowReady { player ->
             if (activeQueue.isEmpty() && player.mediaItemCount > 0) {
                 activeQueue = rebuildQueueFromPlayer(player)
+                activeQueueWindowOffset = 0
             }
-            if (activeQueue.isEmpty() || player.mediaItemCount <= 1) return@withConnectedPlayer
-            val currentIdx = player.currentMediaItemIndex.coerceIn(0, player.mediaItemCount - 1)
-            val removeStart = currentIdx + 1
+            if (activeQueue.isEmpty() || player.mediaItemCount <= 1) return@runAfterQueueWindowReady
+            val currentPlayerIdx = player.currentMediaItemIndex.coerceIn(0, player.mediaItemCount - 1)
+            val currentQueueIdx = (activeQueueWindowOffset + currentPlayerIdx).coerceIn(0, activeQueue.lastIndex)
+            val removeStart = currentPlayerIdx + 1
             if (removeStart < player.mediaItemCount) {
                 player.removeMediaItems(removeStart, player.mediaItemCount)
             }
-            activeQueue = PlaybackQueueHelper.clearUpcoming(activeQueue, currentIdx).queue
+            activeQueue = PlaybackQueueHelper.clearUpcoming(activeQueue, currentQueueIdx).queue
             syncStateFromPlayer()
         }
     }
 
+    /**
+     * Envía una ventana inicial centrada en [startIndex] al proceso `:player` para arrancar al instante
+     * sin superar el límite de 1 MB por transacción Binder, y añade el resto en bloques en segundo plano.
+     */
     private fun applyQueueToPlayer(
         player: MediaController,
         tracks: List<Track>,
         startIndex: Int,
     ) {
+        queueChunkLoadJob?.cancel()
+        queueChunkLoadJob = null
+        if (tracks.isEmpty()) return
+
+        val safeStart = startIndex.coerceIn(0, tracks.lastIndex)
+        var windowStart = (safeStart - INITIAL_QUEUE_WINDOW_SIZE / 2).coerceAtLeast(0)
+        val windowEnd = (windowStart + INITIAL_QUEUE_WINDOW_SIZE).coerceAtMost(tracks.size)
+        if (windowEnd - windowStart < INITIAL_QUEUE_WINDOW_SIZE && windowStart > 0) {
+            windowStart = (windowEnd - INITIAL_QUEUE_WINDOW_SIZE).coerceAtLeast(0)
+        }
+        val localStartIndex = safeStart - windowStart
+
         activeQueue = tracks
-        val mediaItems = tracks.map { it.toMediaItem() }
-        player.setMediaItems(mediaItems, startIndex, 0L)
+        activeQueueWindowOffset = windowStart
+        val initialItems = tracks.subList(windowStart, windowEnd).map { it.toMediaItem() }
+        player.setMediaItems(initialItems, localStartIndex, 0L)
         player.prepare()
         player.play()
         syncStateFromPlayer()
+
+        if (windowStart > 0 || windowEnd < tracks.size) {
+            queueChunkLoadJob = scope.launch {
+                var cursor = windowEnd
+                while (cursor < tracks.size && isActive) {
+                    if (!player.isConnected || controller !== player) return@launch
+                    val nextEnd = (cursor + QUEUE_CHUNK_SIZE).coerceAtMost(tracks.size)
+                    val chunk = tracks.subList(cursor, nextEnd).map { it.toMediaItem() }
+                    player.addMediaItems(chunk)
+                    cursor = nextEnd
+                    delay(16L)
+                }
+
+                var prependEnd = windowStart
+                while (prependEnd > 0 && isActive) {
+                    if (!player.isConnected || controller !== player) return@launch
+                    val prependStart = (prependEnd - QUEUE_CHUNK_SIZE).coerceAtLeast(0)
+                    val chunk = tracks.subList(prependStart, prependEnd).map { it.toMediaItem() }
+                    player.addMediaItems(0, chunk)
+                    prependEnd = prependStart
+                    activeQueueWindowOffset = prependStart
+                    delay(16L)
+                }
+                activeQueueWindowOffset = 0
+                syncStateFromPlayer()
+            }
+        }
     }
 
     fun togglePlayPause() {
@@ -753,9 +851,9 @@ class AuraPlayerController(
      */
     private fun syncMediaItemsMetadata(tracks: List<Track>) {
         val player = controller?.takeIf { it.isConnected } ?: return
-        val count = minOf(player.mediaItemCount, tracks.size)
+        val count = player.mediaItemCount
         for (idx in 0 until count) {
-            val track = tracks[idx]
+            val track = tracks.getOrNull(activeQueueWindowOffset + idx) ?: continue
             val existing = player.getMediaItemAt(idx)
             if (existing.mediaId != track.id.toString()) continue
 
@@ -791,6 +889,7 @@ class AuraPlayerController(
         val pitch = PlaybackTuningHelper.clampPlaybackPitch(player.playbackParameters.pitch)
 
         if (player.mediaItemCount == 0) {
+            activeQueueWindowOffset = 0
             activeQueue = emptyList()
             _playbackState.update {
                 PlaybackState(
@@ -814,11 +913,17 @@ class AuraPlayerController(
         }
 
         if (activeQueue.isEmpty() && player.mediaItemCount > 0) {
+            activeQueueWindowOffset = 0
             activeQueue = rebuildQueueFromPlayer(player)
         }
 
-        val index = player.currentMediaItemIndex
-        val currentTrack = activeQueue.getOrNull(index)
+        val playerIndex = player.currentMediaItemIndex
+        val resolvedIndex = if (playerIndex >= 0 && activeQueue.isNotEmpty()) {
+            (activeQueueWindowOffset + playerIndex).coerceIn(0, activeQueue.lastIndex)
+        } else {
+            playerIndex
+        }
+        val currentTrack = activeQueue.getOrNull(resolvedIndex)
             ?: player.currentMediaItem?.toFallbackTrack()
         val duration = player.duration.takeIf { it > 0L } ?: currentTrack?.durationMs ?: 0L
 
@@ -829,7 +934,7 @@ class AuraPlayerController(
                 positionMs = player.currentPosition.coerceAtLeast(0L),
                 durationMs = duration,
                 queue = activeQueue,
-                currentIndex = index,
+                currentIndex = resolvedIndex,
                 shuffleEnabled = player.shuffleModeEnabled,
                 repeatMode = when (player.repeatMode) {
                     Player.REPEAT_MODE_ALL -> RepeatMode.ALL
@@ -897,6 +1002,9 @@ class AuraPlayerController(
         isUiAttached = false
         stopProgressTicker()
         stopSleepTimerUiTicker()
+        queueChunkLoadJob?.cancel()
+        queueChunkLoadJob = null
+        activeQueueWindowOffset = 0
         connectJob?.cancel()
         connectJob = null
         controller?.removeListener(playerListener)
@@ -951,5 +1059,10 @@ class AuraPlayerController(
             .setRequestMetadata(requestMetadata)
             .setMediaMetadata(toMediaMetadata())
             .build()
+    }
+
+    companion object {
+        private const val INITIAL_QUEUE_WINDOW_SIZE = 32
+        private const val QUEUE_CHUNK_SIZE = 24
     }
 }
