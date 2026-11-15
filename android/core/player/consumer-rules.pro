@@ -7,5 +7,8 @@
 }
 -keep class androidx.media3.common.Player$Commands { *; }
 -keep interface com.auramusic.core.player.AuraPlaybackTuningProvider { *; }
+-keep class com.auramusic.core.player.AuraMediaSessionCallback { *; }
 -keep class com.auramusic.core.player.AuraSleepTimerContract { *; }
 -keep class com.auramusic.core.player.AuraPlayerIpcContract { *; }
+-keep class androidx.media3.common.MediaItem$RequestMetadata { *; }
+-keep class androidx.media3.session.MediaSession$MediaItemsWithStartPosition { *; }

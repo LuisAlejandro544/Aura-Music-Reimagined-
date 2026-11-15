@@ -5,7 +5,6 @@ import androidx.annotation.OptIn
 import androidx.media3.common.C
 import androidx.media3.common.audio.AudioProcessor.AudioFormat
 import androidx.media3.common.audio.AudioProcessor.StreamMetadata
-import androidx.media3.common.audio.AudioProcessor.UnhandledAudioFormatException
 import androidx.media3.common.audio.BaseAudioProcessor
 import androidx.media3.common.util.UnstableApi
 import com.auramusic.core.rust.AuraRustBridge
@@ -20,10 +19,12 @@ import java.nio.ByteBuffer
 @OptIn(UnstableApi::class)
 class RustEqualizerAudioProcessor : BaseAudioProcessor() {
     override fun onConfigure(inputAudioFormat: AudioFormat): AudioFormat {
+        // Si el formato PCM no es 16-bit ni float (por ejemplo 24-bit nativo), devolvemos
+        // AudioFormat.NOT_SET para hacer bypass seguro sin abortar la reproducción en AudioSink.
         if (inputAudioFormat.encoding != C.ENCODING_PCM_16BIT &&
             inputAudioFormat.encoding != C.ENCODING_PCM_FLOAT
         ) {
-            throw UnhandledAudioFormatException(inputAudioFormat)
+            return AudioFormat.NOT_SET
         }
 
         AuraRustBridge.configureEqualizer(

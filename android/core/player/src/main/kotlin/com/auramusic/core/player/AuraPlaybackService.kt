@@ -7,6 +7,7 @@ import androidx.annotation.OptIn
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
+import androidx.media3.common.PlaybackException
 import androidx.media3.common.PlaybackParameters
 import androidx.media3.common.Player
 import androidx.media3.common.Timeline
@@ -142,6 +143,11 @@ class AuraPlaybackService : MediaSessionService() {
                 speed = playbackParameters.speed,
                 pitch = playbackParameters.pitch,
             )
+        }
+
+        override fun onPlayerError(error: PlaybackException) {
+            // Limpia cualquier transición de crossfade en curso si falla el archivo o códec.
+            crossfadeEngine.cancelActive("player_error")
         }
     }
 

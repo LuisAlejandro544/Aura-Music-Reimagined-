@@ -9,6 +9,7 @@ import androidx.annotation.OptIn
 import androidx.core.net.toUri
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
+import androidx.media3.common.PlaybackException
 import androidx.media3.common.PlaybackParameters
 import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
@@ -31,10 +32,13 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.guava.await
 import kotlinx.coroutines.isActive
@@ -53,6 +57,9 @@ class AuraPlayerController(
 
     private val _playbackState = MutableStateFlow(PlaybackState())
     val playbackState: StateFlow<PlaybackState> = _playbackState.asStateFlow()
+
+    private val _playbackErrors = Channel<String>(Channel.BUFFERED)
+    val playbackErrors: Flow<String> = _playbackErrors.receiveAsFlow()
 
     val sleepTimerState: StateFlow<SleepTimerState> = AuraSleepTimerBridge.sleepTimerState
 
@@ -78,6 +85,18 @@ class AuraPlayerController(
     private val controllerListener = object : MediaController.Listener {
         override fun onExtrasChanged(controller: MediaController, extras: Bundle) {
             handleSessionExtras(extras)
+        }
+
+        override fun onDisconnected(controller: MediaController) {
+            if (this@AuraPlayerController.controller === controller) {
+                controller.removeListener(playerListener)
+                this@AuraPlayerController.controller = null
+            }
+            stopProgressTicker()
+            stopSleepTimerUiTicker()
+            if (pendingQueue != null || pendingActions.isNotEmpty()) {
+                connectToService()
+            }
         }
     }
 
@@ -111,6 +130,12 @@ class AuraPlayerController(
             if (events.contains(Player.EVENT_TIMELINE_CHANGED)) {
                 syncStateFromPlayer()
             }
+        }
+
+        override fun onPlayerError(error: PlaybackException) {
+            syncStateFromPlayer()
+            val detail = error.errorCodeName.takeIf { it.isNotBlank() } ?: "ERROR_REPRODUCCION"
+            _playbackErrors.trySend("No se pudo reproducir el audio ($detail).")
         }
     }
 
@@ -168,12 +193,24 @@ class AuraPlayerController(
                 context,
                 ComponentName(context, AuraPlaybackService::class.java),
             )
-            val mediaController = runCatching {
-                MediaController.Builder(context, token)
-                    .setListener(controllerListener)
-                    .buildAsync()
-                    .await()
-            }.getOrNull() ?: return@launch
+            var mediaController: MediaController? = null
+            for (attempt in 0 until 2) {
+                mediaController = runCatching {
+                    MediaController.Builder(context, token)
+                        .setListener(controllerListener)
+                        .buildAsync()
+                        .await()
+                }.getOrNull()
+                if (mediaController != null) break
+                if (attempt == 0) delay(250L)
+            }
+            if (mediaController == null) {
+                connectJob = null
+                if (pendingQueue != null) {
+                    _playbackErrors.trySend("No se pudo conectar con el servicio de reproducción.")
+                }
+                return@launch
+            }
 
             controller?.removeListener(playerListener)
             controller = mediaController
@@ -223,6 +260,7 @@ class AuraPlayerController(
             if (mediaController.isPlaying && isUiAttached) {
                 startProgressTicker()
             }
+            connectJob = null
         }
     }
 
@@ -728,10 +766,21 @@ class AuraPlayerController(
                 currentMeta.albumTitle?.toString() != targetMetadata.albumTitle?.toString() ||
                 currentMeta.artworkUri != targetMetadata.artworkUri
             ) {
-                val updatedItem = existing.buildUpon()
+                // Conservamos siempre la URI en RequestMetadata para que :player reconstruya el ítem tras replaceMediaItem.
+                val trackUri = parseTrackUri(track.contentUri)
+                val updatedBuilder = existing.buildUpon()
                     .setMediaMetadata(targetMetadata)
-                    .build()
-                player.replaceMediaItem(idx, updatedItem)
+                if (trackUri != null) {
+                    updatedBuilder.setUri(trackUri)
+                    if (existing.requestMetadata.mediaUri == null) {
+                        updatedBuilder.setRequestMetadata(
+                            existing.requestMetadata.buildUpon()
+                                .setMediaUri(trackUri)
+                                .build(),
+                        )
+                    }
+                }
+                player.replaceMediaItem(idx, updatedBuilder.build())
             }
         }
     }
@@ -807,7 +856,8 @@ class AuraPlayerController(
         val meta = mediaMetadata
         return Track(
             id = id,
-            contentUri = localConfiguration?.uri?.toString().orEmpty(),
+            contentUri = localConfiguration?.uri?.toString()
+                ?: requestMetadata.mediaUri?.toString().orEmpty(),
             title = meta.title?.toString().orEmpty().ifBlank { "Reproduciendo" },
             artist = meta.artist?.toString().orEmpty().ifBlank { "Artista desconocido" },
             album = meta.albumTitle?.toString().orEmpty().ifBlank { "Biblioteca local" },
@@ -870,10 +920,36 @@ class AuraPlayerController(
             .build()
     }
 
-    private fun Track.toMediaItem(): MediaItem =
-        MediaItem.Builder()
+    private fun parseTrackUri(rawUri: String): Uri? {
+        val trimmed = rawUri.trim()
+        if (trimmed.isEmpty()) return null
+        return if (trimmed.startsWith("/")) {
+            Uri.fromFile(File(trimmed))
+        } else {
+            trimmed.toUri()
+        }
+    }
+
+    private fun Track.toMediaItem(): MediaItem {
+        val mediaUri = parseTrackUri(contentUri)
+        // Media3 elimina localConfiguration al cruzar Binder hacia :player; fijamos también
+        // RequestMetadata.mediaUri para que AuraMediaSessionCallback restaure el origen reproducible.
+        val requestMetadata = MediaItem.RequestMetadata.Builder()
+            .apply {
+                if (mediaUri != null) {
+                    setMediaUri(mediaUri)
+                }
+            }
+            .build()
+        return MediaItem.Builder()
             .setMediaId(id.toString())
-            .setUri(contentUri.toUri())
+            .apply {
+                if (mediaUri != null) {
+                    setUri(mediaUri)
+                }
+            }
+            .setRequestMetadata(requestMetadata)
             .setMediaMetadata(toMediaMetadata())
             .build()
+    }
 }

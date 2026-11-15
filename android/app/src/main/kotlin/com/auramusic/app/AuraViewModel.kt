@@ -151,6 +151,11 @@ class AuraViewModel(
         audioTuningCoordinator.startSyncLoops()
         libraryCoordinator.refreshDownloaderStatusInBackground()
         libraryCoordinator.refreshSystemFolderAndAutoSync()
+        viewModelScope.launch {
+            container.playerController.playbackErrors.collect { message ->
+                uiMessagesChannel.trySend(message)
+            }
+        }
     }
 
     fun onUiForeground() {

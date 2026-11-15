@@ -5,6 +5,7 @@ import android.os.Bundle
 import android.view.KeyEvent
 import androidx.annotation.OptIn
 import androidx.core.content.IntentCompat
+import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.session.MediaSession
@@ -29,6 +30,8 @@ import kotlinx.coroutines.launch
  * Callback modular de [MediaSession] para `AuraPlaybackService`.
  *
  * Centraliza:
+ * - Restauración de `localConfiguration` (`uri`) desde `requestMetadata.mediaUri` cuando
+ *   `MediaController` envía elementos de audio por Binder entre el proceso principal y `:player`.
  * - Exposición de comandos IPC personalizados (`AuraSleepTimerContract` y `AuraPlayerIpcContract`).
  * - Recepción de comandos en caliente desde el proceso UI (`MAIN`) hacia `:player`.
  * - Detección de pulsaciones simples, dobles y triples en botones cableados (`KEYCODE_HEADSETHOOK`)
@@ -73,6 +76,49 @@ internal class AuraMediaSessionCallback(
             .setSessionExtras(AuraPlayerIpcContract.sleepTimerToBundle(sleepTimerStateProvider()))
             .build()
     }
+
+    /**
+     * Media3 omite `MediaItem.localConfiguration` al serializar ítems por Binder desde
+     * `MediaController`; aquí reconstruimos la URI reproducible usando `requestMetadata.mediaUri`
+     * para que `addMediaItem` y `replaceMediaItem` funcionen en el proceso `:player`.
+     */
+    override fun onAddMediaItems(
+        mediaSession: MediaSession,
+        controller: MediaSession.ControllerInfo,
+        mediaItems: MutableList<MediaItem>,
+    ): ListenableFuture<MutableList<MediaItem>> =
+        Futures.immediateFuture(resolvePlayableMediaItems(mediaItems))
+
+    /**
+     * Restaura las URIs reproducibles al establecer una cola nueva completa (`setMediaItems`)
+     * preservando el índice inicial y la posición solicitada por el controlador.
+     */
+    override fun onSetMediaItems(
+        mediaSession: MediaSession,
+        controller: MediaSession.ControllerInfo,
+        mediaItems: MutableList<MediaItem>,
+        startIndex: Int,
+        startPositionMs: Long,
+    ): ListenableFuture<MediaSession.MediaItemsWithStartPosition> {
+        val resolvedItems = resolvePlayableMediaItems(mediaItems)
+        return Futures.immediateFuture(
+            MediaSession.MediaItemsWithStartPosition(resolvedItems, startIndex, startPositionMs),
+        )
+    }
+
+    private fun resolvePlayableMediaItems(
+        mediaItems: List<MediaItem>,
+    ): MutableList<MediaItem> =
+        mediaItems.map { item ->
+            val resolvedUri = item.localConfiguration?.uri ?: item.requestMetadata.mediaUri
+            if (item.localConfiguration == null && resolvedUri != null) {
+                item.buildUpon()
+                    .setUri(resolvedUri)
+                    .build()
+            } else {
+                item
+            }
+        }.toMutableList()
 
     override fun onCustomCommand(
         session: MediaSession,

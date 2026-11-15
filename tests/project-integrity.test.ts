@@ -2238,4 +2238,52 @@ test('navigation transitions, mini-player switch, staggered GPU menus, and modal
   assert.match(downloaderScreenKt, /animateContentSize\(/);
 });
 
+test('cross-process Media3 playback preserves playable URIs via RequestMetadata, resolves them in MediaSessionCallback, and reports player errors', () => {
+  const controllerKt = fs.readFileSync(
+    path.join(rootDir, 'android/core/player/src/main/kotlin/com/auramusic/core/player/AuraPlayerController.kt'),
+    'utf8',
+  );
+  const callbackKt = fs.readFileSync(
+    path.join(rootDir, 'android/core/player/src/main/kotlin/com/auramusic/core/player/AuraMediaSessionCallback.kt'),
+    'utf8',
+  );
+  const serviceKt = fs.readFileSync(
+    path.join(rootDir, 'android/core/player/src/main/kotlin/com/auramusic/core/player/AuraPlaybackService.kt'),
+    'utf8',
+  );
+  const eqProcessorKt = fs.readFileSync(
+    path.join(rootDir, 'android/core/player/src/main/kotlin/com/auramusic/core/player/RustEqualizerAudioProcessor.kt'),
+    'utf8',
+  );
+  const vmKt = fs.readFileSync(
+    path.join(rootDir, 'android/app/src/main/kotlin/com/auramusic/app/AuraViewModel.kt'),
+    'utf8',
+  );
+  const playerRules = fs.readFileSync(
+    path.join(rootDir, 'android/core/player/consumer-rules.pro'),
+    'utf8',
+  );
+
+  // 1. El proceso MAIN adjunta RequestMetadata.mediaUri además de localConfiguration
+  assert.match(controllerKt, /MediaItem\.RequestMetadata\.Builder\(\)/);
+  assert.match(controllerKt, /setMediaUri\(mediaUri\)/);
+  assert.match(controllerKt, /requestMetadata\.mediaUri\?\.toString\(\)/);
+  assert.match(controllerKt, /override fun onDisconnected\(/);
+  assert.match(controllerKt, /override fun onPlayerError\(/);
+  assert.match(controllerKt, /val playbackErrors:\s*Flow<String>/);
+
+  // 2. El servicio :player reconstruye localConfiguration desde RequestMetadata.mediaUri
+  assert.match(callbackKt, /override fun onAddMediaItems\(/);
+  assert.match(callbackKt, /override fun onSetMediaItems\(/);
+  assert.match(callbackKt, /MediaSession\.MediaItemsWithStartPosition/);
+  assert.match(callbackKt, /item\.requestMetadata\.mediaUri/);
+  assert.match(callbackKt, /\.setUri\(resolvedUri\)/);
+
+  // 3. Servicio y procesador DSP manejan errores y formatos PCM sin abortar la reproducción
+  assert.match(serviceKt, /override fun onPlayerError\(/);
+  assert.match(eqProcessorKt, /return AudioFormat\.NOT_SET/);
+  assert.doesNotMatch(eqProcessorKt, /throw UnhandledAudioFormatException/);
+  assert.match(vmKt, /playbackErrors\.collect/);
+  assert.match(playerRules, /AuraMediaSessionCallback/);
+});
 
