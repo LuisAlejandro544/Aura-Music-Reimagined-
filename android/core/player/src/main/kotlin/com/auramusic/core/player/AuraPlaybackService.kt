@@ -61,13 +61,29 @@ class AuraPlaybackService : MediaSessionService() {
 
     private val primaryListener = object : Player.Listener {
         override fun onIsPlayingChanged(isPlaying: Boolean) {
-            primaryPlayer?.let { sleepTimerEngine.lastObservedMediaIndex = it.currentMediaItemIndex }
+            val player = primaryPlayer
+            player?.let { sleepTimerEngine.lastObservedMediaIndex = it.currentMediaItemIndex }
             if (isPlaying) {
                 wasPausedByHeadphoneDisconnect = false
                 crossfadeEngine.startMonitorIfNeeded()
             } else {
                 lastPausedElapsedMs = SystemClock.elapsedRealtime()
-                crossfadeEngine.cancelActive("paused")
+                // Durante el cambio de pista por crossfade ExoPlayer entra brevemente en STATE_BUFFERING
+                // con playWhenReady=true; solo cancelamos el fundido si el usuario pausó o se detuvo la cola.
+                val isRealPauseOrStop = player == null ||
+                    !player.playWhenReady ||
+                    player.playbackState == Player.STATE_IDLE ||
+                    player.playbackState == Player.STATE_ENDED
+                if (!crossfadeEngine.isAdvancingTransition && isRealPauseOrStop) {
+                    crossfadeEngine.cancelActive("paused")
+                }
+            }
+        }
+
+        override fun onPlayWhenReadyChanged(playWhenReady: Boolean, reason: Int) {
+            if (!playWhenReady && !crossfadeEngine.isAdvancingTransition) {
+                lastPausedElapsedMs = SystemClock.elapsedRealtime()
+                crossfadeEngine.cancelActive("play_when_ready_false")
             }
         }
 
@@ -77,7 +93,12 @@ class AuraPlaybackService : MediaSessionService() {
 
         override fun onPlaybackStateChanged(playbackState: Int) {
             if (playbackState == Player.STATE_ENDED) {
+                if (!crossfadeEngine.isAdvancingTransition) {
+                    crossfadeEngine.cancelActive("playback_ended")
+                }
                 sleepTimerEngine.handlePlaybackEnded()
+            } else if (playbackState == Player.STATE_IDLE && !crossfadeEngine.isAdvancingTransition) {
+                crossfadeEngine.cancelActive("playback_idle")
             }
         }
 
@@ -140,7 +161,7 @@ class AuraPlaybackService : MediaSessionService() {
             ): AudioSink =
                 DefaultAudioSink.Builder(context)
                     .setEnableFloatOutput(enableFloatOutput)
-                    .setEnableAudioTrackPlaybackParams(enableAudioOutputPlaybackParameters)
+                    .setEnableAudioOutputPlaybackParameters(enableAudioOutputPlaybackParameters)
                     .setAudioProcessors(arrayOf(rustEqualizerProcessor))
                     .build()
         }

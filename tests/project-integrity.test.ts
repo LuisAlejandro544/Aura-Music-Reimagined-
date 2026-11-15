@@ -108,7 +108,7 @@ test('GitHub Action apk Debug is manual-only, zero-cache, and uses Gradle 9.9.1'
   assert.match(workflow, /assembleDebug/);
   assert.match(workflow, /9\.9\.1/);
   assert.match(workflow, /android-actions\/setup-android@v4/);
-  assert.match(workflow, /platforms;android-36/);
+  assert.match(workflow, /platforms;android-37/);
   assert.doesNotMatch(workflow, /^\s*tools$/m);
   assert.match(wrapperProps, /gradle-9\.9\.1-bin\.zip/);
   assert.ok(
@@ -796,6 +796,8 @@ test('configurable Crossfade (seconds before end) and playback speed live exclus
   assert.match(tuningProviderKt, /interface AuraPlaybackTuningProvider/);
   assert.match(crossfadeEngineKt, /outgoingFadePlayer/);
   assert.match(crossfadeEngineKt, /launchOverlapCrossfade/);
+  assert.match(crossfadeEngineKt, /playWhenReady/);
+  assert.match(serviceKt, /onPlayWhenReadyChanged/);
   assert.match(serviceKt, /PlaybackParameters\(/);
 
   assert.match(controllerKt, /fun setPlaybackSpeed\(speed:\s*Float\)/);
@@ -1794,6 +1796,17 @@ test('cross-module Kotlin API contracts stay aligned across player, downloader, 
 
   // 5. AuraSystemStorageManager busca engine_versions.json dentro de py_updates primero
   assert.match(systemManagerKt, /File\(context\.filesDir,\s*"py_updates"\)/);
+
+  // 6. Media3 1.11.1 usa las APIs vigentes sin deprecaciones en :core:player
+  const eqProcessorKt = fs.readFileSync(
+    path.join(rootDir, 'android/core/player/src/main/kotlin/com/auramusic/core/player/RustEqualizerAudioProcessor.kt'),
+    'utf8',
+  );
+  assert.match(eqProcessorKt, /override fun onFlush\(streamMetadata:\s*StreamMetadata\)/);
+  assert.doesNotMatch(eqProcessorKt, /override fun onFlush\(\)/);
+  assert.match(callbackKt, /AcceptedResultBuilder\(session,\s*controller\)/);
+  assert.match(playbackServiceKt, /setEnableAudioOutputPlaybackParameters\(enableAudioOutputPlaybackParameters\)/);
+  assert.doesNotMatch(playbackServiceKt, /setEnableAudioTrackPlaybackParams\(/);
 });
 
 test('GitHub lint-and-audit workflow covers Kotlin, Rust, Python, outdated deps, and interactive HTML zip report', () => {

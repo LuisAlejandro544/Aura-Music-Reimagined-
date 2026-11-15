@@ -97,20 +97,24 @@ internal class AuraCrossfadeEngine(
                             positionMs = positionMs,
                             playbackSpeed = effectiveSpeed,
                         )
-                        val preloadWindowMs = fadeSeconds * 1000L + 3_500L
+                        val preloadWindowMs = fadeSeconds * 1000L + 4_000L
                         val itemId = currentItem.mediaId.ifBlank {
                             currentItem.localConfiguration?.uri?.toString().orEmpty()
                         }
 
-                        // Prepara por adelantado la pista actual en el deck saliente antes del inicio del fade.
+                        // Prepara por adelantado la pista actual en el deck saliente (silenciado) antes del inicio del fade.
                         if (wallRemainingMs in 400L..preloadWindowMs && preloadedMediaId != itemId) {
                             preloadedMediaId = itemId
+                            val pitch = player.playbackParameters.pitch
+                                .takeIf { it.isFinite() && it >= 0.5f }
+                                ?: 1.0f
                             val outPlayer = getOrCreateOutgoingFadePlayer()
                             outPlayer.stop()
                             outPlayer.setMediaItem(currentItem)
-                            outPlayer.prepare()
+                            outPlayer.playbackParameters = PlaybackParameters(effectiveSpeed, pitch)
+                            outPlayer.volume = 0f
                             outPlayer.playWhenReady = false
-                            outPlayer.volume = 1f
+                            outPlayer.prepare()
                         }
 
                         val shouldTrigger = PlaybackTuningHelper.shouldTriggerCrossfade(
@@ -138,7 +142,7 @@ internal class AuraCrossfadeEngine(
                     }
                 }
 
-                delay(150L)
+                delay(100L)
             }
         }
     }
@@ -220,36 +224,91 @@ internal class AuraCrossfadeEngine(
         activeCrossfadeJob?.cancel()
         activeCrossfadeJob = scope.launch {
             val outPlayer = getOrCreateOutgoingFadePlayer()
-            val remainingWallMs = PlaybackTuningHelper.remainingWallClockMs(
-                durationMs = outgoingDurationMs,
-                positionMs = outgoingPositionMs,
-                playbackSpeed = speed,
-            )
-            val fadeDurationMs = remainingWallMs.coerceIn(300L, configuredSeconds * 1000L)
 
             try {
                 val itemId = outgoingItem.mediaId.ifBlank {
                     outgoingItem.localConfiguration?.uri?.toString().orEmpty()
                 }
-                if (preloadedMediaId != itemId || outPlayer.mediaItemCount == 0) {
+                if (preloadedMediaId != itemId ||
+                    outPlayer.mediaItemCount == 0 ||
+                    outPlayer.playbackState == Player.STATE_IDLE ||
+                    outPlayer.playbackState == Player.STATE_ENDED
+                ) {
                     preloadedMediaId = itemId
                     outPlayer.stop()
                     outPlayer.setMediaItem(outgoingItem)
+                    outPlayer.volume = 0f
+                    outPlayer.playWhenReady = false
                     outPlayer.prepare()
                 }
+
                 val pitch = primary.playbackParameters.pitch
                     .takeIf { it.isFinite() && it >= 0.5f }
                     ?: 1.0f
                 outPlayer.playbackParameters = PlaybackParameters(speed, pitch)
-                outPlayer.volume = 1f
-                outPlayer.seekTo(outgoingPositionMs.coerceAtLeast(0L))
+
+                // 1. Esperamos a que el deck saliente quede listo antes de cortar el reproductor principal.
+                val readyDeadlineMs = SystemClock.elapsedRealtime() + 600L
+                while (isActive &&
+                    outPlayer.playbackState != Player.STATE_READY &&
+                    SystemClock.elapsedRealtime() < readyDeadlineMs
+                ) {
+                    if (!primary.playWhenReady ||
+                        primary.playbackState == Player.STATE_IDLE ||
+                        primary.playbackState == Player.STATE_ENDED
+                    ) {
+                        return@launch
+                    }
+                    delay(15L)
+                }
+                if (outPlayer.playbackState != Player.STATE_READY) {
+                    return@launch
+                }
+
+                // 2. Sincronizamos el deck saliente (en silencio) a la posición en vivo antes del relevo.
+                val livePosMs = primary.currentPosition.coerceAtLeast(outgoingPositionMs)
+                val seekLeadTrackMs = (80L * speed).toLong()
+                val maxSafeSeekMs = (outgoingDurationMs - 250L).coerceAtLeast(0L)
+                val handoffPosMs = (livePosMs + seekLeadTrackMs).coerceIn(0L, maxSafeSeekMs)
+                outPlayer.volume = 0f
+                outPlayer.seekTo(handoffPosMs)
                 outPlayer.play()
 
-                // Adelanta el reproductor principal a la pista siguiente empezando desde volumen 0
-                // mientras el deck auxiliar desvanece la cola de la canción saliente.
+                val playWarmupDeadlineMs = SystemClock.elapsedRealtime() + 450L
+                while (isActive &&
+                    !(outPlayer.isPlaying && outPlayer.playbackState == Player.STATE_READY) &&
+                    SystemClock.elapsedRealtime() < playWarmupDeadlineMs
+                ) {
+                    if (!primary.playWhenReady ||
+                        primary.playbackState == Player.STATE_IDLE ||
+                        primary.playbackState == Player.STATE_ENDED
+                    ) {
+                        return@launch
+                    }
+                    val liveRemainingWall = PlaybackTuningHelper.remainingWallClockMs(
+                        durationMs = outgoingDurationMs,
+                        positionMs = primary.currentPosition,
+                        playbackSpeed = speed,
+                    )
+                    if (liveRemainingWall in 0L..299L) {
+                        break
+                    }
+                    delay(12L)
+                }
+
+                if (!primary.playWhenReady ||
+                    primary.playbackState == Player.STATE_IDLE ||
+                    primary.playbackState == Player.STATE_ENDED
+                ) {
+                    return@launch
+                }
+
+                // 3. Relevo limpio: el deck saliente asume volumen 1.0 y el reproductor principal
+                // avanza al siguiente tema empezando en volumen 0.0.
+                outPlayer.volume = 1f
+                primary.volume = 0f
                 isAdvancingTransition = true
                 try {
-                    primary.volume = 0f
                     primary.seekToNextMediaItem()
                     if (primary.playbackState == Player.STATE_IDLE) {
                         primary.prepare()
@@ -259,20 +318,53 @@ internal class AuraCrossfadeEngine(
                     isAdvancingTransition = false
                 }
 
+                // 4. Esperamos brevemente a que la nueva pista termine de abrir/bufferizar sin
+                // cancelar el crossfade ni cortar la canción saliente mientras tanto.
+                val incomingReadyDeadlineMs = SystemClock.elapsedRealtime() + 1_200L
+                while (isActive &&
+                    !primary.isPlaying &&
+                    SystemClock.elapsedRealtime() < incomingReadyDeadlineMs
+                ) {
+                    if (!primary.playWhenReady ||
+                        primary.playbackState == Player.STATE_IDLE ||
+                        primary.playbackState == Player.STATE_ENDED ||
+                        outPlayer.playbackState == Player.STATE_ENDED
+                    ) {
+                        break
+                    }
+                    delay(16L)
+                }
+
+                // 5. Calculamos la duración real restante del deck saliente para completar el fundido
+                // equal-power antes de que termine su audio.
+                val outRemainingWallMs = PlaybackTuningHelper.remainingWallClockMs(
+                    durationMs = outgoingDurationMs,
+                    positionMs = outPlayer.currentPosition.coerceAtLeast(0L),
+                    playbackSpeed = speed,
+                )
+                val fadeDurationMs = if (outRemainingWallMs > 0L) {
+                    minOf(configuredSeconds * 1000L, outRemainingWallMs).coerceAtLeast(300L)
+                } else {
+                    (configuredSeconds * 1000L).coerceAtLeast(300L)
+                }
+
                 val startWallMs = SystemClock.elapsedRealtime()
                 while (isActive) {
-                    if (!primary.isPlaying) {
+                    if (!primary.playWhenReady ||
+                        primary.playbackState == Player.STATE_IDLE ||
+                        primary.playbackState == Player.STATE_ENDED
+                    ) {
                         break
                     }
                     val elapsedMs = SystemClock.elapsedRealtime() - startWallMs
                     val progress = (elapsedMs.toFloat() / fadeDurationMs.toFloat()).coerceIn(0f, 1f)
                     val (outGain, inGain) = PlaybackTuningHelper.computeEqualPowerGains(progress)
-                    outPlayer.volume = outGain
+                    outPlayer.volume = if (outPlayer.playbackState == Player.STATE_ENDED) 0f else outGain
                     primary.volume = inGain
                     if (progress >= 1f) {
                         break
                     }
-                    delay(35L)
+                    delay(16L)
                 }
             } catch (_: CancellationException) {
                 // Cancelación esperada al pausar, adelantar o desactivar Crossfade.

@@ -139,7 +139,7 @@ val buildRustAndroidLibs by tasks.registering(Exec::class) {
 
 android {
     namespace = "com.auramusic.core.rust"
-    compileSdk = 36
+    compileSdk = 37
 
     // minSdk 26 (Android 8.0): habilita canales de notificación nativos para Media3,
     // iconos adaptativos, java.time sin desugaring pesado y compatibilidad moderna con NDK/Rust.

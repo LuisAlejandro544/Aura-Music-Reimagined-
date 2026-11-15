@@ -9,7 +9,7 @@ plugins {
 
 android {
     namespace = "com.auramusic.app"
-    compileSdk = 36
+    compileSdk = 37
 
     defaultConfig {
         applicationId = "com.auramusic.app"

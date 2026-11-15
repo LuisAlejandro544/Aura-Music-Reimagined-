@@ -65,7 +65,6 @@ coil-compose = { group = "io.coil-kt.coil3", name = "coil-compose", version.ref 
 # Extracción de paleta y colores dinámicos Material 3 desde carátulas (Apache-2.0 / MIT)
 androidx-palette = { group = "androidx.palette", name = "palette", version.ref = "androidxPalette" }
 material-kolor = { group = "com.materialkolor", name = "material-kolor", version.ref = "materialKolor" }
-material-kolor-palette = { group = "com.materialkolor", name = "material-kolor-palette", version.ref = "materialKolor" }
 
 # Testing
 junit = { group = "junit", name = "junit", version.ref = "junit" }

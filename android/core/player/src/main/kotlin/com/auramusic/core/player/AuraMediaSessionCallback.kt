@@ -67,7 +67,7 @@ internal class AuraMediaSessionCallback(
         AuraPlayerIpcContract.supportedActions.forEach { action ->
             commandsBuilder.add(SessionCommand(action, Bundle.EMPTY))
         }
-        return MediaSession.ConnectionResult.AcceptedResultBuilder(session)
+        return MediaSession.ConnectionResult.AcceptedResultBuilder(session, controller)
             .setAvailableSessionCommands(commandsBuilder.build())
             .setAvailablePlayerCommands(baseResult.availablePlayerCommands)
             .setSessionExtras(AuraPlayerIpcContract.sleepTimerToBundle(sleepTimerStateProvider()))

@@ -6,7 +6,7 @@ plugins {
 
 android {
     namespace = "com.auramusic.feature.player"
-    compileSdk = 36
+    compileSdk = 37
 
     defaultConfig {
         minSdk = 26
@@ -40,5 +40,4 @@ dependencies {
     implementation(libs.coil.compose)
     implementation(libs.androidx.palette)
     implementation(libs.material.kolor)
-    implementation(libs.material.kolor.palette)
 }

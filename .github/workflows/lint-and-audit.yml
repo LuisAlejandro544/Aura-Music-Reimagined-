@@ -76,10 +76,10 @@ jobs:
         with:
           packages: platform-tools
 
-      - name: Instalar Android SDK 36, Build Tools y NDK 27
+      - name: Instalar Android SDK 37, Build Tools y NDK 27
         run: |
           yes | sdkmanager --licenses >/dev/null || true
-          sdkmanager --install "platform-tools" "platforms;android-36" "build-tools;36.0.0" "ndk;27.3.13750724"
+          sdkmanager --install "platform-tools" "platforms;android-37.0" "build-tools;37.0.0" "ndk;27.3.13750724"
           NDK_PATH="$ANDROID_HOME/ndk/27.3.13750724"
           echo "ANDROID_NDK_HOME=$NDK_PATH" >> "$GITHUB_ENV"
           echo "ANDROID_NDK_ROOT=$NDK_PATH" >> "$GITHUB_ENV"

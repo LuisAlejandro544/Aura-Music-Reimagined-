@@ -4,6 +4,7 @@ import android.annotation.SuppressLint
 import androidx.annotation.OptIn
 import androidx.media3.common.C
 import androidx.media3.common.audio.AudioProcessor.AudioFormat
+import androidx.media3.common.audio.AudioProcessor.StreamMetadata
 import androidx.media3.common.audio.AudioProcessor.UnhandledAudioFormatException
 import androidx.media3.common.audio.BaseAudioProcessor
 import androidx.media3.common.util.UnstableApi
@@ -50,7 +51,8 @@ class RustEqualizerAudioProcessor : BaseAudioProcessor() {
         }
     }
 
-    override fun onFlush() {
+    // Media3 1.11.1 deprecó onFlush() sin argumentos; usar StreamMetadata asegura el reinicio de filtros DSP.
+    override fun onFlush(streamMetadata: StreamMetadata) {
         AuraRustBridge.resetEqualizerState()
     }
 
