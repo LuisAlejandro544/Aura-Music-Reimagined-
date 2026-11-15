@@ -6,6 +6,7 @@ import android.content.Intent
 import com.auramusic.core.database.AudioEffectsPreferencesRepository
 import com.auramusic.core.database.DownloaderPreferencesRepository
 import com.auramusic.core.database.EqualizerPreferencesRepository
+import com.auramusic.core.database.HeadphonePreferencesRepository
 import com.auramusic.core.database.MusicRepository
 import com.auramusic.core.database.PlaybackPreferencesRepository
 import com.auramusic.core.database.ThemePreferencesRepository
@@ -13,7 +14,11 @@ import com.auramusic.core.downloader.AuraDownloadHost
 import com.auramusic.core.downloader.YtDlpAudioDownloader
 import com.auramusic.core.importer.AudioImporter
 import com.auramusic.core.model.AudioEffectsState
+import com.auramusic.core.model.AudioOutputRouteState
+import com.auramusic.core.model.HeadphonePreferences
+import com.auramusic.core.model.HeadphoneRoutingHelper
 import com.auramusic.core.model.PlaybackTuning
+import com.auramusic.core.player.AuraAudioOutputMonitor
 import com.auramusic.core.player.AuraPlaybackTuningProvider
 import com.auramusic.core.player.AuraPlayerController
 import com.auramusic.core.rust.AuraRustBridge
@@ -27,8 +32,8 @@ import kotlinx.coroutines.launch
 /**
  * Contenedor modular de dependencias de Aura Music.
  * Centraliza el ciclo de vida de la base de datos Room, DataStore, el importador manual,
- * el motor de descargas (Chaquopy + yt-dlp + QuickJS-NG), el controlador Media3 ExoPlayer
- * y la información del motor nativo en Rust.
+ * el monitor de salida de audio (`AudioDeviceCallback`), el motor de descargas
+ * (Chaquopy + yt-dlp + QuickJS-NG), el controlador Media3 ExoPlayer y el motor nativo en Rust.
  */
 class AuraAppContainer(context: Context) {
     private val appContext = context.applicationContext
@@ -61,6 +66,14 @@ class AuraAppContainer(context: Context) {
         AudioEffectsPreferencesRepository(appContext)
     }
 
+    val headphonePreferencesRepository: HeadphonePreferencesRepository by lazy {
+        HeadphonePreferencesRepository(appContext)
+    }
+
+    val audioOutputMonitor: AuraAudioOutputMonitor by lazy {
+        AuraAudioOutputMonitor(appContext)
+    }
+
     val audioImporter: AudioImporter by lazy {
         AudioImporter(
             context = appContext,
@@ -88,7 +101,8 @@ class AuraAppContainer(context: Context) {
 /**
  * Clase Application de Aura Music.
  * Implementa [AuraDownloadHost] para que [com.auramusic.core.downloader.AuraDownloadForegroundService]
- * pueda ejecutar descargas en segundo plano aunque el usuario salga de la app.
+ * pueda ejecutar descargas en segundo plano aunque el usuario salga de la app, y
+ * [AuraPlaybackTuningProvider] para suministrar en tiempo real ajustes, ruta de salida y efectos.
  */
 class AuraApplication : Application(), AuraDownloadHost, AuraPlaybackTuningProvider {
     lateinit var container: AuraAppContainer
@@ -99,11 +113,19 @@ class AuraApplication : Application(), AuraDownloadHost, AuraPlaybackTuningProvi
     override fun onCreate() {
         super.onCreate()
         container = AuraAppContainer(this)
+        container.audioOutputMonitor.start()
         appScope.launch {
             runCatching {
                 val eq = container.equalizerPreferencesRepository.equalizerState.first()
                 AuraRustBridge.setEqualizerConfig(eq.isEnabled, eq.bandGainsDb)
                 val fx = container.audioEffectsPreferencesRepository.audioEffectsState.first()
+                val hp = container.headphonePreferencesRepository.headphonePreferences.first()
+                val route = container.audioOutputMonitor.outputRoute.value
+                val effective = HeadphoneRoutingHelper.resolveEffectiveRustEffects(
+                    effects = fx,
+                    outputRoute = route,
+                    prefs = hp,
+                )
                 AuraRustBridge.setAudioEffectsConfig(
                     reverbEnabled = fx.reverbEnabled,
                     reverbRoomSize = fx.reverbRoomSize,
@@ -112,9 +134,12 @@ class AuraApplication : Application(), AuraDownloadHost, AuraPlaybackTuningProvi
                     reverbWidth = fx.reverbWidth,
                     slowedWarmthEnabled = fx.isSlowedWarmthActive,
                     slowedWarmthAmount = fx.slowedWarmth,
-                    spatial8dEnabled = fx.spatial8dEnabled,
+                    spatial8dEnabled = effective.spatial8dEnabled,
                     spatial8dSpeed = fx.spatial8dSpeed,
                     spatial8dDepth = fx.spatial8dDepth,
+                    crossfeedEnabled = effective.crossfeedEnabled,
+                    crossfeedStrength = fx.crossfeedStrength,
+                    crossfeedAngle = fx.crossfeedAngle,
                 )
             }
         }
@@ -132,6 +157,12 @@ class AuraApplication : Application(), AuraDownloadHost, AuraPlaybackTuningProvi
 
     override fun observeAudioEffects(): Flow<AudioEffectsState> =
         container.audioEffectsPreferencesRepository.audioEffectsState
+
+    override fun observeHeadphonePreferences(): Flow<HeadphonePreferences> =
+        container.headphonePreferencesRepository.headphonePreferences
+
+    override fun observeAudioOutputRoute(): Flow<AudioOutputRouteState> =
+        container.audioOutputMonitor.outputRoute
 
     override fun createOpenPlayerIntent(): Intent =
         Intent(this, MainActivity::class.java).apply {

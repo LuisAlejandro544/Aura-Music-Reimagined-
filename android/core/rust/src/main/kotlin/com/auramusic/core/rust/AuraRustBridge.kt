@@ -68,6 +68,9 @@ object AuraRustBridge {
         spatial8dEnabled: Boolean,
         spatial8dSpeed: Float,
         spatial8dDepth: Float,
+        crossfeedEnabled: Boolean,
+        crossfeedStrength: Float,
+        crossfeedAngle: Float,
     )
 
     private external fun nativeConfigureEqualizer(sampleRate: Int, channelCount: Int)
@@ -188,7 +191,7 @@ object AuraRustBridge {
         }
 
     /**
-     * Actualiza la configuración de Reverberación estéreo, Calidez Slowed y Audio 8D en el motor nativo Rust.
+     * Actualiza la configuración de Reverberación estéreo, Calidez Slowed, Audio 8D y Crossfeed binaural en el motor nativo Rust.
      */
     suspend fun setAudioEffectsConfig(
         reverbEnabled: Boolean,
@@ -201,6 +204,9 @@ object AuraRustBridge {
         spatial8dEnabled: Boolean,
         spatial8dSpeed: Float,
         spatial8dDepth: Float,
+        crossfeedEnabled: Boolean = false,
+        crossfeedStrength: Float = 0.45f,
+        crossfeedAngle: Float = 0.50f,
     ) = withContext(Dispatchers.Default) {
         nativeSetAudioEffectsConfig(
             reverbEnabled = reverbEnabled,
@@ -213,6 +219,9 @@ object AuraRustBridge {
             spatial8dEnabled = spatial8dEnabled,
             spatial8dSpeed = spatial8dSpeed,
             spatial8dDepth = spatial8dDepth,
+            crossfeedEnabled = crossfeedEnabled,
+            crossfeedStrength = crossfeedStrength,
+            crossfeedAngle = crossfeedAngle,
         )
     }
 

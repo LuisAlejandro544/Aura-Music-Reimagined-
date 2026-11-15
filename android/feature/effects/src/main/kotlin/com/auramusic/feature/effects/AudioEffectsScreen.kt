@@ -22,11 +22,15 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.rounded.AutoAwesome
+import androidx.compose.material.icons.rounded.BluetoothAudio
 import androidx.compose.material.icons.rounded.GraphicEq
 import androidx.compose.material.icons.rounded.Headphones
+import androidx.compose.material.icons.rounded.Hearing
 import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material.icons.rounded.SlowMotionVideo
+import androidx.compose.material.icons.rounded.Speaker
 import androidx.compose.material.icons.rounded.SurroundSound
+import androidx.compose.material.icons.rounded.Usb
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -63,6 +67,10 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.auramusic.core.model.AudioEffectPreset
 import com.auramusic.core.model.AudioEffectsState
+import com.auramusic.core.model.AudioOutputRouteState
+import com.auramusic.core.model.AudioOutputType
+import com.auramusic.core.model.HeadphonePreferences
+import com.auramusic.core.model.HeadphoneRoutingHelper
 import com.auramusic.core.model.PlaybackTuningHelper
 import java.util.Locale
 import kotlin.math.PI
@@ -73,6 +81,7 @@ import kotlin.math.sin
 
 /**
  * Pantalla dedicada de efectos espaciales y de textura en tiempo real:
+ * - Crossfeed binaural estático para auriculares (ITD + sombra de cabeza LPF en Rust DSP).
  * - Audio Espacial 8D psicoacústico (ITD + sombra de cabeza ILD + cross-feed en Rust DSP).
  * - Reverberación estéreo Freeverb (8 filtros comb + 4 allpass por canal en Rust DSP).
  * - Modo Slowed (velocidad + tono estilo vinilo/cinta + filtro de calidez analógica en Rust).
@@ -97,12 +106,24 @@ fun AudioEffectsScreen(
     onSetSpatial8dDepth: (Float) -> Unit,
     onReset: () -> Unit,
     modifier: Modifier = Modifier,
+    outputRoute: AudioOutputRouteState = AudioOutputRouteState(),
+    headphonePreferences: HeadphonePreferences = HeadphonePreferences(),
+    onSetCrossfeedEnabled: (Boolean) -> Unit = {},
+    onSetCrossfeedStrength: (Float) -> Unit = {},
+    onSetCrossfeedAngle: (Float) -> Unit = {},
 ) {
+    val effectiveEffects = HeadphoneRoutingHelper.resolveEffectiveRustEffects(
+        effects = effectsState,
+        outputRoute = outputRoute,
+        prefs = headphonePreferences,
+    )
+    val anyEffectiveEnabled = effectsState.isAnyEffectEnabled || effectiveEffects.crossfeedEnabled
     val activePreset = AudioEffectsState.findPresetById(effectsState.activePresetId)
     val activeTitle = when {
-        !effectsState.isAnyEffectEnabled -> "Audio original (Bypass)"
+        !anyEffectiveEnabled -> "Audio original (Bypass)"
         activePreset != null -> activePreset.displayName
         else -> buildList {
+            if (effectiveEffects.crossfeedEnabled) add("Crossfeed")
             if (effectsState.spatial8dEnabled) add("Audio 8D")
             if (effectsState.slowedEnabled) add("Slowed")
             if (effectsState.reverbEnabled) add("Reverb")
@@ -221,6 +242,14 @@ fun AudioEffectsScreen(
             }
 
             item {
+                OutputRouteEffectsBanner(
+                    outputRoute = outputRoute,
+                    spatial8dBypassedBySpeaker = effectiveEffects.spatial8dBypassedBySpeaker,
+                    crossfeedAutoEnabled = effectiveEffects.crossfeedAutoEnabledByHeadphones,
+                )
+            }
+
+            item {
                 AcousticDecayPreviewCard(effectsState = effectsState)
             }
 
@@ -282,10 +311,24 @@ fun AudioEffectsScreen(
                 }
             }
 
+            // Tarjeta dedicada: Crossfeed binaural estático para auriculares en Rust DSP
+            item {
+                StaticCrossfeedCard(
+                    enabled = effectiveEffects.crossfeedEnabled,
+                    autoEnabledByHeadphones = effectiveEffects.crossfeedAutoEnabledByHeadphones,
+                    strength = effectsState.crossfeedStrength,
+                    angle = effectsState.crossfeedAngle,
+                    onToggleEnabled = onSetCrossfeedEnabled,
+                    onStrengthChange = onSetCrossfeedStrength,
+                    onAngleChange = onSetCrossfeedAngle,
+                )
+            }
+
             // Tarjeta dedicada: Audio Espacial 8D en Rust (ITD + sombra craneal + órbita 360°)
             item {
                 Spatial8dCard(
                     enabled = effectsState.spatial8dEnabled,
+                    bypassedBySpeaker = effectiveEffects.spatial8dBypassedBySpeaker,
                     speed = effectsState.spatial8dSpeed,
                     depth = effectsState.spatial8dDepth,
                     onToggleEnabled = onSetSpatial8dEnabled,
@@ -694,12 +737,266 @@ private fun AcousticDecayPreviewCard(
 }
 
 /**
+ * Banner con la salida de audio activa detectada mediante `AudioDeviceCallback`
+ * y el estado de enrutamiento automático de Crossfeed / Audio 8D.
+ */
+@Composable
+private fun OutputRouteEffectsBanner(
+    outputRoute: AudioOutputRouteState,
+    spatial8dBypassedBySpeaker: Boolean,
+    crossfeedAutoEnabled: Boolean,
+) {
+    val icon = when (outputRoute.outputType) {
+        AudioOutputType.BLUETOOTH_HEADSET -> Icons.Rounded.BluetoothAudio
+        AudioOutputType.USB_HEADSET -> Icons.Rounded.Usb
+        AudioOutputType.WIRED_HEADSET -> Icons.Rounded.Headphones
+        AudioOutputType.SPEAKER,
+        AudioOutputType.OTHER -> Icons.Rounded.Speaker
+    }
+    val statusDetail = when {
+        spatial8dBypassedBySpeaker ->
+            "Altavoz detectado: 8D en pausa automática para proteger la claridad"
+        crossfeedAutoEnabled ->
+            "Auriculares detectados: Crossfeed binaural activado automáticamente"
+        outputRoute.isHeadphonesConnected ->
+            "Salida optimizada para escucha con auriculares (${outputRoute.outputType.displayLabel})"
+        else ->
+            "Reproduciendo por ${outputRoute.outputType.displayLabel}"
+    }
+
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(16.dp),
+        color = if (outputRoute.isHeadphonesConnected) {
+            MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.72f)
+        } else {
+            MaterialTheme.colorScheme.surfaceContainerHigh
+        },
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 14.dp, vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(
+                imageVector = icon,
+                contentDescription = null,
+                tint = if (outputRoute.isHeadphonesConnected) {
+                    MaterialTheme.colorScheme.primary
+                } else {
+                    MaterialTheme.colorScheme.onSurfaceVariant
+                },
+            )
+            Spacer(modifier = Modifier.width(12.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = "Salida: ${outputRoute.deviceName}",
+                    style = MaterialTheme.typography.labelLarge,
+                    fontWeight = FontWeight.Bold,
+                )
+                Text(
+                    text = statusDetail,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+    }
+}
+
+/**
+ * Tarjeta dedicada de Crossfeed Binaural Estático en Rust: simula altavoces frontales
+ * a ±15°–45° mediante ITD fraccional y filtro de sombra craneal para reducir la fatiga en auriculares.
+ */
+@Composable
+private fun StaticCrossfeedCard(
+    enabled: Boolean,
+    autoEnabledByHeadphones: Boolean,
+    strength: Float,
+    angle: Float,
+    onToggleEnabled: (Boolean) -> Unit,
+    onStrengthChange: (Float) -> Unit,
+    onAngleChange: (Float) -> Unit,
+) {
+    val angleDegrees = PlaybackTuningHelper.crossfeedVirtualAngleDegrees(angle)
+    val primary = MaterialTheme.colorScheme.primary
+    val secondary = MaterialTheme.colorScheme.secondary
+    val ringColor = MaterialTheme.colorScheme.outlineVariant
+
+    Surface(
+        shape = RoundedCornerShape(20.dp),
+        color = MaterialTheme.colorScheme.surfaceContainerLow,
+        tonalElevation = 2.dp,
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween,
+            ) {
+                Row(
+                    modifier = Modifier.weight(1f),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Icon(
+                        imageVector = Icons.Rounded.Hearing,
+                        contentDescription = null,
+                        tint = if (enabled) primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Spacer(modifier = Modifier.width(10.dp))
+                    Column {
+                        Text(
+                            text = "Crossfeed Binaural Estático (Rust)",
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold,
+                        )
+                        Text(
+                            text = when {
+                                autoEnabledByHeadphones ->
+                                    "Activo por auriculares • ${angleDegrees}° • ${(strength * 100f).roundToInt()}%"
+                                enabled ->
+                                    "Escenario frontal ±${angleDegrees}° • Intensidad ${(strength * 100f).roundToInt()}%"
+                                else ->
+                                    "Desactivado • Naturaliza el estéreo en auriculares"
+                            },
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
+                Switch(
+                    checked = enabled,
+                    onCheckedChange = onToggleEnabled,
+                )
+            }
+
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .alpha(if (enabled) 1f else 0.55f),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(14.dp),
+            ) {
+                Canvas(modifier = Modifier.size(72.dp)) {
+                    val cx = size.width * 0.5f
+                    val cy = size.height * 0.66f
+                    val headRadius = size.minDimension * 0.16f
+                    val dist = size.minDimension * 0.42f
+                    val rad = Math.toRadians(angleDegrees.toDouble()).toFloat()
+
+                    val leftSpeaker = Offset(cx - dist * sin(rad), cy - dist * cos(rad))
+                    val rightSpeaker = Offset(cx + dist * sin(rad), cy - dist * cos(rad))
+
+                    drawLine(
+                        color = (if (enabled) primary else ringColor).copy(alpha = 0.7f),
+                        start = leftSpeaker,
+                        end = Offset(cx - headRadius * 0.8f, cy),
+                        strokeWidth = 2.dp.toPx(),
+                        cap = StrokeCap.Round,
+                    )
+                    drawLine(
+                        color = (if (enabled) secondary else ringColor).copy(alpha = 0.45f),
+                        start = leftSpeaker,
+                        end = Offset(cx + headRadius * 0.8f, cy),
+                        strokeWidth = 1.6.dp.toPx(),
+                        cap = StrokeCap.Round,
+                    )
+                    drawLine(
+                        color = (if (enabled) primary else ringColor).copy(alpha = 0.7f),
+                        start = rightSpeaker,
+                        end = Offset(cx + headRadius * 0.8f, cy),
+                        strokeWidth = 2.dp.toPx(),
+                        cap = StrokeCap.Round,
+                    )
+                    drawLine(
+                        color = (if (enabled) secondary else ringColor).copy(alpha = 0.45f),
+                        start = rightSpeaker,
+                        end = Offset(cx - headRadius * 0.8f, cy),
+                        strokeWidth = 1.6.dp.toPx(),
+                        cap = StrokeCap.Round,
+                    )
+
+                    drawCircle(
+                        color = ringColor.copy(alpha = 0.55f),
+                        radius = headRadius,
+                        center = Offset(cx, cy),
+                        style = Stroke(width = 1.6.dp.toPx()),
+                    )
+                    drawCircle(
+                        color = if (enabled) primary else ringColor,
+                        radius = 4.5.dp.toPx(),
+                        center = leftSpeaker,
+                    )
+                    drawCircle(
+                        color = if (enabled) primary else ringColor,
+                        radius = 4.5.dp.toPx(),
+                        center = rightSpeaker,
+                    )
+                }
+
+                Column(
+                    modifier = Modifier.weight(1f),
+                    verticalArrangement = Arrangement.spacedBy(4.dp),
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(
+                            text = "Ángulo virtual de escena",
+                            style = MaterialTheme.typography.labelLarge,
+                            fontWeight = FontWeight.SemiBold,
+                        )
+                        Text(
+                            text = "±${angleDegrees}°",
+                            style = MaterialTheme.typography.labelLarge,
+                            fontWeight = FontWeight.Bold,
+                            color = if (enabled) primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    Slider(
+                        value = angle.coerceIn(0f, 1f),
+                        enabled = enabled,
+                        onValueChange = { next ->
+                            val snapped = ((next * 100f).roundToInt() / 100f).coerceIn(0f, 1f)
+                            onAngleChange(snapped)
+                        },
+                        valueRange = 0f..1f,
+                    )
+                }
+            }
+
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .alpha(if (enabled) 1f else 0.55f),
+            ) {
+                EffectPercentSlider(
+                    label = "Intensidad binaural",
+                    value = strength,
+                    enabled = enabled,
+                    onValueChange = onStrengthChange,
+                )
+            }
+        }
+    }
+}
+
+/**
  * Tarjeta dedicada de Audio Espacial 8D con radar animado 360°, velocidad de giro
  * (en segundos por vuelta) e intensidad/profundidad psicoacústica.
  */
 @Composable
 private fun Spatial8dCard(
     enabled: Boolean,
+    bypassedBySpeaker: Boolean,
     speed: Float,
     depth: Float,
     onToggleEnabled: (Boolean) -> Unit,
@@ -713,8 +1010,8 @@ private fun Spatial8dCard(
     val ringColor = MaterialTheme.colorScheme.outlineVariant
 
     var phaseRad by remember { mutableFloatStateOf(0f) }
-    LaunchedEffect(enabled, speed) {
-        if (!enabled) return@LaunchedEffect
+    LaunchedEffect(enabled, bypassedBySpeaker, speed) {
+        if (!enabled || bypassedBySpeaker) return@LaunchedEffect
         var lastMs = 0L
         val omega = ((2.0 * PI) / orbitPeriodSec.toDouble()).toFloat()
         while (true) {
@@ -751,7 +1048,7 @@ private fun Spatial8dCard(
                     Icon(
                         imageVector = Icons.Rounded.Headphones,
                         contentDescription = null,
-                        tint = if (enabled) {
+                        tint = if (enabled && !bypassedBySpeaker) {
                             MaterialTheme.colorScheme.primary
                         } else {
                             MaterialTheme.colorScheme.onSurfaceVariant
@@ -765,10 +1062,13 @@ private fun Spatial8dCard(
                             fontWeight = FontWeight.Bold,
                         )
                         Text(
-                            text = if (enabled) {
-                                "Órbita $orbitLabel • Intensidad ${(depth * 100f).roundToInt()}% • Usa audífonos"
-                            } else {
-                                "Desactivado • Recomendado usar audífonos"
+                            text = when {
+                                bypassedBySpeaker ->
+                                    "En pausa automática sobre altavoz • Conecta auriculares"
+                                enabled ->
+                                    "Órbita $orbitLabel • Intensidad ${(depth * 100f).roundToInt()}% • Usa audífonos"
+                                else ->
+                                    "Desactivado • Recomendado usar audífonos"
                             },
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,

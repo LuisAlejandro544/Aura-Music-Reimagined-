@@ -1,0 +1,159 @@
+package com.auramusic.app
+
+import android.net.Uri
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.LibraryMusic
+import androidx.compose.material.icons.rounded.QueueMusic
+import androidx.compose.material.icons.rounded.Settings
+import androidx.compose.material3.Icon
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.NavigationBar
+import androidx.compose.material3.NavigationBarItem
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.Stable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Modifier
+import com.auramusic.core.model.PlaybackState
+import com.auramusic.feature.player.MiniPlayerBar
+
+/**
+ * Encapsula los selectores del Storage Access Framework (SAF) y galería
+ * para mantener limpia la composición principal en `AuraAppRoot`.
+ */
+@Stable
+class AuraSafLaunchers(
+    val pickSingleAudio: () -> Unit,
+    val pickMultipleAudio: () -> Unit,
+    val pickFolderTree: () -> Unit,
+    val pickCustomCoverForTrack: (Long) -> Unit,
+)
+
+/**
+ * Crea y recuerda los `ActivityResultLauncher` necesarios para importar canciones,
+ * carpetas completas y carátulas personalizadas desde la galería del teléfono.
+ */
+@Composable
+fun rememberAuraSafLaunchers(
+    onImportFiles: (List<Uri>) -> Unit,
+    onImportFolder: (Uri) -> Unit,
+    onSetCustomTrackCover: (trackId: Long, imageUri: Uri) -> Unit,
+): AuraSafLaunchers {
+    var pendingCoverTrackId by remember { mutableStateOf<Long?>(null) }
+
+    val singleFileLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocument(),
+    ) { uri ->
+        if (uri != null) onImportFiles(listOf(uri))
+    }
+
+    val multipleFilesLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenMultipleDocuments(),
+    ) { uris ->
+        if (uris.isNotEmpty()) onImportFiles(uris)
+    }
+
+    val folderTreeLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocumentTree(),
+    ) { treeUri ->
+        if (treeUri != null) onImportFolder(treeUri)
+    }
+
+    val galleryCoverLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.GetContent(),
+    ) { imageUri ->
+        val targetTrackId = pendingCoverTrackId
+        pendingCoverTrackId = null
+        if (imageUri != null && targetTrackId != null) {
+            onSetCustomTrackCover(targetTrackId, imageUri)
+        }
+    }
+
+    return remember(
+        singleFileLauncher,
+        multipleFilesLauncher,
+        folderTreeLauncher,
+        galleryCoverLauncher,
+    ) {
+        AuraSafLaunchers(
+            pickSingleAudio = { singleFileLauncher.launch(arrayOf("audio/*")) },
+            pickMultipleAudio = { multipleFilesLauncher.launch(arrayOf("audio/*")) },
+            pickFolderTree = { folderTreeLauncher.launch(null) },
+            pickCustomCoverForTrack = { trackId ->
+                pendingCoverTrackId = trackId
+                galleryCoverLauncher.launch("image/*")
+            },
+        )
+    }
+}
+
+/**
+ * Barra inferior unificada de Aura Music: combina el `MiniPlayerBar` animado
+ * con la barra de navegación entre Biblioteca, Playlists y Ajustes.
+ */
+@Composable
+fun AuraBottomChrome(
+    playbackState: PlaybackState,
+    dynamicCoverColorsEnabled: Boolean,
+    isLibrarySelected: Boolean,
+    isPlaylistsSelected: Boolean,
+    isSettingsSelected: Boolean,
+    onOpenFullPlayer: () -> Unit,
+    onTogglePlayPause: () -> Unit,
+    onSkipNext: () -> Unit,
+    onToggleLike: (Long) -> Unit,
+    onSelectLibrary: () -> Unit,
+    onSelectPlaylists: () -> Unit,
+    onSelectSettings: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Column(modifier = modifier.navigationBarsPadding()) {
+        AnimatedVisibility(
+            visible = playbackState.currentTrack != null,
+            enter = slideInVertically { it },
+            exit = slideOutVertically { it },
+        ) {
+            MiniPlayerBar(
+                playbackState = playbackState,
+                dynamicCoverColorsEnabled = dynamicCoverColorsEnabled,
+                onOpenFullPlayer = onOpenFullPlayer,
+                onTogglePlayPause = onTogglePlayPause,
+                onSkipNext = onSkipNext,
+                onToggleLike = onToggleLike,
+            )
+        }
+
+        NavigationBar(
+            containerColor = MaterialTheme.colorScheme.surfaceContainer,
+        ) {
+            NavigationBarItem(
+                selected = isLibrarySelected,
+                onClick = onSelectLibrary,
+                icon = { Icon(Icons.Rounded.LibraryMusic, contentDescription = null) },
+                label = { Text("Biblioteca") },
+            )
+            NavigationBarItem(
+                selected = isPlaylistsSelected,
+                onClick = onSelectPlaylists,
+                icon = { Icon(Icons.Rounded.QueueMusic, contentDescription = null) },
+                label = { Text("Playlists") },
+            )
+            NavigationBarItem(
+                selected = isSettingsSelected,
+                onClick = onSelectSettings,
+                icon = { Icon(Icons.Rounded.Settings, contentDescription = null) },
+                label = { Text("Ajustes") },
+            )
+        }
+    }
+}

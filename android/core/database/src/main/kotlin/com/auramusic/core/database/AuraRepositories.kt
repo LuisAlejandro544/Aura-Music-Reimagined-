@@ -14,6 +14,8 @@ import com.auramusic.core.model.AppAccentColor
 import com.auramusic.core.model.AudioEffectsState
 import com.auramusic.core.model.EditedTrackMetadata
 import com.auramusic.core.model.EqualizerState
+import com.auramusic.core.model.HeadphonePreferences
+import com.auramusic.core.model.HeadphoneRoutingHelper
 import com.auramusic.core.model.PlaybackTuning
 import com.auramusic.core.model.PlaybackTuningHelper
 import com.auramusic.core.model.Playlist
@@ -23,6 +25,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.withContext
+import androidx.datastore.preferences.core.longPreferencesKey
 
 private val Context.auraSettingsDataStore: DataStore<Preferences> by preferencesDataStore(
     name = "aura_music_settings",
@@ -371,7 +374,7 @@ class DownloaderPreferencesRepository(
 }
 
 /**
- * Repositorio de preferencias de transición Crossfade y velocidad de reproducción en DataStore.
+ * Repositorio de preferencias de transición Crossfade, velocidad de reproducción y velocidad/tono de voz en DataStore.
  */
 class PlaybackPreferencesRepository(
     private val context: Context,
@@ -379,12 +382,16 @@ class PlaybackPreferencesRepository(
     private val crossfadeEnabledKey = booleanPreferencesKey("playback_crossfade_enabled")
     private val crossfadeSecondsKey = intPreferencesKey("playback_crossfade_seconds")
     private val playbackSpeedKey = floatPreferencesKey("playback_speed")
+    private val playbackPitchKey = floatPreferencesKey("playback_pitch")
+    private val linkPitchToSpeedKey = booleanPreferencesKey("playback_link_pitch_speed")
 
     val playbackTuning: Flow<PlaybackTuning> = context.auraSettingsDataStore.data.map { prefs ->
         PlaybackTuning(
             crossfadeEnabled = prefs[crossfadeEnabledKey] ?: false,
             crossfadeSeconds = prefs[crossfadeSecondsKey] ?: PlaybackTuning.DEFAULT_CROSSFADE_SECONDS,
             playbackSpeed = prefs[playbackSpeedKey] ?: PlaybackTuning.DEFAULT_PLAYBACK_SPEED,
+            playbackPitch = prefs[playbackPitchKey] ?: PlaybackTuning.DEFAULT_PLAYBACK_PITCH,
+            linkPitchToSpeed = prefs[linkPitchToSpeedKey] ?: false,
         ).normalized()
     }
 
@@ -413,6 +420,23 @@ class PlaybackPreferencesRepository(
             }
         }
     }
+
+    suspend fun setPlaybackPitch(pitch: Float) {
+        val safePitch = PlaybackTuningHelper.clampPlaybackPitch(pitch)
+        withContext(Dispatchers.IO) {
+            context.auraSettingsDataStore.edit { prefs ->
+                prefs[playbackPitchKey] = safePitch
+            }
+        }
+    }
+
+    suspend fun setLinkPitchToSpeed(linked: Boolean) {
+        withContext(Dispatchers.IO) {
+            context.auraSettingsDataStore.edit { prefs ->
+                prefs[linkPitchToSpeedKey] = linked
+            }
+        }
+    }
 }
 
 /**
@@ -433,6 +457,9 @@ class AudioEffectsPreferencesRepository(
     private val spatial8dEnabledKey = booleanPreferencesKey("fx_spatial_8d_enabled")
     private val spatial8dSpeedKey = floatPreferencesKey("fx_spatial_8d_speed")
     private val spatial8dDepthKey = floatPreferencesKey("fx_spatial_8d_depth")
+    private val crossfeedEnabledKey = booleanPreferencesKey("fx_crossfeed_enabled")
+    private val crossfeedStrengthKey = floatPreferencesKey("fx_crossfeed_strength")
+    private val crossfeedAngleKey = floatPreferencesKey("fx_crossfeed_angle")
     private val presetIdKey = stringPreferencesKey("fx_preset_id")
 
     val audioEffectsState: Flow<AudioEffectsState> = context.auraSettingsDataStore.data.map { prefs ->
@@ -449,6 +476,9 @@ class AudioEffectsPreferencesRepository(
             spatial8dEnabled = prefs[spatial8dEnabledKey] ?: false,
             spatial8dSpeed = prefs[spatial8dSpeedKey] ?: AudioEffectsState.DEFAULT_SPATIAL_8D_SPEED,
             spatial8dDepth = prefs[spatial8dDepthKey] ?: AudioEffectsState.DEFAULT_SPATIAL_8D_DEPTH,
+            crossfeedEnabled = prefs[crossfeedEnabledKey] ?: false,
+            crossfeedStrength = prefs[crossfeedStrengthKey] ?: AudioEffectsState.DEFAULT_CROSSFEED_STRENGTH,
+            crossfeedAngle = prefs[crossfeedAngleKey] ?: AudioEffectsState.DEFAULT_CROSSFEED_ANGLE,
             activePresetId = prefs[presetIdKey] ?: AudioEffectsState.PRESET_OFF_ID,
         ).normalized()
     }
@@ -469,10 +499,68 @@ class AudioEffectsPreferencesRepository(
                 prefs[spatial8dEnabledKey] = normalized.spatial8dEnabled
                 prefs[spatial8dSpeedKey] = normalized.spatial8dSpeed
                 prefs[spatial8dDepthKey] = normalized.spatial8dDepth
+                prefs[crossfeedEnabledKey] = normalized.crossfeedEnabled
+                prefs[crossfeedStrengthKey] = normalized.crossfeedStrength
+                prefs[crossfeedAngleKey] = normalized.crossfeedAngle
                 prefs[presetIdKey] = normalized.activePresetId
             }
         }
     }
 }
+
+/**
+ * Repositorio de preferencias para detección de salida de audio (auriculares/Bluetooth)
+ * y ajustes finos de botones multimedia (cable / AVRCP) en Jetpack DataStore.
+ */
+class HeadphonePreferencesRepository(
+    private val context: Context,
+) {
+    private val autoPauseDisconnectKey = booleanPreferencesKey("hp_auto_pause_disconnect")
+    private val autoResumeConnectKey = booleanPreferencesKey("hp_auto_resume_connect")
+    private val autoDisable8dSpeakerKey = booleanPreferencesKey("hp_auto_disable_8d_speaker")
+    private val autoEnableCrossfeedHpKey = booleanPreferencesKey("hp_auto_enable_crossfeed_hp")
+    private val doubleTapNextKey = booleanPreferencesKey("hp_double_tap_next")
+    private val tripleTapPreviousKey = booleanPreferencesKey("hp_triple_tap_prev")
+    private val prevRestartThresholdKey = longPreferencesKey("hp_prev_restart_ms")
+    private val wrapQueueNavKey = booleanPreferencesKey("hp_wrap_queue_nav")
+    private val seekStepSecondsKey = intPreferencesKey("hp_seek_step_sec")
+
+    val headphonePreferences: Flow<HeadphonePreferences> = context.auraSettingsDataStore.data.map { prefs ->
+        HeadphonePreferences(
+            autoPauseOnDisconnect = prefs[autoPauseDisconnectKey] ?: true,
+            autoResumeOnConnect = prefs[autoResumeConnectKey] ?: false,
+            autoDisable8dOnSpeaker = prefs[autoDisable8dSpeakerKey] ?: true,
+            autoEnableCrossfeedOnHeadphones = prefs[autoEnableCrossfeedHpKey] ?: false,
+            doubleTapNextEnabled = prefs[doubleTapNextKey] ?: true,
+            tripleTapPreviousEnabled = prefs[tripleTapPreviousKey] ?: true,
+            previousRestartThresholdMs = prefs[prevRestartThresholdKey]
+                ?: HeadphonePreferences.DEFAULT_PREVIOUS_RESTART_MS,
+            wrapQueueNavigation = prefs[wrapQueueNavKey] ?: true,
+            seekStepSeconds = prefs[seekStepSecondsKey] ?: HeadphonePreferences.DEFAULT_SEEK_STEP_SECONDS,
+        ).normalized()
+    }
+
+    suspend fun saveHeadphonePreferences(preferences: HeadphonePreferences) {
+        val normalized = preferences.normalized()
+        withContext(Dispatchers.IO) {
+            context.auraSettingsDataStore.edit { prefs ->
+                prefs[autoPauseDisconnectKey] = normalized.autoPauseOnDisconnect
+                prefs[autoResumeConnectKey] = normalized.autoResumeOnConnect
+                prefs[autoDisable8dSpeakerKey] = normalized.autoDisable8dOnSpeaker
+                prefs[autoEnableCrossfeedHpKey] = normalized.autoEnableCrossfeedOnHeadphones
+                prefs[doubleTapNextKey] = normalized.doubleTapNextEnabled
+                prefs[tripleTapPreviousKey] = normalized.tripleTapPreviousEnabled
+                prefs[prevRestartThresholdKey] = HeadphoneRoutingHelper.clampPreviousRestartThresholdMs(
+                    normalized.previousRestartThresholdMs,
+                )
+                prefs[wrapQueueNavKey] = normalized.wrapQueueNavigation
+                prefs[seekStepSecondsKey] = HeadphoneRoutingHelper.clampSeekStepSeconds(
+                    normalized.seekStepSeconds,
+                )
+            }
+        }
+    }
+}
+
 
 

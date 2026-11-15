@@ -8,6 +8,7 @@
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Mutex, OnceLock};
 
+use crate::crossfeed::StaticCrossfeedProcessor;
 use crate::spatial_8d::Spatial8dProcessor;
 
 const COMB_TUNINGS_44100: [usize; 8] = [1116, 1188, 1277, 1356, 1422, 1491, 1557, 1617];
@@ -30,6 +31,9 @@ pub struct AudioEffectsConfig {
     pub spatial_8d_enabled: bool,
     pub spatial_8d_speed: f32,
     pub spatial_8d_depth: f32,
+    pub crossfeed_enabled: bool,
+    pub crossfeed_strength: f32,
+    pub crossfeed_angle: f32,
 }
 
 impl Default for AudioEffectsConfig {
@@ -45,6 +49,9 @@ impl Default for AudioEffectsConfig {
             spatial_8d_enabled: false,
             spatial_8d_speed: 0.38,
             spatial_8d_depth: 0.80,
+            crossfeed_enabled: false,
+            crossfeed_strength: 0.45,
+            crossfeed_angle: 0.50,
         }
     }
 }
@@ -196,6 +203,7 @@ pub struct AudioEffectsProcessor {
 
     bank_left: ReverbChannelBank,
     bank_right: ReverbChannelBank,
+    crossfeed: StaticCrossfeedProcessor,
     spatial_8d: Spatial8dProcessor,
 }
 
@@ -218,6 +226,7 @@ impl AudioEffectsProcessor {
             warmth_states: [0.0; MAX_CHANNELS],
             bank_left: ReverbChannelBank::new(44_100, 0),
             bank_right: ReverbChannelBank::new(44_100, STEREO_SPREAD_44100),
+            crossfeed: StaticCrossfeedProcessor::new(),
             spatial_8d: Spatial8dProcessor::new(),
         };
         proc.sync_config_if_needed();
@@ -239,15 +248,17 @@ impl AudioEffectsProcessor {
             self.warmth_states = [0.0; MAX_CHANNELS];
             self.applied_version = 0;
         }
+        self.crossfeed.configure(safe_rate, safe_channels);
         self.spatial_8d.configure(safe_rate, safe_channels);
         self.sync_config_if_needed();
     }
 
-    /// Limpia colas de reverb, estados del filtro cálido y fase/retardos 8D al hacer seek o cambiar de pista.
+    /// Limpia colas de reverb, estados del filtro cálido, crossfeed y fase/retardos 8D al hacer seek o cambiar de pista.
     pub fn reset_states(&mut self) {
         self.bank_left.reset();
         self.bank_right.reset();
         self.warmth_states = [0.0; MAX_CHANNELS];
+        self.crossfeed.reset_states();
         self.spatial_8d.reset_states();
     }
 
@@ -295,6 +306,12 @@ impl AudioEffectsProcessor {
             self.warmth_alpha = 1.0;
         }
 
+        self.crossfeed.apply_config(
+            cfg.crossfeed_enabled,
+            cfg.crossfeed_strength,
+            cfg.crossfeed_angle,
+        );
+
         self.spatial_8d.apply_config(
             cfg.spatial_8d_enabled,
             cfg.spatial_8d_speed,
@@ -304,11 +321,14 @@ impl AudioEffectsProcessor {
 
     #[inline]
     pub fn is_active(&self) -> bool {
-        self.reverb_enabled || self.warmth_active || self.spatial_8d.is_active()
+        self.reverb_enabled
+            || self.warmth_active
+            || self.crossfeed.is_active()
+            || self.spatial_8d.is_active()
     }
 
     /// Procesa un frame multicanal completo en precisión `f64` en el orden óptimo:
-    /// Calidez analógica LPF -> Espacializador 8D -> Reverberación estéreo Freeverb.
+    /// Calidez analógica LPF -> Crossfeed binaural -> Espacializador 8D -> Reverberación estéreo Freeverb.
     #[inline]
     pub fn process_frame(&mut self, samples: &mut [f64]) {
         let ch_count = samples.len().min(self.channel_count).min(MAX_CHANNELS);
@@ -324,6 +344,10 @@ impl AudioEffectsProcessor {
                 self.warmth_states[ch] = if filtered.abs() < 1e-15 { 0.0 } else { filtered };
                 samples[ch] = filtered;
             }
+        }
+
+        if self.crossfeed.is_active() {
+            self.crossfeed.process_frame(&mut samples[..ch_count]);
         }
 
         if self.spatial_8d.is_active() {
@@ -393,6 +417,9 @@ pub fn set_audio_effects_config(config: AudioEffectsConfig) {
         spatial_8d_enabled: config.spatial_8d_enabled,
         spatial_8d_speed: clamp_unit(config.spatial_8d_speed),
         spatial_8d_depth: clamp_unit(config.spatial_8d_depth),
+        crossfeed_enabled: config.crossfeed_enabled,
+        crossfeed_strength: clamp_unit(config.crossfeed_strength),
+        crossfeed_angle: clamp_unit(config.crossfeed_angle),
     };
 
     if let Ok(mut guard) = shared_effects_config().lock() {

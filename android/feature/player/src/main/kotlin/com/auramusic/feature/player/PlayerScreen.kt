@@ -39,6 +39,7 @@ import androidx.compose.material.icons.rounded.SkipNext
 import androidx.compose.material.icons.rounded.SkipPrevious
 import androidx.compose.material.icons.rounded.Speed
 import androidx.compose.material.icons.rounded.SurroundSound
+import androidx.compose.material.icons.rounded.Timer
 import androidx.compose.material.icons.rounded.Tune
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -84,6 +85,8 @@ import com.auramusic.core.model.PlaybackState
 import com.auramusic.core.model.PlaybackTuning
 import com.auramusic.core.model.PlaybackTuningHelper
 import com.auramusic.core.model.RepeatMode
+import com.auramusic.core.model.SleepTimerHelper
+import com.auramusic.core.model.SleepTimerState
 import com.auramusic.core.model.Track
 import java.io.File
 import java.util.Locale
@@ -215,6 +218,7 @@ fun PlayerScreen(
     playbackState: PlaybackState,
     playbackTuning: PlaybackTuning = PlaybackTuning(),
     audioEffects: AudioEffectsState = AudioEffectsState(),
+    sleepTimerState: SleepTimerState = SleepTimerState(),
     dynamicCoverColorsEnabled: Boolean = true,
     onCollapse: () -> Unit,
     onTogglePlayPause: () -> Unit,
@@ -231,11 +235,20 @@ fun PlayerScreen(
     onOpenAudioEffects: () -> Unit = {},
     onOpenQueue: () -> Unit = {},
     onSetPlaybackSpeed: (Float) -> Unit = {},
+    onSetPlaybackPitch: (Float) -> Unit = {},
+    onSetLinkPitchToSpeed: (Boolean) -> Unit = {},
+    onResetSpeedAndPitch: () -> Unit = {},
     onSetCrossfadeEnabled: (Boolean) -> Unit = {},
     onSetCrossfadeSeconds: (Int) -> Unit = {},
+    onStartSleepTimerMinutes: (Int, Boolean) -> Unit = { _, _ -> },
+    onSetSleepTimerEndOfTrack: (Boolean) -> Unit = {},
+    onSetSleepTimerEndOfQueue: (Boolean) -> Unit = {},
+    onAddSleepTimerMinutes: (Int) -> Unit = {},
+    onCancelSleepTimer: () -> Unit = {},
 ) {
     val track = playbackState.currentTrack
     var showTuningSheet by remember { mutableStateOf(false) }
+    var showSleepTimerSheet by remember { mutableStateOf(false) }
     var showOptionsMenu by remember { mutableStateOf(false) }
 
     CoverDynamicTheme(
@@ -288,19 +301,37 @@ fun PlayerScreen(
                             expanded = showOptionsMenu,
                             onDismissRequest = { showOptionsMenu = false },
                         ) {
+                            val effectivePitch = if (playbackTuning.linkPitchToSpeed) {
+                                playbackTuning.playbackSpeed
+                            } else {
+                                playbackTuning.playbackPitch
+                            }
+                            val hasCustomPitch = !audioEffects.slowedEnabled &&
+                                kotlin.math.abs(effectivePitch - 1.0f) > 0.01f
+                            val hasCustomSpeed = !audioEffects.slowedEnabled &&
+                                kotlin.math.abs(playbackTuning.playbackSpeed - 1.0f) > 0.01f
                             val hasCustomTuning =
-                                kotlin.math.abs(playbackTuning.playbackSpeed - 1.0f) > 0.01f ||
+                                hasCustomSpeed ||
+                                    hasCustomPitch ||
+                                    playbackTuning.linkPitchToSpeed ||
                                     playbackTuning.crossfadeEnabled
                             val tuningLabel = if (hasCustomTuning) {
                                 val parts = buildList {
-                                    if (kotlin.math.abs(playbackTuning.playbackSpeed - 1.0f) > 0.01f) {
+                                    if (hasCustomSpeed) {
                                         add(PlaybackTuningHelper.formatSpeedLabel(playbackTuning.playbackSpeed))
+                                    }
+                                    if (hasCustomPitch) {
+                                        add("Voz ${PlaybackTuningHelper.formatPitchLabel(effectivePitch)}")
                                     }
                                     if (playbackTuning.crossfadeEnabled) {
                                         add("Crossfade ${playbackTuning.crossfadeSeconds}s")
                                     }
                                 }.joinToString(" • ")
-                                "Velocidad y Crossfade ($parts)"
+                                if (parts.isNotEmpty()) {
+                                    "Velocidad y Crossfade ($parts)"
+                                } else {
+                                    "Velocidad y Crossfade"
+                                }
                             } else {
                                 "Velocidad y Crossfade"
                             }
@@ -321,6 +352,33 @@ fun PlayerScreen(
                                 onClick = {
                                     showOptionsMenu = false
                                     showTuningSheet = true
+                                },
+                            )
+
+                            DropdownMenuItem(
+                                text = {
+                                    Text(
+                                        if (sleepTimerState.isActive) {
+                                            "Temporizador (${SleepTimerHelper.formatShortLabel(sleepTimerState)})"
+                                        } else {
+                                            "Temporizador"
+                                        },
+                                    )
+                                },
+                                leadingIcon = {
+                                    Icon(
+                                        imageVector = Icons.Rounded.Timer,
+                                        contentDescription = null,
+                                        tint = if (sleepTimerState.isActive) {
+                                            MaterialTheme.colorScheme.primary
+                                        } else {
+                                            MaterialTheme.colorScheme.onSurfaceVariant
+                                        },
+                                    )
+                                },
+                                onClick = {
+                                    showOptionsMenu = false
+                                    showSleepTimerSheet = true
                                 },
                             )
 
@@ -617,11 +675,19 @@ fun PlayerScreen(
                         style = MaterialTheme.typography.labelMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
+                    val effectiveSummaryPitch = if (playbackTuning.linkPitchToSpeed) {
+                        playbackTuning.playbackSpeed
+                    } else {
+                        playbackTuning.playbackPitch
+                    }
+                    val hasCustomPitch =
+                        !audioEffects.slowedEnabled && kotlin.math.abs(effectiveSummaryPitch - 1.0f) > 0.01f
                     val hasSpeedOrCrossfade =
                         (!audioEffects.slowedEnabled && kotlin.math.abs(playbackTuning.playbackSpeed - 1.0f) > 0.01f) ||
+                            hasCustomPitch ||
                             playbackTuning.crossfadeEnabled
                     val effectsText = PlaybackTuningHelper.formatEffectsSummary(audioEffects)
-                    if (hasSpeedOrCrossfade || effectsText != null) {
+                    if (hasSpeedOrCrossfade || effectsText != null || sleepTimerState.isActive) {
                         val activeSummary = buildList {
                             if (effectsText != null) {
                                 add(effectsText)
@@ -629,8 +695,14 @@ fun PlayerScreen(
                             if (!audioEffects.slowedEnabled && kotlin.math.abs(playbackTuning.playbackSpeed - 1.0f) > 0.01f) {
                                 add(PlaybackTuningHelper.formatSpeedLabel(playbackTuning.playbackSpeed))
                             }
+                            if (hasCustomPitch) {
+                                add("Voz ${PlaybackTuningHelper.formatPitchLabel(effectiveSummaryPitch)}")
+                            }
                             if (playbackTuning.crossfadeEnabled) {
                                 add("Crossfade ${playbackTuning.crossfadeSeconds}s")
+                            }
+                            if (sleepTimerState.isActive) {
+                                add("Timer ${SleepTimerHelper.formatShortLabel(sleepTimerState)}")
                             }
                         }.joinToString(" • ")
                         Text(
@@ -644,10 +716,14 @@ fun PlayerScreen(
                                 .weight(1f, fill = false)
                                 .padding(horizontal = 8.dp)
                                 .clickable {
-                                    if (effectsText != null && !hasSpeedOrCrossfade) {
-                                        onOpenAudioEffects()
-                                    } else {
-                                        showTuningSheet = true
+                                    when {
+                                        sleepTimerState.isActive && !hasSpeedOrCrossfade && effectsText == null -> {
+                                            showSleepTimerSheet = true
+                                        }
+                                        effectsText != null && !hasSpeedOrCrossfade -> {
+                                            onOpenAudioEffects()
+                                        }
+                                        else -> showTuningSheet = true
                                     }
                                 },
                         )
@@ -748,8 +824,30 @@ fun PlayerScreen(
                     onOpenAudioEffects()
                 },
                 onSetPlaybackSpeed = onSetPlaybackSpeed,
+                onSetPlaybackPitch = onSetPlaybackPitch,
+                onSetLinkPitchToSpeed = onSetLinkPitchToSpeed,
+                onResetSpeedAndPitch = onResetSpeedAndPitch,
                 onSetCrossfadeEnabled = onSetCrossfadeEnabled,
                 onSetCrossfadeSeconds = onSetCrossfadeSeconds,
+            )
+        }
+
+        if (showSleepTimerSheet) {
+            val remainingInQueue = if (playbackState.queue.isNotEmpty() && playbackState.currentIndex >= 0) {
+                (playbackState.queue.size - playbackState.currentIndex).coerceAtLeast(1)
+            } else {
+                playbackState.queue.size
+            }
+            SleepTimerBottomSheet(
+                sleepTimerState = sleepTimerState,
+                hasActiveTrack = track != null,
+                queueRemainingCount = remainingInQueue,
+                onDismiss = { showSleepTimerSheet = false },
+                onStartMinutes = onStartSleepTimerMinutes,
+                onSetEndOfTrack = onSetSleepTimerEndOfTrack,
+                onSetEndOfQueue = onSetSleepTimerEndOfQueue,
+                onAddMinutes = onAddSleepTimerMinutes,
+                onCancelTimer = onCancelSleepTimer,
             )
         }
     }
@@ -764,6 +862,9 @@ private fun PlaybackTuningBottomSheet(
     onDismiss: () -> Unit,
     onOpenAudioEffects: () -> Unit,
     onSetPlaybackSpeed: (Float) -> Unit,
+    onSetPlaybackPitch: (Float) -> Unit,
+    onSetLinkPitchToSpeed: (Boolean) -> Unit,
+    onResetSpeedAndPitch: () -> Unit,
     onSetCrossfadeEnabled: (Boolean) -> Unit,
     onSetCrossfadeSeconds: (Int) -> Unit,
 ) {
@@ -791,13 +892,13 @@ private fun PlaybackTuningBottomSheet(
                         fontWeight = FontWeight.Bold,
                     )
                     Text(
-                        text = "Ajusta el ritmo y el fundido entre pistas",
+                        text = "Ajusta ritmo, velocidad de voz y fundido entre pistas",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
                 TextButton(
-                    onClick = { onSetPlaybackSpeed(PlaybackTuning.DEFAULT_PLAYBACK_SPEED) },
+                    onClick = onResetSpeedAndPitch,
                 ) {
                     Text("Normal 1.0x")
                 }
@@ -891,6 +992,122 @@ private fun PlaybackTuningBottomSheet(
                                 ) {
                                     Text(
                                         text = PlaybackTuningHelper.formatSpeedLabel(preset),
+                                        style = MaterialTheme.typography.labelSmall,
+                                        maxLines = 1,
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Control complementario de velocidad/tono de voz (independiente o vinculado a la velocidad).
+            val displayedPitch = if (playbackTuning.linkPitchToSpeed) {
+                playbackTuning.playbackSpeed
+            } else {
+                playbackTuning.playbackPitch
+            }
+            Surface(
+                shape = RoundedCornerShape(16.dp),
+                color = MaterialTheme.colorScheme.surfaceContainerHigh,
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "Velocidad / Tono de voz",
+                                style = MaterialTheme.typography.titleSmall,
+                                fontWeight = FontWeight.SemiBold,
+                            )
+                            Text(
+                                text = PlaybackTuningHelper.describeVoicePitch(displayedPitch),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                        Text(
+                            text = PlaybackTuningHelper.formatPitchLabel(displayedPitch),
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.primary,
+                        )
+                    }
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "Vincular voz con velocidad",
+                                style = MaterialTheme.typography.labelLarge,
+                                fontWeight = FontWeight.Medium,
+                            )
+                            Text(
+                                text = if (playbackTuning.linkPitchToSpeed) {
+                                    "La voz sube o baja al compás de la velocidad (efecto cinta)"
+                                } else {
+                                    "Control independiente sin alterar el ritmo"
+                                },
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                        Switch(
+                            checked = playbackTuning.linkPitchToSpeed,
+                            onCheckedChange = onSetLinkPitchToSpeed,
+                        )
+                    }
+
+                    Slider(
+                        value = displayedPitch,
+                        onValueChange = { raw ->
+                            val snapped = ((raw * 20f).roundToInt() / 20f)
+                            onSetPlaybackPitch(snapped)
+                        },
+                        enabled = !playbackTuning.linkPitchToSpeed,
+                        valueRange = PlaybackTuning.MIN_PLAYBACK_PITCH..PlaybackTuning.MAX_PLAYBACK_PITCH,
+                    )
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    ) {
+                        PlaybackTuning.PITCH_PRESETS.forEach { preset ->
+                            val selected = kotlin.math.abs(displayedPitch - preset) < 0.02f
+                            if (selected) {
+                                FilledTonalButton(
+                                    onClick = { onSetPlaybackPitch(preset) },
+                                    enabled = !playbackTuning.linkPitchToSpeed,
+                                    modifier = Modifier.weight(1f),
+                                    contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 2.dp),
+                                ) {
+                                    Text(
+                                        text = PlaybackTuningHelper.formatPitchLabel(preset),
+                                        style = MaterialTheme.typography.labelSmall,
+                                        maxLines = 1,
+                                    )
+                                }
+                            } else {
+                                OutlinedButton(
+                                    onClick = { onSetPlaybackPitch(preset) },
+                                    enabled = !playbackTuning.linkPitchToSpeed,
+                                    modifier = Modifier.weight(1f),
+                                    contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 2.dp),
+                                ) {
+                                    Text(
+                                        text = PlaybackTuningHelper.formatPitchLabel(preset),
                                         style = MaterialTheme.typography.labelSmall,
                                         maxLines = 1,
                                     )

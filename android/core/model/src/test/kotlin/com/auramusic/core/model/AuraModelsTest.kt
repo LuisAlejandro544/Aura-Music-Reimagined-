@@ -320,7 +320,156 @@ class AuraModelsTest {
         assertEquals(1.25f, resolvedOff.speed, 0.001f)
         assertEquals(1.0f, resolvedOff.pitch, 0.001f)
     }
+
+    @Test
+    fun `crossfeed preset normalizes bounds and formats summary cleanly`() {
+        val crossfeedPreset = AudioEffectsState.fromPreset(
+            AudioEffectsState.findPresetById("headphone_crossfeed")!!,
+        )
+        assertTrue(crossfeedPreset.crossfeedEnabled)
+        assertTrue(crossfeedPreset.isAnyEffectEnabled)
+        assertEquals(0.48f, crossfeedPreset.crossfeedStrength, 0.001f)
+        assertEquals(30, PlaybackTuningHelper.crossfeedVirtualAngleDegrees(crossfeedPreset.crossfeedAngle))
+        assertEquals("Crossfeed 48%", PlaybackTuningHelper.formatEffectsSummary(crossfeedPreset))
+
+        val clamped = AudioEffectsState(
+            crossfeedEnabled = true,
+            crossfeedStrength = 2.0f,
+            crossfeedAngle = Float.NaN,
+        ).normalized()
+        assertEquals(1.0f, clamped.crossfeedStrength, 0.001f)
+        assertEquals(AudioEffectsState.DEFAULT_CROSSFEED_ANGLE, clamped.crossfeedAngle, 0.001f)
+    }
+
+    @Test
+    fun `headphone routing helper resolves 8d speaker bypass, auto crossfeed, and media hook taps`() {
+        val speakerRoute = AudioOutputRouteState(
+            outputType = AudioOutputType.SPEAKER,
+            deviceName = "Altavoz del teléfono",
+            isHeadphonesConnected = false,
+        )
+        val btRoute = AudioOutputRouteState(
+            outputType = AudioOutputType.BLUETOOTH_HEADSET,
+            deviceName = "Aura Buds",
+            isHeadphonesConnected = true,
+        )
+        val prefs = HeadphonePreferences(
+            autoDisable8dOnSpeaker = true,
+            autoEnableCrossfeedOnHeadphones = true,
+            doubleTapNextEnabled = true,
+            tripleTapPreviousEnabled = true,
+        )
+        val effectsWith8d = AudioEffectsState(spatial8dEnabled = true, crossfeedEnabled = false)
+
+        val onSpeaker = HeadphoneRoutingHelper.resolveEffectiveRustEffects(effectsWith8d, speakerRoute, prefs)
+        assertFalse(onSpeaker.spatial8dEnabled)
+        assertTrue(onSpeaker.spatial8dBypassedBySpeaker)
+        assertFalse(onSpeaker.crossfeedEnabled)
+
+        val onHeadphones = HeadphoneRoutingHelper.resolveEffectiveRustEffects(effectsWith8d, btRoute, prefs)
+        assertTrue(onHeadphones.spatial8dEnabled)
+        assertFalse(onHeadphones.spatial8dBypassedBySpeaker)
+        assertTrue(onHeadphones.crossfeedEnabled)
+        assertTrue(onHeadphones.crossfeedAutoEnabledByHeadphones)
+
+        assertEquals(MediaHookTapAction.TOGGLE_PLAY_PAUSE, HeadphoneRoutingHelper.resolveMediaHookTapAction(1, prefs))
+        assertEquals(MediaHookTapAction.SKIP_NEXT, HeadphoneRoutingHelper.resolveMediaHookTapAction(2, prefs))
+        assertEquals(MediaHookTapAction.SKIP_PREVIOUS, HeadphoneRoutingHelper.resolveMediaHookTapAction(3, prefs))
+        assertEquals(
+            MediaHookTapAction.TOGGLE_PLAY_PAUSE,
+            HeadphoneRoutingHelper.resolveMediaHookTapAction(2, prefs.copy(doubleTapNextEnabled = false)),
+        )
+        assertEquals("Siempre previa", HeadphoneRoutingHelper.formatPreviousThresholdLabel(0L))
+        assertEquals("3.5 s", HeadphoneRoutingHelper.formatPreviousThresholdLabel(3_500L))
+    }
+
+    @Test
+    fun `playback tuning helper resolves independent and linked vocal pitch accurately`() {
+        assertEquals(0.5f, PlaybackTuningHelper.clampPlaybackPitch(0.1f), 0.001f)
+        assertEquals(2.0f, PlaybackTuningHelper.clampPlaybackPitch(3.5f), 0.001f)
+        assertEquals(1.0f, PlaybackTuningHelper.clampPlaybackPitch(Float.NaN), 0.001f)
+        assertEquals("1.15x", PlaybackTuningHelper.formatPitchLabel(1.15f))
+        assertEquals("Voz natural", PlaybackTuningHelper.describeVoicePitch(1.0f))
+        assertEquals("Voz más grave", PlaybackTuningHelper.describeVoicePitch(0.88f))
+        assertEquals("Voz más aguda", PlaybackTuningHelper.describeVoicePitch(1.18f))
+
+        // Tono de voz independiente de la velocidad
+        val independent = PlaybackTuningHelper.resolvePlaybackParameters(
+            tuning = PlaybackTuning(
+                playbackSpeed = 1.30f,
+                playbackPitch = 0.85f,
+                linkPitchToSpeed = false,
+            ),
+            effects = AudioEffectsState(),
+        )
+        assertEquals(1.30f, independent.speed, 0.001f)
+        assertEquals(0.85f, independent.pitch, 0.001f)
+
+        // Modo vinculado: la voz sigue la velocidad (efecto cinta/vinilo)
+        val linked = PlaybackTuningHelper.resolvePlaybackParameters(
+            tuning = PlaybackTuning(
+                playbackSpeed = 1.35f,
+                playbackPitch = 0.80f,
+                linkPitchToSpeed = true,
+            ),
+            effects = AudioEffectsState(),
+        )
+        assertEquals(1.35f, linked.speed, 0.001f)
+        assertEquals(1.35f, linked.pitch, 0.001f)
+    }
+
+    @Test
+    fun `sleep timer helper validates custom minutes, formats countdowns and evaluates auto stop`() {
+        assertEquals(25, SleepTimerHelper.parseCustomMinutesOrNull(" 25 "))
+        assertEquals(null, SleepTimerHelper.parseCustomMinutesOrNull("0"))
+        assertEquals(null, SleepTimerHelper.parseCustomMinutesOrNull("999"))
+        assertEquals(null, SleepTimerHelper.parseCustomMinutesOrNull("abc"))
+
+        assertEquals("15 min", SleepTimerHelper.formatPresetLabel(15))
+        assertEquals("1 h", SleepTimerHelper.formatPresetLabel(60))
+        assertEquals("90 min", SleepTimerHelper.formatPresetLabel(90))
+        assertEquals("05:00", SleepTimerHelper.formatCountdown(300_000L))
+        assertEquals("1:05:02", SleepTimerHelper.formatCountdown(3_901_200L))
+
+        val endOfTrackState = SleepTimerState(mode = SleepTimerMode.END_OF_TRACK)
+        assertTrue(SleepTimerHelper.shouldBypassCrossfadeForSleepTimer(endOfTrackState, hasNextMediaItem = true))
+        assertTrue(
+            SleepTimerHelper.shouldPauseOnAutoTransition(
+                mode = SleepTimerMode.END_OF_TRACK,
+                previousIndex = 0,
+                newIndex = 1,
+                itemCount = 3,
+                reasonIsAuto = true,
+                reasonIsRepeat = false,
+            ),
+        )
+
+        val endOfQueueState = SleepTimerState(mode = SleepTimerMode.END_OF_QUEUE)
+        assertFalse(SleepTimerHelper.shouldBypassCrossfadeForSleepTimer(endOfQueueState, hasNextMediaItem = true))
+        assertTrue(SleepTimerHelper.shouldBypassCrossfadeForSleepTimer(endOfQueueState, hasNextMediaItem = false))
+        assertFalse(
+            SleepTimerHelper.shouldPauseOnAutoTransition(
+                mode = SleepTimerMode.END_OF_QUEUE,
+                previousIndex = 0,
+                newIndex = 1,
+                itemCount = 3,
+                reasonIsAuto = true,
+                reasonIsRepeat = false,
+            ),
+        )
+        assertTrue(
+            SleepTimerHelper.shouldPauseOnAutoTransition(
+                mode = SleepTimerMode.END_OF_QUEUE,
+                previousIndex = 2,
+                newIndex = 0,
+                itemCount = 3,
+                reasonIsAuto = true,
+                reasonIsRepeat = false,
+            ),
+        )
+    }
 }
+
 
 
 

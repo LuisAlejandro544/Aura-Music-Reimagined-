@@ -503,6 +503,9 @@ mod tests {
             spatial_8d_enabled: true,
             spatial_8d_speed: 0.50,
             spatial_8d_depth: 0.85,
+            crossfeed_enabled: true,
+            crossfeed_strength: 0.55,
+            crossfeed_angle: 0.50,
         });
 
         let mut pcm16 = generate_sine_pcm16(440.0, 48_000, 1024, 0.5);

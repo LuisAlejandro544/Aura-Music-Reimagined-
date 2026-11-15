@@ -68,6 +68,7 @@ data class PlaybackState(
     val shuffleEnabled: Boolean = false,
     val repeatMode: RepeatMode = RepeatMode.OFF,
     val playbackSpeed: Float = PlaybackTuning.DEFAULT_PLAYBACK_SPEED,
+    val playbackPitch: Float = PlaybackTuning.DEFAULT_PLAYBACK_PITCH,
 ) {
     val progressFraction: Float
         get() = if (durationMs > 0L) {
@@ -691,15 +692,19 @@ fun interface DeleteEffectFrameRenderer {
  * - Crossfade activado/desactivado.
  * - Segundos antes de terminar la canción en los que comienza el crossfade.
  * - Velocidad de reproducción (0.50x a 2.00x).
+ * - Velocidad / tono de voz independiente o vinculada a la velocidad (0.50x a 2.00x).
  */
 data class PlaybackTuning(
     val crossfadeEnabled: Boolean = false,
     val crossfadeSeconds: Int = DEFAULT_CROSSFADE_SECONDS,
     val playbackSpeed: Float = DEFAULT_PLAYBACK_SPEED,
+    val playbackPitch: Float = DEFAULT_PLAYBACK_PITCH,
+    val linkPitchToSpeed: Boolean = false,
 ) {
     fun normalized(): PlaybackTuning = copy(
         crossfadeSeconds = PlaybackTuningHelper.clampCrossfadeSeconds(crossfadeSeconds),
         playbackSpeed = PlaybackTuningHelper.clampPlaybackSpeed(playbackSpeed),
+        playbackPitch = PlaybackTuningHelper.clampPlaybackPitch(playbackPitch),
     )
 
     companion object {
@@ -709,12 +714,16 @@ data class PlaybackTuning(
         const val MIN_PLAYBACK_SPEED = 0.5f
         const val MAX_PLAYBACK_SPEED = 2.0f
         const val DEFAULT_PLAYBACK_SPEED = 1.0f
+        const val MIN_PLAYBACK_PITCH = 0.5f
+        const val MAX_PLAYBACK_PITCH = 2.0f
+        const val DEFAULT_PLAYBACK_PITCH = 1.0f
         val SPEED_PRESETS = listOf(0.5f, 0.75f, 1.0f, 1.25f, 1.5f, 2.0f)
+        val PITCH_PRESETS = listOf(0.75f, 0.85f, 1.0f, 1.15f, 1.25f, 1.5f)
     }
 }
 
 /**
- * Reglas puras y deterministas para velocidad de reproducción y transición Crossfade.
+ * Reglas puras y deterministas para velocidad de reproducción, tono/velocidad de voz y Crossfade.
  */
 object PlaybackTuningHelper {
 
@@ -727,6 +736,12 @@ object PlaybackTuningHelper {
         return kotlin.math.round(clamped * 100f) / 100f
     }
 
+    fun clampPlaybackPitch(pitch: Float): Float {
+        if (!pitch.isFinite()) return PlaybackTuning.DEFAULT_PLAYBACK_PITCH
+        val clamped = pitch.coerceIn(PlaybackTuning.MIN_PLAYBACK_PITCH, PlaybackTuning.MAX_PLAYBACK_PITCH)
+        return kotlin.math.round(clamped * 100f) / 100f
+    }
+
     fun formatSpeedLabel(speed: Float): String {
         val safe = clampPlaybackSpeed(speed)
         val roundedTwo = kotlin.math.round(safe * 100f).toInt()
@@ -734,6 +749,22 @@ object PlaybackTuningHelper {
             String.format(java.util.Locale.US, "%.1fx", safe)
         } else {
             String.format(java.util.Locale.US, "%.2fx", safe)
+        }
+    }
+
+    fun formatPitchLabel(pitch: Float): String = formatSpeedLabel(clampPlaybackPitch(pitch))
+
+    /**
+     * Describe de forma legible el carácter vocal resultante del ajuste de tono/velocidad de voz.
+     */
+    fun describeVoicePitch(pitch: Float): String {
+        val safe = clampPlaybackPitch(pitch)
+        return when {
+            safe < 0.80f -> "Voz muy grave"
+            safe < 0.98f -> "Voz más grave"
+            safe > 1.25f -> "Voz muy aguda"
+            safe > 1.02f -> "Voz más aguda"
+            else -> "Voz natural"
         }
     }
 
@@ -790,7 +821,7 @@ object PlaybackTuningHelper {
 
     /**
      * Parámetros finales de velocidad y tono enviados a Media3 ExoPlayer combinando
-     * la velocidad libre y el modo Slowed (que por defecto reduce tono y tempo juntos).
+     * la velocidad libre, el control de velocidad/tono de voz y el modo Slowed.
      */
     data class ResolvedPlaybackParams(
         val speed: Float,
@@ -807,10 +838,13 @@ object PlaybackTuningHelper {
             val pitch = if (safeEffects.slowedPreservePitch) 1.0f else speed
             return ResolvedPlaybackParams(speed = speed, pitch = pitch)
         }
-        return ResolvedPlaybackParams(
-            speed = clampPlaybackSpeed(tuning.playbackSpeed),
-            pitch = 1.0f,
-        )
+        val speed = clampPlaybackSpeed(tuning.playbackSpeed)
+        val pitch = if (tuning.linkPitchToSpeed) {
+            clampPlaybackPitch(speed)
+        } else {
+            clampPlaybackPitch(tuning.playbackPitch)
+        }
+        return ResolvedPlaybackParams(speed = speed, pitch = pitch)
     }
 
     fun clampSlowedSpeed(speed: Float): Float {
@@ -831,6 +865,9 @@ object PlaybackTuningHelper {
         val safe = effects.normalized()
         if (!safe.isAnyEffectEnabled) return null
         val parts = buildList {
+            if (safe.crossfeedEnabled) {
+                add("Crossfeed ${(safe.crossfeedStrength * 100f).toInt()}%")
+            }
             if (safe.spatial8dEnabled) {
                 add("8D")
             }
@@ -851,6 +888,14 @@ object PlaybackTuningHelper {
         val safe = clampUnit(speed, AudioEffectsState.DEFAULT_SPATIAL_8D_SPEED)
         val hz = 0.05f + safe * 0.30f
         return 1f / hz
+    }
+
+    /**
+     * Convierte el parámetro normalizado de ángulo [0..1] a grados virtuales de escena (15° a 45°).
+     */
+    fun crossfeedVirtualAngleDegrees(angle: Float): Int {
+        val safe = clampUnit(angle, AudioEffectsState.DEFAULT_CROSSFEED_ANGLE)
+        return (15f + safe * 30f).toInt()
     }
 }
 
@@ -910,11 +955,15 @@ data class AudioEffectPreset(
     val spatial8dEnabled: Boolean = false,
     val spatial8dSpeed: Float = AudioEffectsState.DEFAULT_SPATIAL_8D_SPEED,
     val spatial8dDepth: Float = AudioEffectsState.DEFAULT_SPATIAL_8D_DEPTH,
+    val crossfeedEnabled: Boolean = false,
+    val crossfeedStrength: Float = AudioEffectsState.DEFAULT_CROSSFEED_STRENGTH,
+    val crossfeedAngle: Float = AudioEffectsState.DEFAULT_CROSSFEED_ANGLE,
 )
 
 /**
  * Estado inmutable de efectos de audio en tiempo real (Reverberación estéreo Freeverb,
- * Audio Espacial 8D psicoacústico y Calidez analógica en Rust + Slowed varispeed en ExoPlayer).
+ * Crossfeed binaural estático, Audio Espacial 8D psicoacústico y Calidez analógica en Rust +
+ * Slowed varispeed en ExoPlayer).
  */
 data class AudioEffectsState(
     val reverbEnabled: Boolean = false,
@@ -929,10 +978,13 @@ data class AudioEffectsState(
     val spatial8dEnabled: Boolean = false,
     val spatial8dSpeed: Float = DEFAULT_SPATIAL_8D_SPEED,
     val spatial8dDepth: Float = DEFAULT_SPATIAL_8D_DEPTH,
+    val crossfeedEnabled: Boolean = false,
+    val crossfeedStrength: Float = DEFAULT_CROSSFEED_STRENGTH,
+    val crossfeedAngle: Float = DEFAULT_CROSSFEED_ANGLE,
     val activePresetId: String = PRESET_OFF_ID,
 ) {
     val isAnyEffectEnabled: Boolean
-        get() = reverbEnabled || slowedEnabled || spatial8dEnabled
+        get() = reverbEnabled || slowedEnabled || spatial8dEnabled || crossfeedEnabled
 
     val isSlowedWarmthActive: Boolean
         get() = slowedEnabled && slowedWarmth > 0.01f
@@ -946,6 +998,8 @@ data class AudioEffectsState(
         slowedWarmth = PlaybackTuningHelper.clampUnit(slowedWarmth, DEFAULT_SLOWED_WARMTH),
         spatial8dSpeed = PlaybackTuningHelper.clampUnit(spatial8dSpeed, DEFAULT_SPATIAL_8D_SPEED),
         spatial8dDepth = PlaybackTuningHelper.clampUnit(spatial8dDepth, DEFAULT_SPATIAL_8D_DEPTH),
+        crossfeedStrength = PlaybackTuningHelper.clampUnit(crossfeedStrength, DEFAULT_CROSSFEED_STRENGTH),
+        crossfeedAngle = PlaybackTuningHelper.clampUnit(crossfeedAngle, DEFAULT_CROSSFEED_ANGLE),
         activePresetId = activePresetId.ifBlank { PRESET_CUSTOM_ID },
     )
 
@@ -960,6 +1014,8 @@ data class AudioEffectsState(
         const val DEFAULT_WIDTH = 0.85f
         const val DEFAULT_SPATIAL_8D_SPEED = 0.38f
         const val DEFAULT_SPATIAL_8D_DEPTH = 0.80f
+        const val DEFAULT_CROSSFEED_STRENGTH = 0.45f
+        const val DEFAULT_CROSSFEED_ANGLE = 0.50f
 
         const val PRESET_OFF_ID = "off"
         const val PRESET_CUSTOM_ID = "custom"
@@ -983,6 +1039,29 @@ data class AudioEffectsState(
                 spatial8dEnabled = false,
                 spatial8dSpeed = DEFAULT_SPATIAL_8D_SPEED,
                 spatial8dDepth = DEFAULT_SPATIAL_8D_DEPTH,
+                crossfeedEnabled = false,
+                crossfeedStrength = DEFAULT_CROSSFEED_STRENGTH,
+                crossfeedAngle = DEFAULT_CROSSFEED_ANGLE,
+            ),
+            AudioEffectPreset(
+                id = "headphone_crossfeed",
+                displayName = "Crossfeed Auriculares",
+                subtitle = "Escenario binaural natural al frente sin fatiga auditiva",
+                reverbEnabled = false,
+                reverbRoomSize = DEFAULT_ROOM_SIZE,
+                reverbDamping = DEFAULT_DAMPING,
+                reverbWetMix = DEFAULT_WET_MIX,
+                reverbWidth = DEFAULT_WIDTH,
+                slowedEnabled = false,
+                slowedSpeed = DEFAULT_SLOWED_SPEED,
+                slowedPreservePitch = false,
+                slowedWarmth = DEFAULT_SLOWED_WARMTH,
+                spatial8dEnabled = false,
+                spatial8dSpeed = DEFAULT_SPATIAL_8D_SPEED,
+                spatial8dDepth = DEFAULT_SPATIAL_8D_DEPTH,
+                crossfeedEnabled = true,
+                crossfeedStrength = 0.48f,
+                crossfeedAngle = 0.50f,
             ),
             AudioEffectPreset(
                 id = "spatial_8d",
@@ -1103,6 +1182,9 @@ data class AudioEffectsState(
             spatial8dEnabled = preset.spatial8dEnabled,
             spatial8dSpeed = preset.spatial8dSpeed,
             spatial8dDepth = preset.spatial8dDepth,
+            crossfeedEnabled = preset.crossfeedEnabled,
+            crossfeedStrength = preset.crossfeedStrength,
+            crossfeedAngle = preset.crossfeedAngle,
             activePresetId = preset.id,
         ).normalized()
 
@@ -1110,6 +1192,253 @@ data class AudioEffectsState(
             PRESETS.firstOrNull { it.id == id }
     }
 }
+
+/**
+ * Tipo de salida de audio detectada mediante `AudioDeviceCallback` (Android 8.0+).
+ */
+enum class AudioOutputType(
+    val displayLabel: String,
+    val isHeadphones: Boolean,
+) {
+    SPEAKER("Altavoz del teléfono", isHeadphones = false),
+    WIRED_HEADSET("Auriculares por cable", isHeadphones = true),
+    USB_HEADSET("Auriculares USB-C", isHeadphones = true),
+    BLUETOOTH_HEADSET("Auriculares Bluetooth", isHeadphones = true),
+    OTHER("Salida de audio externa", isHeadphones = false),
+}
+
+/**
+ * Estado reactivo de la ruta de salida de audio activa en el dispositivo.
+ */
+data class AudioOutputRouteState(
+    val outputType: AudioOutputType = AudioOutputType.SPEAKER,
+    val deviceName: String = AudioOutputType.SPEAKER.displayLabel,
+    val isHeadphonesConnected: Boolean = false,
+)
+
+/**
+ * Preferencias de comportamiento inteligente para auriculares y botones multimedia (cable / Bluetooth AVRCP).
+ */
+data class HeadphonePreferences(
+    val autoPauseOnDisconnect: Boolean = true,
+    val autoResumeOnConnect: Boolean = false,
+    val autoDisable8dOnSpeaker: Boolean = true,
+    val autoEnableCrossfeedOnHeadphones: Boolean = false,
+    val doubleTapNextEnabled: Boolean = true,
+    val tripleTapPreviousEnabled: Boolean = true,
+    val previousRestartThresholdMs: Long = DEFAULT_PREVIOUS_RESTART_MS,
+    val wrapQueueNavigation: Boolean = true,
+    val seekStepSeconds: Int = DEFAULT_SEEK_STEP_SECONDS,
+) {
+    fun normalized(): HeadphonePreferences = copy(
+        previousRestartThresholdMs = HeadphoneRoutingHelper.clampPreviousRestartThresholdMs(previousRestartThresholdMs),
+        seekStepSeconds = HeadphoneRoutingHelper.clampSeekStepSeconds(seekStepSeconds),
+    )
+
+    companion object {
+        const val DEFAULT_PREVIOUS_RESTART_MS = 3_500L
+        const val DEFAULT_SEEK_STEP_SECONDS = 10
+        val PREVIOUS_THRESHOLD_OPTIONS_MS = listOf(0L, 3_500L, 5_000L, 8_000L)
+        val SEEK_STEP_OPTIONS_SECONDS = listOf(5, 10, 15, 30)
+    }
+}
+
+/**
+ * Parámetros efectivos finalmente enviados al motor Rust tras combinar las preferencias
+ * del usuario con la salida de audio activa (altavoz vs. auriculares).
+ */
+data class EffectiveRustAudioEffects(
+    val spatial8dEnabled: Boolean,
+    val spatial8dBypassedBySpeaker: Boolean,
+    val crossfeedEnabled: Boolean,
+    val crossfeedAutoEnabledByHeadphones: Boolean,
+)
+
+/**
+ * Acción resuelta al pulsar repetidamente el botón físico único (`KEYCODE_HEADSETHOOK`)
+ * de unos auriculares con cable o adaptador.
+ */
+enum class MediaHookTapAction {
+    NONE,
+    TOGGLE_PLAY_PAUSE,
+    SKIP_NEXT,
+    SKIP_PREVIOUS,
+}
+
+/**
+ * Reglas puras y deterministas para enrutamiento de efectos por salida de audio
+ * y comportamiento de botones multimedia cableados / Bluetooth AVRCP.
+ */
+object HeadphoneRoutingHelper {
+
+    fun clampPreviousRestartThresholdMs(ms: Long): Long =
+        ms.coerceIn(0L, 15_000L)
+
+    fun clampSeekStepSeconds(seconds: Int): Int =
+        seconds.coerceIn(5, 60)
+
+    fun resolveEffectiveRustEffects(
+        effects: AudioEffectsState,
+        outputRoute: AudioOutputRouteState,
+        prefs: HeadphonePreferences,
+    ): EffectiveRustAudioEffects {
+        val safeEffects = effects.normalized()
+        val safePrefs = prefs.normalized()
+        val headphonesActive = outputRoute.isHeadphonesConnected
+
+        val spatial8dBypassedBySpeaker =
+            safeEffects.spatial8dEnabled && !headphonesActive && safePrefs.autoDisable8dOnSpeaker
+        val effectiveSpatial8d = safeEffects.spatial8dEnabled && !spatial8dBypassedBySpeaker
+
+        val crossfeedAutoEnabled =
+            !safeEffects.crossfeedEnabled && headphonesActive && safePrefs.autoEnableCrossfeedOnHeadphones
+        val effectiveCrossfeed = safeEffects.crossfeedEnabled || crossfeedAutoEnabled
+
+        return EffectiveRustAudioEffects(
+            spatial8dEnabled = effectiveSpatial8d,
+            spatial8dBypassedBySpeaker = spatial8dBypassedBySpeaker,
+            crossfeedEnabled = effectiveCrossfeed,
+            crossfeedAutoEnabledByHeadphones = crossfeedAutoEnabled,
+        )
+    }
+
+    fun resolveMediaHookTapAction(
+        tapCount: Int,
+        prefs: HeadphonePreferences,
+    ): MediaHookTapAction {
+        if (tapCount <= 0) return MediaHookTapAction.NONE
+        return when {
+            tapCount >= 3 && prefs.tripleTapPreviousEnabled -> MediaHookTapAction.SKIP_PREVIOUS
+            tapCount >= 2 && prefs.doubleTapNextEnabled -> MediaHookTapAction.SKIP_NEXT
+            else -> MediaHookTapAction.TOGGLE_PLAY_PAUSE
+        }
+    }
+
+    fun formatPreviousThresholdLabel(ms: Long): String {
+        val safe = clampPreviousRestartThresholdMs(ms)
+        return when {
+            safe == 0L -> "Siempre previa"
+            safe % 1000L == 0L -> "${safe / 1000L} s"
+            else -> String.format(java.util.Locale.US, "%.1f s", safe / 1000f)
+        }
+    }
+}
+
+/**
+ * Modos soportados por el temporizador de apagado automático de Aura Music.
+ */
+enum class SleepTimerMode {
+    OFF,
+    DURATION,
+    END_OF_TRACK,
+    END_OF_QUEUE,
+}
+
+/**
+ * Estado reactivo del temporizador de apagado automático ejecutado en segundo plano
+ * dentro de `AuraPlaybackService`.
+ */
+data class SleepTimerState(
+    val mode: SleepTimerMode = SleepTimerMode.OFF,
+    val configuredMinutes: Int = 0,
+    val totalDurationMs: Long = 0L,
+    val remainingMs: Long = 0L,
+    val fadeOutOnFinish: Boolean = true,
+) {
+    val isActive: Boolean
+        get() = mode != SleepTimerMode.OFF
+
+    val progressFraction: Float
+        get() = if (mode == SleepTimerMode.DURATION && totalDurationMs > 0L) {
+            (remainingMs.toFloat() / totalDurationMs.toFloat()).coerceIn(0f, 1f)
+        } else {
+            0f
+        }
+}
+
+/**
+ * Reglas puras para validación de minutos personalizados, presets, formato de cuenta atrás
+ * y detección del fin de pista/cola del temporizador de apagado.
+ */
+object SleepTimerHelper {
+    const val MIN_CUSTOM_MINUTES = 1
+    const val MAX_CUSTOM_MINUTES = 480
+    val PRESET_MINUTES = listOf(5, 10, 15, 30, 45, 60, 90)
+
+    fun clampCustomMinutes(minutes: Int): Int =
+        minutes.coerceIn(MIN_CUSTOM_MINUTES, MAX_CUSTOM_MINUTES)
+
+    fun parseCustomMinutesOrNull(rawInput: String): Int? {
+        val cleaned = rawInput.trim()
+        if (cleaned.isEmpty()) return null
+        val parsed = cleaned.toIntOrNull() ?: return null
+        return parsed.takeIf { it in MIN_CUSTOM_MINUTES..MAX_CUSTOM_MINUTES }
+    }
+
+    fun formatPresetLabel(minutes: Int): String {
+        val safe = clampCustomMinutes(minutes)
+        return if (safe >= 60 && safe % 60 == 0) {
+            val hours = safe / 60
+            if (hours == 1) "1 h" else "$hours h"
+        } else {
+            "$safe min"
+        }
+    }
+
+    fun formatCountdown(remainingMs: Long): String {
+        val totalSeconds = ((remainingMs.coerceAtLeast(0L) + 999L) / 1000L)
+        val hours = totalSeconds / 3600L
+        val minutes = (totalSeconds % 3600L) / 60L
+        val seconds = totalSeconds % 60L
+        return if (hours > 0L) {
+            String.format(java.util.Locale.US, "%d:%02d:%02d", hours, minutes, seconds)
+        } else {
+            String.format(java.util.Locale.US, "%02d:%02d", minutes, seconds)
+        }
+    }
+
+    fun formatShortLabel(state: SleepTimerState): String = when (state.mode) {
+        SleepTimerMode.OFF -> "Desactivado"
+        SleepTimerMode.DURATION -> formatCountdown(state.remainingMs)
+        SleepTimerMode.END_OF_TRACK -> "Fin de canción"
+        SleepTimerMode.END_OF_QUEUE -> "Fin de la música"
+    }
+
+    /**
+     * Evita que el Crossfade avance automáticamente a la siguiente canción cuando el usuario
+     * programó detener la reproducción al terminar la pista actual o la última de la cola.
+     */
+    fun shouldBypassCrossfadeForSleepTimer(
+        state: SleepTimerState,
+        hasNextMediaItem: Boolean,
+    ): Boolean = when (state.mode) {
+        SleepTimerMode.END_OF_TRACK -> true
+        SleepTimerMode.END_OF_QUEUE -> !hasNextMediaItem
+        SleepTimerMode.OFF,
+        SleepTimerMode.DURATION -> false
+    }
+
+    /**
+     * Determina si una transición automática de pista debe pausar la reproducción por el temporizador.
+     */
+    fun shouldPauseOnAutoTransition(
+        mode: SleepTimerMode,
+        previousIndex: Int,
+        newIndex: Int,
+        itemCount: Int,
+        reasonIsAuto: Boolean,
+        reasonIsRepeat: Boolean,
+    ): Boolean = when (mode) {
+        SleepTimerMode.END_OF_TRACK -> reasonIsAuto || reasonIsRepeat
+        SleepTimerMode.END_OF_QUEUE -> {
+            val wrappedQueue = reasonIsAuto && itemCount > 0 && previousIndex >= itemCount - 1 && newIndex == 0
+            reasonIsRepeat || wrappedQueue
+        }
+        SleepTimerMode.OFF,
+        SleepTimerMode.DURATION -> false
+    }
+}
+
 
 
 

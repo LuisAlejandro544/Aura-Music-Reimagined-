@@ -1,11 +1,6 @@
 package com.auramusic.app
 
 import android.net.Uri
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.slideInVertically
-import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
@@ -15,24 +10,18 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.Edit
-import androidx.compose.material.icons.rounded.LibraryMusic
-import androidx.compose.material.icons.rounded.QueueMusic
-import androidx.compose.material.icons.rounded.Settings
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.NavigationBar
-import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
@@ -70,7 +59,6 @@ import com.auramusic.feature.downloader.DownloaderScreen
 import com.auramusic.feature.effects.AudioEffectsScreen
 import com.auramusic.feature.equalizer.EqualizerScreen
 import com.auramusic.feature.library.LibraryScreen
-import com.auramusic.feature.player.MiniPlayerBar
 import com.auramusic.feature.player.PlayerScreen
 import com.auramusic.feature.player.QueueScreen
 import com.auramusic.feature.playlists.AddToPlaylistBottomSheet
@@ -78,13 +66,21 @@ import com.auramusic.feature.playlists.ArtistDetailScreen
 import com.auramusic.feature.playlists.LikedSongsScreen
 import com.auramusic.feature.playlists.PlaylistDetailScreen
 import com.auramusic.feature.playlists.PlaylistsScreen
+import com.auramusic.feature.settings.SettingsAccentThemeScreen
+import com.auramusic.feature.settings.SettingsHeadphonesScreen
+import com.auramusic.feature.settings.SettingsMediaButtonsScreen
 import com.auramusic.feature.settings.SettingsScreen
+import com.auramusic.feature.settings.SettingsVisualEffectsScreen
 import kotlinx.coroutines.launch
 
 private object AuraRoutes {
     const val LIBRARY = "library"
     const val PLAYLISTS = "playlists"
     const val SETTINGS = "settings"
+    const val SETTINGS_THEME = "settings/theme"
+    const val SETTINGS_VISUAL_FX = "settings/visual_fx"
+    const val SETTINGS_HEADPHONES = "settings/headphones"
+    const val SETTINGS_MEDIA_BUTTONS = "settings/media_buttons"
     const val EQUALIZER = "equalizer"
     const val AUDIO_EFFECTS = "audio_effects"
     const val DOWNLOADER = "downloader"
@@ -115,6 +111,7 @@ fun AuraAppRoot(viewModel: AuraViewModel) {
     val playlists by viewModel.playlists.collectAsStateWithLifecycle()
     val artistPlaylists by viewModel.artistPlaylists.collectAsStateWithLifecycle()
     val playbackState by viewModel.playbackState.collectAsStateWithLifecycle()
+    val sleepTimerState by viewModel.sleepTimerState.collectAsStateWithLifecycle()
     val importProgress by viewModel.importProgress.collectAsStateWithLifecycle()
     val downloadState by viewModel.downloadState.collectAsStateWithLifecycle()
     val downloaderEngineStatus by viewModel.downloaderEngineStatus.collectAsStateWithLifecycle()
@@ -124,6 +121,8 @@ fun AuraAppRoot(viewModel: AuraViewModel) {
     val equalizerState by viewModel.equalizerState.collectAsStateWithLifecycle()
     val audioEffects by viewModel.audioEffects.collectAsStateWithLifecycle()
     val playbackTuning by viewModel.playbackTuning.collectAsStateWithLifecycle()
+    val headphonePreferences by viewModel.headphonePreferences.collectAsStateWithLifecycle()
+    val audioOutputRoute by viewModel.audioOutputRoute.collectAsStateWithLifecycle()
     val rustEngineInfo by viewModel.rustEngineInfo.collectAsStateWithLifecycle()
 
     val snackbarHostState = remember { SnackbarHostState() }
@@ -168,34 +167,20 @@ fun AuraAppRoot(viewModel: AuraViewModel) {
 
     var trackForPlaylistSheet by remember { mutableStateOf<Track?>(null) }
     var trackPendingMetadataEdit by remember { mutableStateOf<Track?>(null) }
-    var pendingCoverTrackId by remember { mutableStateOf<Long?>(null) }
 
-    // Launchers del Storage Access Framework (SAF) para los 3 modos de importación manual.
-    val singleFileLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.OpenDocument(),
-    ) { uri ->
-        if (uri != null) viewModel.importFiles(listOf(uri))
-    }
+    val safLaunchers = rememberAuraSafLaunchers(
+        onImportFiles = viewModel::importFiles,
+        onImportFolder = viewModel::importFolder,
+        onSetCustomTrackCover = viewModel::setCustomTrackCover,
+    )
 
-    val multipleFilesLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.OpenMultipleDocuments(),
-    ) { uris ->
-        if (uris.isNotEmpty()) viewModel.importFiles(uris)
-    }
-
-    val folderTreeLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.OpenDocumentTree(),
-    ) { treeUri ->
-        if (treeUri != null) viewModel.importFolder(treeUri)
-    }
-
-    val galleryCoverLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.GetContent(),
-    ) { imageUri ->
-        val targetTrackId = pendingCoverTrackId
-        pendingCoverTrackId = null
-        if (imageUri != null && targetTrackId != null) {
-            viewModel.setCustomTrackCover(targetTrackId, imageUri)
+    val navigateTopTab: (String) -> Unit = { route ->
+        navController.navigate(route) {
+            popUpTo(navController.graph.findStartDestination().id) {
+                saveState = true
+            }
+            launchSingleTop = true
+            restoreState = true
         }
     }
 
@@ -210,83 +195,38 @@ fun AuraAppRoot(viewModel: AuraViewModel) {
         snackbarHost = { SnackbarHost(hostState = snackbarHostState) },
         bottomBar = {
             if (showBottomChrome) {
-                Column(modifier = Modifier.navigationBarsPadding()) {
-                    AnimatedVisibility(
-                        visible = playbackState.currentTrack != null,
-                        enter = slideInVertically { it },
-                        exit = slideOutVertically { it },
-                    ) {
-                        MiniPlayerBar(
-                            playbackState = playbackState,
-                            dynamicCoverColorsEnabled = dynamicCoverColorsEnabled,
-                            onOpenFullPlayer = {
-                                navController.navigate(AuraRoutes.PLAYER) {
-                                    launchSingleTop = true
-                                }
-                            },
-                            onTogglePlayPause = viewModel::togglePlayPause,
-                            onSkipNext = viewModel::skipNext,
-                            onToggleLike = viewModel::toggleLike,
-                        )
-                    }
-
-                    NavigationBar(
-                        containerColor = MaterialTheme.colorScheme.surfaceContainer,
-                    ) {
-                        NavigationBarItem(
-                            selected = currentRoute == AuraRoutes.LIBRARY,
-                            onClick = {
-                                navController.navigate(AuraRoutes.LIBRARY) {
-                                    popUpTo(navController.graph.findStartDestination().id) {
-                                        saveState = true
-                                    }
-                                    launchSingleTop = true
-                                    restoreState = true
-                                }
-                            },
-                            icon = { Icon(Icons.Rounded.LibraryMusic, contentDescription = null) },
-                            label = { Text("Biblioteca") },
-                        )
-                        NavigationBarItem(
-                            selected = currentRoute == AuraRoutes.PLAYLISTS ||
-                                currentRoute == AuraRoutes.LIKED ||
-                                currentRoute == AuraRoutes.PLAYLIST_DETAIL ||
-                                currentRoute == AuraRoutes.ARTIST_DETAIL,
-                            onClick = {
-                                navController.navigate(AuraRoutes.PLAYLISTS) {
-                                    popUpTo(navController.graph.findStartDestination().id) {
-                                        saveState = true
-                                    }
-                                    launchSingleTop = true
-                                    restoreState = true
-                                }
-                            },
-                            icon = { Icon(Icons.Rounded.QueueMusic, contentDescription = null) },
-                            label = { Text("Playlists") },
-                        )
-                        NavigationBarItem(
-                            selected = currentRoute == AuraRoutes.SETTINGS,
-                            onClick = {
-                                navController.navigate(AuraRoutes.SETTINGS) {
-                                    popUpTo(navController.graph.findStartDestination().id) {
-                                        saveState = true
-                                    }
-                                    launchSingleTop = true
-                                    restoreState = true
-                                }
-                            },
-                            icon = { Icon(Icons.Rounded.Settings, contentDescription = null) },
-                            label = { Text("Ajustes") },
-                        )
-                    }
-                }
+                AuraBottomChrome(
+                    playbackState = playbackState,
+                    dynamicCoverColorsEnabled = dynamicCoverColorsEnabled,
+                    isLibrarySelected = currentRoute == AuraRoutes.LIBRARY,
+                    isPlaylistsSelected = currentRoute == AuraRoutes.PLAYLISTS ||
+                        currentRoute == AuraRoutes.LIKED ||
+                        currentRoute == AuraRoutes.PLAYLIST_DETAIL ||
+                        currentRoute == AuraRoutes.ARTIST_DETAIL,
+                    isSettingsSelected = currentRoute == AuraRoutes.SETTINGS ||
+                        currentRoute == AuraRoutes.SETTINGS_THEME ||
+                        currentRoute == AuraRoutes.SETTINGS_VISUAL_FX ||
+                        currentRoute == AuraRoutes.SETTINGS_HEADPHONES ||
+                        currentRoute == AuraRoutes.SETTINGS_MEDIA_BUTTONS,
+                    onOpenFullPlayer = {
+                        navController.navigate(AuraRoutes.PLAYER) {
+                            launchSingleTop = true
+                        }
+                    },
+                    onTogglePlayPause = viewModel::togglePlayPause,
+                    onSkipNext = viewModel::skipNext,
+                    onToggleLike = viewModel::toggleLike,
+                    onSelectLibrary = { navigateTopTab(AuraRoutes.LIBRARY) },
+                    onSelectPlaylists = { navigateTopTab(AuraRoutes.PLAYLISTS) },
+                    onSelectSettings = { navigateTopTab(AuraRoutes.SETTINGS) },
+                )
             }
         },
     ) { innerPadding ->
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(bottom = if (showBottomChrome) innerPadding.calculateBottomPadding() else innerPadding.calculateBottomPadding()),
+                .padding(bottom = innerPadding.calculateBottomPadding()),
             contentAlignment = Alignment.Center,
         ) {
             NavHost(
@@ -299,9 +239,9 @@ fun AuraAppRoot(viewModel: AuraViewModel) {
                         likedCount = likedCount,
                         currentPlayingTrackId = playbackState.currentTrack?.id,
                         importProgress = importProgress,
-                        onImportSingleTrack = { singleFileLauncher.launch(arrayOf("audio/*")) },
-                        onImportMultipleTracks = { multipleFilesLauncher.launch(arrayOf("audio/*")) },
-                        onImportFolder = { folderTreeLauncher.launch(null) },
+                        onImportSingleTrack = safLaunchers.pickSingleAudio,
+                        onImportMultipleTracks = safLaunchers.pickMultipleAudio,
+                        onImportFolder = safLaunchers.pickFolderTree,
                         onPlayTrack = viewModel::playQueue,
                         onToggleLike = viewModel::toggleLike,
                         onPlayNext = { track ->
@@ -314,10 +254,7 @@ fun AuraAppRoot(viewModel: AuraViewModel) {
                         },
                         onAddToPlaylist = { track -> trackForPlaylistSheet = track },
                         onEditMetadata = { track -> trackPendingMetadataEdit = track },
-                        onChangeCover = { track ->
-                            pendingCoverTrackId = track.id
-                            galleryCoverLauncher.launch("image/*")
-                        },
+                        onChangeCover = { track -> safLaunchers.pickCustomCoverForTrack(track.id) },
                         onDeleteTrack = viewModel::deleteTrack,
                         onOpenLikedSongs = { navController.navigate(AuraRoutes.LIKED) },
                         onDismissImportMessage = viewModel::dismissImportMessage,
@@ -442,9 +379,70 @@ fun AuraAppRoot(viewModel: AuraViewModel) {
                         dynamicCoverColorsEnabled = dynamicCoverColorsEnabled,
                         deleteAnimationsEnabled = deleteAnimationsEnabled,
                         rustEngineInfo = rustEngineInfo,
+                        outputRoute = audioOutputRoute,
+                        headphonePreferences = headphonePreferences,
+                        onOpenAccentTheme = {
+                            navController.navigate(AuraRoutes.SETTINGS_THEME) {
+                                launchSingleTop = true
+                            }
+                        },
+                        onOpenVisualEffects = {
+                            navController.navigate(AuraRoutes.SETTINGS_VISUAL_FX) {
+                                launchSingleTop = true
+                            }
+                        },
+                        onOpenHeadphoneSettings = {
+                            navController.navigate(AuraRoutes.SETTINGS_HEADPHONES) {
+                                launchSingleTop = true
+                            }
+                        },
+                        onOpenMediaButtons = {
+                            navController.navigate(AuraRoutes.SETTINGS_MEDIA_BUTTONS) {
+                                launchSingleTop = true
+                            }
+                        },
+                    )
+                }
+
+                composable(AuraRoutes.SETTINGS_THEME) {
+                    SettingsAccentThemeScreen(
+                        selectedAccent = accentColor,
                         onSelectAccent = viewModel::selectAccentColor,
+                        onBack = { navController.popBackStack() },
+                    )
+                }
+
+                composable(AuraRoutes.SETTINGS_VISUAL_FX) {
+                    SettingsVisualEffectsScreen(
+                        dynamicCoverColorsEnabled = dynamicCoverColorsEnabled,
+                        deleteAnimationsEnabled = deleteAnimationsEnabled,
                         onToggleDynamicCoverColors = viewModel::setDynamicCoverColorsEnabled,
                         onToggleDeleteAnimations = viewModel::setDeleteAnimationsEnabled,
+                        onBack = { navController.popBackStack() },
+                    )
+                }
+
+                composable(AuraRoutes.SETTINGS_HEADPHONES) {
+                    SettingsHeadphonesScreen(
+                        outputRoute = audioOutputRoute,
+                        headphonePreferences = headphonePreferences,
+                        onSetAutoPauseOnDisconnect = viewModel::setAutoPauseOnDisconnect,
+                        onSetAutoResumeOnConnect = viewModel::setAutoResumeOnConnect,
+                        onSetAutoDisable8dOnSpeaker = viewModel::setAutoDisable8dOnSpeaker,
+                        onSetAutoEnableCrossfeedOnHeadphones = viewModel::setAutoEnableCrossfeedOnHeadphones,
+                        onBack = { navController.popBackStack() },
+                    )
+                }
+
+                composable(AuraRoutes.SETTINGS_MEDIA_BUTTONS) {
+                    SettingsMediaButtonsScreen(
+                        headphonePreferences = headphonePreferences,
+                        onSetDoubleTapNext = viewModel::setDoubleTapNextEnabled,
+                        onSetTripleTapPrevious = viewModel::setTripleTapPreviousEnabled,
+                        onSetWrapQueueNavigation = viewModel::setWrapQueueNavigation,
+                        onSetPreviousRestartThresholdMs = viewModel::setPreviousRestartThresholdMs,
+                        onSetSeekStepSeconds = viewModel::setSeekStepSeconds,
+                        onBack = { navController.popBackStack() },
                     )
                 }
 
@@ -509,6 +507,11 @@ fun AuraAppRoot(viewModel: AuraViewModel) {
                         onSetSpatial8dSpeed = viewModel::setSpatial8dSpeed,
                         onSetSpatial8dDepth = viewModel::setSpatial8dDepth,
                         onReset = viewModel::resetAudioEffects,
+                        outputRoute = audioOutputRoute,
+                        headphonePreferences = headphonePreferences,
+                        onSetCrossfeedEnabled = viewModel::setCrossfeedEnabled,
+                        onSetCrossfeedStrength = viewModel::setCrossfeedStrength,
+                        onSetCrossfeedAngle = viewModel::setCrossfeedAngle,
                     )
                 }
 
@@ -517,6 +520,7 @@ fun AuraAppRoot(viewModel: AuraViewModel) {
                         playbackState = playbackState,
                         playbackTuning = playbackTuning,
                         audioEffects = audioEffects,
+                        sleepTimerState = sleepTimerState,
                         dynamicCoverColorsEnabled = dynamicCoverColorsEnabled,
                         onCollapse = { navController.popBackStack() },
                         onTogglePlayPause = viewModel::togglePlayPause,
@@ -528,10 +532,7 @@ fun AuraAppRoot(viewModel: AuraViewModel) {
                         onToggleLike = viewModel::toggleLike,
                         onOpenAddToPlaylist = { track -> trackForPlaylistSheet = track },
                         onEditMetadata = { track -> trackPendingMetadataEdit = track },
-                        onChangeCover = { track ->
-                            pendingCoverTrackId = track.id
-                            galleryCoverLauncher.launch("image/*")
-                        },
+                        onChangeCover = { track -> safLaunchers.pickCustomCoverForTrack(track.id) },
                         onOpenEqualizer = {
                             navController.navigate(AuraRoutes.EQUALIZER) {
                                 launchSingleTop = true
@@ -548,8 +549,16 @@ fun AuraAppRoot(viewModel: AuraViewModel) {
                             }
                         },
                         onSetPlaybackSpeed = viewModel::setPlaybackSpeed,
+                        onSetPlaybackPitch = viewModel::setPlaybackPitch,
+                        onSetLinkPitchToSpeed = viewModel::setLinkPitchToSpeed,
+                        onResetSpeedAndPitch = viewModel::resetPlaybackSpeedAndPitch,
                         onSetCrossfadeEnabled = viewModel::setCrossfadeEnabled,
                         onSetCrossfadeSeconds = viewModel::setCrossfadeSeconds,
+                        onStartSleepTimerMinutes = viewModel::startSleepTimerMinutes,
+                        onSetSleepTimerEndOfTrack = viewModel::setSleepTimerEndOfTrack,
+                        onSetSleepTimerEndOfQueue = viewModel::setSleepTimerEndOfQueue,
+                        onAddSleepTimerMinutes = viewModel::addSleepTimerMinutes,
+                        onCancelSleepTimer = viewModel::cancelSleepTimer,
                     )
                 }
 

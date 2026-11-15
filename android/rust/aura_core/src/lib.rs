@@ -10,6 +10,7 @@ use jni::objects::{JByteArray, JByteBuffer, JClass, JFloatArray, JString};
 use jni::sys::{JNI_FALSE, JNI_TRUE, jboolean, jfloat, jint, jlong, jstring};
 
 mod artwork;
+mod crossfeed;
 mod delete_fx;
 mod equalizer;
 pub mod js_runtime;
@@ -210,7 +211,7 @@ pub extern "system" fn Java_com_auramusic_core_rust_AuraRustBridge_nativeSetEqua
     equalizer::set_equalizer_config(enabled != JNI_FALSE, &bands);
 }
 
-/// Actualiza en Rust los parámetros de Reverberación estéreo, calidez analógica Slowed y Audio 8D.
+/// Actualiza en Rust los parámetros de Reverberación estéreo, calidez analógica Slowed, Audio 8D y Crossfeed binaural.
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_com_auramusic_core_rust_AuraRustBridge_nativeSetAudioEffectsConfig(
     _env: JNIEnv,
@@ -225,6 +226,9 @@ pub extern "system" fn Java_com_auramusic_core_rust_AuraRustBridge_nativeSetAudi
     spatial_8d_enabled: jboolean,
     spatial_8d_speed: jfloat,
     spatial_8d_depth: jfloat,
+    crossfeed_enabled: jboolean,
+    crossfeed_strength: jfloat,
+    crossfeed_angle: jfloat,
 ) {
     init_android_logger();
     reverb::set_audio_effects_config(reverb::AudioEffectsConfig {
@@ -238,6 +242,9 @@ pub extern "system" fn Java_com_auramusic_core_rust_AuraRustBridge_nativeSetAudi
         spatial_8d_enabled: spatial_8d_enabled != JNI_FALSE,
         spatial_8d_speed,
         spatial_8d_depth,
+        crossfeed_enabled: crossfeed_enabled != JNI_FALSE,
+        crossfeed_strength,
+        crossfeed_angle,
     });
 }
 

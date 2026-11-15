@@ -3,17 +3,20 @@ package com.auramusic.core.player
 import android.content.ComponentName
 import android.content.Context
 import android.net.Uri
+import android.os.Bundle
 import androidx.core.net.toUri
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
 import androidx.media3.common.PlaybackParameters
 import androidx.media3.common.Player
 import androidx.media3.session.MediaController
+import androidx.media3.session.SessionCommand
 import androidx.media3.session.SessionToken
 import com.auramusic.core.model.PlaybackQueueHelper
 import com.auramusic.core.model.PlaybackState
 import com.auramusic.core.model.PlaybackTuningHelper
 import com.auramusic.core.model.RepeatMode
+import com.auramusic.core.model.SleepTimerState
 import com.auramusic.core.model.Track
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -42,6 +45,8 @@ class AuraPlayerController(
     private val _playbackState = MutableStateFlow(PlaybackState())
     val playbackState: StateFlow<PlaybackState> = _playbackState.asStateFlow()
 
+    val sleepTimerState: StateFlow<SleepTimerState> = AuraSleepTimerBridge.sleepTimerState
+
     private var controller: MediaController? = null
     private var connectJob: Job? = null
     private var progressTickerJob: Job? = null
@@ -50,6 +55,9 @@ class AuraPlayerController(
     private var isUiAttached: Boolean = true
     private var pendingQueue: Pair<List<Track>, Int>? = null
     private val pendingActions = mutableListOf<(MediaController) -> Unit>()
+    private var previousRestartThresholdMs: Long =
+        com.auramusic.core.model.HeadphonePreferences.DEFAULT_PREVIOUS_RESTART_MS
+    private var wrapQueueNavigation: Boolean = true
 
     private val playerListener = object : Player.Listener {
         override fun onIsPlayingChanged(isPlaying: Boolean) {
@@ -388,10 +396,25 @@ class AuraPlayerController(
         }
     }
 
+    fun updateHeadphoneControlTuning(
+        previousRestartThresholdMs: Long,
+        wrapQueueNavigation: Boolean,
+    ) {
+        this.previousRestartThresholdMs =
+            com.auramusic.core.model.HeadphoneRoutingHelper.clampPreviousRestartThresholdMs(
+                previousRestartThresholdMs,
+            )
+        this.wrapQueueNavigation = wrapQueueNavigation
+    }
+
     fun skipToNext() {
         withConnectedPlayer { player ->
             if (player.hasNextMediaItem()) {
                 player.seekToNextMediaItem()
+                player.play()
+                syncStateFromPlayer()
+            } else if (wrapQueueNavigation && player.mediaItemCount > 0) {
+                player.seekTo(0, 0L)
                 player.play()
                 syncStateFromPlayer()
             }
@@ -400,10 +423,13 @@ class AuraPlayerController(
 
     fun skipToPrevious() {
         withConnectedPlayer { player ->
-            if (player.currentPosition > 3_500L) {
+            if (previousRestartThresholdMs > 0L && player.currentPosition > previousRestartThresholdMs) {
                 player.seekTo(0L)
             } else if (player.hasPreviousMediaItem()) {
                 player.seekToPreviousMediaItem()
+                player.play()
+            } else if (wrapQueueNavigation && player.mediaItemCount > 1) {
+                player.seekTo(player.mediaItemCount - 1, 0L)
                 player.play()
             } else {
                 player.seekTo(0L)
@@ -443,15 +469,69 @@ class AuraPlayerController(
     }
 
     /**
-     * Ajusta velocidad y tono en tiempo real (usado por el modo Slowed con estilo cinta/vinilo).
+     * Ajusta velocidad y tono/velocidad de voz en tiempo real en el servicio Media3.
      */
     fun setPlaybackParameters(speed: Float, pitch: Float) {
-        val safeSpeed = if (speed.isFinite()) speed.coerceIn(0.5f, 2.0f) else 1.0f
-        val safePitch = if (pitch.isFinite()) pitch.coerceIn(0.5f, 2.0f) else 1.0f
-        _playbackState.update { it.copy(playbackSpeed = safeSpeed) }
+        val safeSpeed = PlaybackTuningHelper.clampPlaybackSpeed(speed)
+        val safePitch = PlaybackTuningHelper.clampPlaybackPitch(pitch)
+        _playbackState.update { it.copy(playbackSpeed = safeSpeed, playbackPitch = safePitch) }
         withConnectedPlayer { player ->
             player.playbackParameters = PlaybackParameters(safeSpeed, safePitch)
             syncStateFromPlayer()
+        }
+    }
+
+    /**
+     * Inicia el temporizador de apagado automático por duración en minutos.
+     */
+    fun startSleepTimerMinutes(minutes: Int, fadeOutOnFinish: Boolean = true) {
+        val args = Bundle().apply {
+            putInt(AuraSleepTimerContract.EXTRA_MINUTES, minutes)
+            putBoolean(AuraSleepTimerContract.EXTRA_FADE_OUT, fadeOutOnFinish)
+        }
+        sendSleepTimerCommand(AuraSleepTimerContract.ACTION_START_MINUTES, args)
+    }
+
+    /**
+     * Programa detener la música automáticamente al finalizar la canción actual.
+     */
+    fun setSleepTimerEndOfTrack(fadeOutOnFinish: Boolean = true) {
+        val args = Bundle().apply {
+            putBoolean(AuraSleepTimerContract.EXTRA_FADE_OUT, fadeOutOnFinish)
+        }
+        sendSleepTimerCommand(AuraSleepTimerContract.ACTION_SET_END_OF_TRACK, args)
+    }
+
+    /**
+     * Programa detener la música al terminar todas las canciones en la cola actual.
+     */
+    fun setSleepTimerEndOfQueue(fadeOutOnFinish: Boolean = true) {
+        val args = Bundle().apply {
+            putBoolean(AuraSleepTimerContract.EXTRA_FADE_OUT, fadeOutOnFinish)
+        }
+        sendSleepTimerCommand(AuraSleepTimerContract.ACTION_SET_END_OF_QUEUE, args)
+    }
+
+    /**
+     * Añade o resta minutos al temporizador de duración activo.
+     */
+    fun addSleepTimerMinutes(deltaMinutes: Int) {
+        val args = Bundle().apply {
+            putInt(AuraSleepTimerContract.EXTRA_DELTA_MINUTES, deltaMinutes)
+        }
+        sendSleepTimerCommand(AuraSleepTimerContract.ACTION_ADD_MINUTES, args)
+    }
+
+    /**
+     * Cancela cualquier temporizador de apagado automático activo.
+     */
+    fun cancelSleepTimer() {
+        sendSleepTimerCommand(AuraSleepTimerContract.ACTION_CANCEL, Bundle.EMPTY)
+    }
+
+    private fun sendSleepTimerCommand(action: String, args: Bundle) {
+        withConnectedPlayer { player ->
+            player.sendCustomCommand(SessionCommand(action, Bundle.EMPTY), args)
         }
     }
 
@@ -502,6 +582,7 @@ class AuraPlayerController(
     private fun syncStateFromPlayer() {
         val player = controller?.takeIf { it.isConnected } ?: return
         val speed = PlaybackTuningHelper.clampPlaybackSpeed(player.playbackParameters.speed)
+        val pitch = PlaybackTuningHelper.clampPlaybackPitch(player.playbackParameters.pitch)
 
         if (player.mediaItemCount == 0) {
             activeQueue = emptyList()
@@ -520,6 +601,7 @@ class AuraPlayerController(
                         else -> RepeatMode.OFF
                     },
                     playbackSpeed = speed,
+                    playbackPitch = pitch,
                 )
             }
             return
@@ -549,6 +631,7 @@ class AuraPlayerController(
                     else -> RepeatMode.OFF
                 },
                 playbackSpeed = speed,
+                playbackPitch = pitch,
             )
         }
     }

@@ -557,6 +557,10 @@ test('yt-dlp downloads run in background foreground service (dataSync) with canc
     path.join(rootDir, 'android/app/src/main/kotlin/com/auramusic/app/AuraViewModel.kt'),
     'utf8',
   );
+  const libraryCoordinatorKt = fs.readFileSync(
+    path.join(rootDir, 'android/app/src/main/kotlin/com/auramusic/app/AuraLibraryCoordinator.kt'),
+    'utf8',
+  );
   const downloaderScreenKt = fs.readFileSync(
     path.join(rootDir, 'android/feature/downloader/src/main/kotlin/com/auramusic/feature/downloader/DownloaderScreen.kt'),
     'utf8',
@@ -581,7 +585,8 @@ test('yt-dlp downloads run in background foreground service (dataSync) with canc
   assert.match(pyScript, /cancel_check/);
 
   assert.match(appKt, /AuraDownloadHost/);
-  assert.match(vmKt, /startBackgroundConfirmedDownload/);
+  assert.match(libraryCoordinatorKt, /startBackgroundConfirmedDownload/);
+  assert.match(vmKt, /confirmPendingDownload/);
   assert.match(vmKt, /cancelActiveDownload/);
   assert.match(downloaderScreenKt, /onCancelDownload/);
   assert.match(downloaderScreenKt, /DownloadStatus\.CANCELLED/);
@@ -1125,6 +1130,311 @@ test('Rust stereo Reverb (Freeverb), Slowed, and Spatial 8D integrate modularly 
   assert.match(rootKt, /AuraRoutes\.AUDIO_EFFECTS/);
   assert.match(rootKt, /AudioEffectsScreen\(/);
 });
+
+test('headphone output detection (AudioDeviceCallback without extra BT perms), Rust static Crossfeed, and wired/AVRCP media button tuning integrate cleanly', () => {
+  const crossfeedRs = path.join(rootDir, 'android/rust/aura_core/src/crossfeed.rs');
+  const reverbRs = fs.readFileSync(path.join(rootDir, 'android/rust/aura_core/src/reverb.rs'), 'utf8');
+  const eqRs = fs.readFileSync(path.join(rootDir, 'android/rust/aura_core/src/equalizer.rs'), 'utf8');
+  const rustLib = fs.readFileSync(path.join(rootDir, 'android/rust/aura_core/src/lib.rs'), 'utf8');
+  const bridgeKt = fs.readFileSync(
+    path.join(rootDir, 'android/core/rust/src/main/kotlin/com/auramusic/core/rust/AuraRustBridge.kt'),
+    'utf8',
+  );
+  const manifestXml = fs.readFileSync(path.join(rootDir, 'android/app/src/main/AndroidManifest.xml'), 'utf8');
+  const modelsKt = fs.readFileSync(
+    path.join(rootDir, 'android/core/model/src/main/kotlin/com/auramusic/core/model/AuraModels.kt'),
+    'utf8',
+  );
+  const modelsTestKt = fs.readFileSync(
+    path.join(rootDir, 'android/core/model/src/test/kotlin/com/auramusic/core/model/AuraModelsTest.kt'),
+    'utf8',
+  );
+  const reposKt = fs.readFileSync(
+    path.join(rootDir, 'android/core/database/src/main/kotlin/com/auramusic/core/database/AuraRepositories.kt'),
+    'utf8',
+  );
+  const monitorKt = path.join(
+    rootDir,
+    'android/core/player/src/main/kotlin/com/auramusic/core/player/AuraAudioOutputMonitor.kt',
+  );
+  const serviceKt = fs.readFileSync(
+    path.join(rootDir, 'android/core/player/src/main/kotlin/com/auramusic/core/player/AuraPlaybackService.kt'),
+    'utf8',
+  );
+  const controllerKt = fs.readFileSync(
+    path.join(rootDir, 'android/core/player/src/main/kotlin/com/auramusic/core/player/AuraPlayerController.kt'),
+    'utf8',
+  );
+  const effectsScreenKt = fs.readFileSync(
+    path.join(rootDir, 'android/feature/effects/src/main/kotlin/com/auramusic/feature/effects/AudioEffectsScreen.kt'),
+    'utf8',
+  );
+  const settingsScreenKt = fs.readFileSync(
+    path.join(rootDir, 'android/feature/settings/src/main/kotlin/com/auramusic/feature/settings/SettingsScreen.kt'),
+    'utf8',
+  );
+  const appKt = fs.readFileSync(
+    path.join(rootDir, 'android/app/src/main/kotlin/com/auramusic/app/AuraApplication.kt'),
+    'utf8',
+  );
+  const vmKt = fs.readFileSync(
+    path.join(rootDir, 'android/app/src/main/kotlin/com/auramusic/app/AuraViewModel.kt'),
+    'utf8',
+  );
+  const rootKt = fs.readFileSync(
+    path.join(rootDir, 'android/app/src/main/kotlin/com/auramusic/app/AuraAppRoot.kt'),
+    'utf8',
+  );
+
+  // 1. Crossfeed binaural estático en Rust (sin fallbacks en Kotlin)
+  assert.ok(fs.existsSync(crossfeedRs), 'Missing android/rust/aura_core/src/crossfeed.rs');
+  const crossfeedCode = fs.readFileSync(crossfeedRs, 'utf8');
+  assert.match(crossfeedCode, /struct StaticCrossfeedProcessor/);
+  assert.match(crossfeedCode, /struct CrossfeedDelayLine/);
+  assert.match(crossfeedCode, /lpf_l_to_r/);
+  assert.match(reverbRs, /crossfeed:\s*StaticCrossfeedProcessor/);
+  assert.match(reverbRs, /crossfeed_enabled:\s*bool/);
+  assert.match(eqRs, /crossfeed_enabled:/);
+  assert.match(rustLib, /mod crossfeed;/);
+  assert.match(rustLib, /crossfeed_enabled:\s*jboolean/);
+  assert.match(bridgeKt, /crossfeedEnabled:\s*Boolean/);
+
+  // 2. Detección de salida con AudioDeviceCallback (minSdk 26, sin permisos Bluetooth extra)
+  assert.ok(fs.existsSync(monitorKt), 'Missing AuraAudioOutputMonitor.kt');
+  const monitorCode = fs.readFileSync(monitorKt, 'utf8');
+  assert.match(monitorCode, /AudioDeviceCallback/);
+  assert.match(monitorCode, /GET_DEVICES_OUTPUTS/);
+  assert.doesNotMatch(manifestXml, /BLUETOOTH_CONNECT|BLUETOOTH_SCAN|BLUETOOTH_ADMIN/);
+
+  // 3. Modelos puros y pruebas unitarias Kotlin
+  assert.match(modelsKt, /enum class AudioOutputType/);
+  assert.match(modelsKt, /data class AudioOutputRouteState/);
+  assert.match(modelsKt, /data class HeadphonePreferences/);
+  assert.match(modelsKt, /object HeadphoneRoutingHelper/);
+  assert.match(modelsKt, /"headphone_crossfeed"/);
+  assert.match(modelsTestKt, /HeadphoneRoutingHelper\.resolveEffectiveRustEffects/);
+  assert.match(modelsTestKt, /HeadphoneRoutingHelper\.resolveMediaHookTapAction/);
+
+  // 4. Persistencia DataStore
+  assert.match(reposKt, /class HeadphonePreferencesRepository/);
+  assert.match(reposKt, /fx_crossfeed_enabled/);
+  assert.match(reposKt, /hp_seek_step_sec/);
+
+  // 5. Servicio Media3, AVRCP y KEYCODE_HEADSETHOOK
+  assert.match(serviceKt, /fun observeHeadphonePreferences\(/);
+  assert.match(serviceKt, /fun observeAudioOutputRoute\(/);
+  assert.match(serviceKt, /class AuraMediaSessionCallback/);
+  assert.match(serviceKt, /KEYCODE_HEADSETHOOK/);
+  assert.match(serviceKt, /COMMAND_SEEK_FORWARD/);
+  assert.match(serviceKt, /COMMAND_SEEK_BACK/);
+  assert.match(serviceKt, /getSeekForwardIncrement/);
+  assert.match(controllerKt, /fun updateHeadphoneControlTuning\(/);
+
+  // 6. UI desacoplada en :feature:effects y :feature:settings
+  assert.match(effectsScreenKt, /StaticCrossfeedCard/);
+  assert.match(effectsScreenKt, /OutputRouteEffectsBanner/);
+  assert.match(settingsScreenKt, /Auriculares y salida de audio/);
+  assert.match(settingsScreenKt, /Botones multimedia \(Cable y Bluetooth AVRCP\)/);
+
+  // 7. Conexión reactiva en :app
+  assert.match(appKt, /audioOutputMonitor/);
+  assert.match(appKt, /headphonePreferencesRepository/);
+  assert.match(vmKt, /val audioOutputRoute:\s*StateFlow<AudioOutputRouteState>/);
+  assert.match(vmKt, /fun setCrossfeedEnabled\(/);
+  assert.match(vmKt, /fun setSeekStepSeconds\(/);
+  assert.match(rootKt, /onSetCrossfeedEnabled\s*=\s*viewModel::setCrossfeedEnabled/);
+  assert.match(rootKt, /onSetSeekStepSeconds\s*=\s*viewModel::setSeekStepSeconds/);
+});
+
+test('SettingsScreen acts as a clickable category hub navigating to dedicated sub-screens', () => {
+  const settingsKt = fs.readFileSync(
+    path.join(rootDir, 'android/feature/settings/src/main/kotlin/com/auramusic/feature/settings/SettingsScreen.kt'),
+    'utf8',
+  );
+  const rootKt = fs.readFileSync(
+    path.join(rootDir, 'android/app/src/main/kotlin/com/auramusic/app/AuraAppRoot.kt'),
+    'utf8',
+  );
+
+  // Hub de categorías en SettingsScreen
+  assert.match(settingsKt, /onOpenAccentTheme:\s*\(\) -> Unit/);
+  assert.match(settingsKt, /onOpenVisualEffects:\s*\(\) -> Unit/);
+  assert.match(settingsKt, /onOpenHeadphoneSettings:\s*\(\) -> Unit/);
+  assert.match(settingsKt, /onOpenMediaButtons:\s*\(\) -> Unit/);
+  assert.match(settingsKt, /Colores dinámicos y animación al eliminar/);
+  assert.match(settingsKt, /private fun SettingsCategoryCard\(/);
+
+  // Subpantallas dedicadas con botón volver
+  assert.match(settingsKt, /fun SettingsAccentThemeScreen\(/);
+  assert.match(settingsKt, /fun SettingsVisualEffectsScreen\(/);
+  assert.match(settingsKt, /fun SettingsHeadphonesScreen\(/);
+  assert.match(settingsKt, /fun SettingsMediaButtonsScreen\(/);
+
+  // Rutas de navegación en AuraAppRoot
+  assert.match(rootKt, /SETTINGS_THEME\s*=\s*"settings\/theme"/);
+  assert.match(rootKt, /SETTINGS_VISUAL_FX\s*=\s*"settings\/visual_fx"/);
+  assert.match(rootKt, /SETTINGS_HEADPHONES\s*=\s*"settings\/headphones"/);
+  assert.match(rootKt, /SETTINGS_MEDIA_BUTTONS\s*=\s*"settings\/media_buttons"/);
+  assert.match(rootKt, /SettingsAccentThemeScreen\(/);
+  assert.match(rootKt, /SettingsVisualEffectsScreen\(/);
+  assert.match(rootKt, /SettingsHeadphonesScreen\(/);
+  assert.match(rootKt, /SettingsMediaButtonsScreen\(/);
+});
+
+test('vocal speed/pitch control complements playback speed with DataStore persistence and PlayerScreen UI', () => {
+  const modelsKt = fs.readFileSync(
+    path.join(rootDir, 'android/core/model/src/main/kotlin/com/auramusic/core/model/AuraModels.kt'),
+    'utf8',
+  );
+  const modelsTestKt = fs.readFileSync(
+    path.join(rootDir, 'android/core/model/src/test/kotlin/com/auramusic/core/model/AuraModelsTest.kt'),
+    'utf8',
+  );
+  const reposKt = fs.readFileSync(
+    path.join(rootDir, 'android/core/database/src/main/kotlin/com/auramusic/core/database/AuraRepositories.kt'),
+    'utf8',
+  );
+  const controllerKt = fs.readFileSync(
+    path.join(rootDir, 'android/core/player/src/main/kotlin/com/auramusic/core/player/AuraPlayerController.kt'),
+    'utf8',
+  );
+  const playerKt = fs.readFileSync(
+    path.join(rootDir, 'android/feature/player/src/main/kotlin/com/auramusic/feature/player/PlayerScreen.kt'),
+    'utf8',
+  );
+  const vmKt = fs.readFileSync(
+    path.join(rootDir, 'android/app/src/main/kotlin/com/auramusic/app/AuraViewModel.kt'),
+    'utf8',
+  );
+  const playbackCoordKt = fs.readFileSync(
+    path.join(rootDir, 'android/app/src/main/kotlin/com/auramusic/app/AuraPlaybackCoordinator.kt'),
+    'utf8',
+  );
+  const rootKt = fs.readFileSync(
+    path.join(rootDir, 'android/app/src/main/kotlin/com/auramusic/app/AuraAppRoot.kt'),
+    'utf8',
+  );
+
+  assert.match(modelsKt, /val playbackPitch:\s*Float/);
+  assert.match(modelsKt, /val linkPitchToSpeed:\s*Boolean/);
+  assert.match(modelsKt, /val PITCH_PRESETS\s*=/);
+  assert.match(modelsKt, /fun describeVoicePitch\(/);
+  assert.match(modelsTestKt, /playback tuning helper resolves independent and linked vocal pitch accurately/);
+
+  assert.match(reposKt, /playback_pitch/);
+  assert.match(reposKt, /playback_link_pitch_speed/);
+  assert.match(reposKt, /suspend fun setPlaybackPitch\(/);
+  assert.match(reposKt, /suspend fun setLinkPitchToSpeed\(/);
+
+  assert.match(controllerKt, /playbackPitch\s*=/);
+  assert.match(playerKt, /Velocidad \/ Tono de voz/);
+  assert.match(playerKt, /Vincular voz con velocidad/);
+  assert.match(playerKt, /onSetPlaybackPitch/);
+  assert.match(playerKt, /onSetLinkPitchToSpeed/);
+  assert.match(playerKt, /onResetSpeedAndPitch/);
+
+  assert.match(playbackCoordKt, /fun setPlaybackPitch\(/);
+  assert.match(playbackCoordKt, /fun setLinkPitchToSpeed\(/);
+  assert.match(playbackCoordKt, /fun resetPlaybackSpeedAndPitch\(/);
+  assert.match(vmKt, /fun setPlaybackPitch\(/);
+  assert.match(rootKt, /onSetPlaybackPitch\s*=\s*viewModel::setPlaybackPitch/);
+});
+
+test('sleep timer supports presets, custom minutes, end-of-track, end-of-queue, and background service execution', () => {
+  const modelsKt = fs.readFileSync(
+    path.join(rootDir, 'android/core/model/src/main/kotlin/com/auramusic/core/model/AuraModels.kt'),
+    'utf8',
+  );
+  const modelsTestKt = fs.readFileSync(
+    path.join(rootDir, 'android/core/model/src/test/kotlin/com/auramusic/core/model/AuraModelsTest.kt'),
+    'utf8',
+  );
+  const bridgeKtPath = path.join(
+    rootDir,
+    'android/core/player/src/main/kotlin/com/auramusic/core/player/AuraSleepTimerBridge.kt',
+  );
+  const serviceKt = fs.readFileSync(
+    path.join(rootDir, 'android/core/player/src/main/kotlin/com/auramusic/core/player/AuraPlaybackService.kt'),
+    'utf8',
+  );
+  const controllerKt = fs.readFileSync(
+    path.join(rootDir, 'android/core/player/src/main/kotlin/com/auramusic/core/player/AuraPlayerController.kt'),
+    'utf8',
+  );
+  const sleepSheetKtPath = path.join(
+    rootDir,
+    'android/feature/player/src/main/kotlin/com/auramusic/feature/player/SleepTimerBottomSheet.kt',
+  );
+  const playerKt = fs.readFileSync(
+    path.join(rootDir, 'android/feature/player/src/main/kotlin/com/auramusic/feature/player/PlayerScreen.kt'),
+    'utf8',
+  );
+  const vmKt = fs.readFileSync(
+    path.join(rootDir, 'android/app/src/main/kotlin/com/auramusic/app/AuraViewModel.kt'),
+    'utf8',
+  );
+  const rootKt = fs.readFileSync(
+    path.join(rootDir, 'android/app/src/main/kotlin/com/auramusic/app/AuraAppRoot.kt'),
+    'utf8',
+  );
+
+  assert.match(modelsKt, /enum class SleepTimerMode/);
+  assert.match(modelsKt, /END_OF_TRACK/);
+  assert.match(modelsKt, /END_OF_QUEUE/);
+  assert.match(modelsKt, /data class SleepTimerState/);
+  assert.match(modelsKt, /object SleepTimerHelper/);
+  assert.match(modelsTestKt, /sleep timer helper validates custom minutes/);
+
+  assert.ok(fs.existsSync(bridgeKtPath), 'Missing AuraSleepTimerBridge.kt');
+  assert.match(serviceKt, /AuraSleepTimerContract/);
+  assert.match(serviceKt, /shouldBypassCrossfadeForSleepTimer/);
+  assert.match(serviceKt, /shouldPauseOnAutoTransition/);
+  assert.match(serviceKt, /override fun onCustomCommand/);
+
+  assert.match(controllerKt, /val sleepTimerState:\s*StateFlow<SleepTimerState>/);
+  assert.match(controllerKt, /fun startSleepTimerMinutes\(/);
+  assert.match(controllerKt, /fun setSleepTimerEndOfTrack\(/);
+  assert.match(controllerKt, /fun setSleepTimerEndOfQueue\(/);
+
+  assert.ok(fs.existsSync(sleepSheetKtPath), 'Missing SleepTimerBottomSheet.kt');
+  const sleepSheetKt = fs.readFileSync(sleepSheetKtPath, 'utf8');
+  assert.match(sleepSheetKt, /Duración preestablecida/);
+  assert.match(sleepSheetKt, /Tiempo personalizado/);
+  assert.match(sleepSheetKt, /Al terminar esta canción/);
+  assert.match(sleepSheetKt, /Al terminar toda la música/);
+
+  assert.match(playerKt, /SleepTimerBottomSheet\(/);
+  assert.match(playerKt, /Icons\.Rounded\.Timer/);
+  assert.match(vmKt, /val sleepTimerState:\s*StateFlow<SleepTimerState>/);
+  assert.match(rootKt, /onStartSleepTimerMinutes\s*=\s*viewModel::startSleepTimerMinutes/);
+});
+
+test(':app layer is cleanly modularized into dedicated coordinators and chrome helpers', () => {
+  const expectedFiles = [
+    'android/app/src/main/kotlin/com/auramusic/app/AuraPlaybackCoordinator.kt',
+    'android/app/src/main/kotlin/com/auramusic/app/AuraAudioTuningCoordinator.kt',
+    'android/app/src/main/kotlin/com/auramusic/app/AuraLibraryCoordinator.kt',
+    'android/app/src/main/kotlin/com/auramusic/app/AuraAppChrome.kt',
+  ];
+  for (const rel of expectedFiles) {
+    assert.ok(fs.existsSync(path.join(rootDir, rel)), `Missing modular :app file: ${rel}`);
+  }
+  const vmKt = fs.readFileSync(
+    path.join(rootDir, 'android/app/src/main/kotlin/com/auramusic/app/AuraViewModel.kt'),
+    'utf8',
+  );
+  const rootKt = fs.readFileSync(
+    path.join(rootDir, 'android/app/src/main/kotlin/com/auramusic/app/AuraAppRoot.kt'),
+    'utf8',
+  );
+  assert.match(vmKt, /AuraPlaybackCoordinator/);
+  assert.match(vmKt, /AuraAudioTuningCoordinator/);
+  assert.match(vmKt, /AuraLibraryCoordinator/);
+  assert.match(rootKt, /rememberAuraSafLaunchers/);
+  assert.match(rootKt, /AuraBottomChrome\(/);
+});
+
+
 
 
 
