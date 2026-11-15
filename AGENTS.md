@@ -45,3 +45,7 @@ Reglas operativas para cualquier agente que modifique o amplíe **Aura Music**.
   ```bash
   cd android && ./gradlew assembleDebug --no-daemon --no-build-cache
   ```
+- Compilación APK Release móvil (32 y 64 bits ARM sin `x86_64`, con poda Rust + R8/ProGuard protegido para Chaquopy/`yt-dlp` y JNI):
+  ```bash
+  cd android && ./gradlew assembleRelease -PauraAbis=armeabi-v7a,arm64-v8a --no-daemon --no-build-cache
+  ```

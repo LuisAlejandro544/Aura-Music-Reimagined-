@@ -35,7 +35,8 @@ Plan de evolución por fases para convertir Aura Music en un reproductor local m
 - [ ] Soporte para letras locales (`.lrc` embebidas o externas).
 - [ ] Exportación e importación de playlists en formato `.m3u8`.
 
-## Fase 4 — Pulido, personalización y distribución
-- Opciones ampliadas en Ajustes (estilo de carátulas procedurales, gestión de caché y limpieza de portadas).
-- Widget de escritorio para Android con controles rápidos.
-- Firma Release reproducible y publicación de paquetes universales optimizados para Uptodown y tiendas de terceros.
+## Fase 4 — Pulido, personalización y distribución (En curso)
+- [x] **Pipeline Release v1.0.0 optimizado para móviles (`apk Release`)**: firma reproducible mediante GitHub Secrets (`AURA_KEYSTORE_BASE64`, `AURA_KEYSTORE_PASSWORD`, `AURA_KEY_ALIAS`, `AURA_KEY_PASSWORD`), compilación exclusiva de arquitecturas móviles de 32 bits (`armeabi-v7a`) y 64 bits (`arm64-v8a`) sin `x86_64`, poda de código muerto en Rust (`lto = "fat"`, `panic = "abort"`, `strip = "symbols"`, `-Wl,--gc-sections`) y reglas R8/ProGuard blindadas para Chaquopy/`yt-dlp`, JNI Rust y Media3.
+- [ ] Opciones ampliadas en Ajustes (estilo de carátulas procedurales, gestión de caché y limpieza de portadas).
+- [ ] Widget de escritorio para Android con controles rápidos.
+- [ ] Publicación de la versión oficial v1.0.0 en Uptodown y canales de terceros.

@@ -53,27 +53,37 @@ Reproductor de música local y descargador de solo audio para Android construido
 
 ## Requisitos técnicos
 
-- **Android**: `minSdk = 26` (Android 8.0) • `targetSdk = 35` • `compileSdk = 35`.
-- **Arquitecturas nativas**: 32 bits (`armeabi-v7a`) y 64 bits (`arm64-v8a`, `x86_64`) compilables como APK universal o APKs individuales para instalación directa o distribución en Uptodown.
-- **Licencias permisivas**: Solo dependencias MIT / Apache-2.0 / BSD / Unlicense (`Chaquopy 17.2.0` MIT, `rquickjs 0.12.2` MIT, `yt-dlp` Unlicense, `yt-dlp-ejs` Unlicense, `lofty` MIT/Apache-2.0, `MaterialKolor` MIT). Sin FFmpeg ni wrappers copyleft.
-- **Rust**: Toolchain `stable` (Edition 2024) + `cargo-ndk` + `clang`/`libclang-dev` (para `rquickjs` bindgen).
+- **Versión oficial**: `v1.0.0` (`versionCode = 1`, `versionName = "1.0.0"`).
+- **Android**: `minSdk = 26` (Android 8.0) • `targetSdk = 36` • `compileSdk = 37`.
+- **Arquitecturas nativas**:
+  - **Release móvil**: estrictamente 32 bits (`armeabi-v7a`) y 64 bits (`arm64-v8a`), sin librerías `x86_64` de PC/emulador.
+  - **Debug / pruebas**: `armeabi-v7a`, `arm64-v8a` y `x86_64` configurables vía `-PauraAbis=...`.
+- **Licencias permisivas**: Solo dependencias MIT / Apache-2.0 / BSD / Unlicense (`Chaquopy 17.2.0` MIT, `rquickjs 0.14.0` MIT, `yt-dlp` Unlicense, `yt-dlp-ejs` Unlicense, `lofty 0.25.5` MIT/Apache-2.0, `MaterialKolor 5.0.1` MIT). Sin FFmpeg ni wrappers copyleft.
+- **Rust**: Toolchain `stable` (Edition 2024) + `cargo-ndk` + `clang`/`libclang-dev` (para `rquickjs` bindgen), con poda agresiva de código muerto en Release (`lto = "fat"`, `panic = "abort"`, `strip = "symbols"`, `-Wl,--gc-sections`, `-Wl,--exclude-libs,ALL`).
 - **Python de compilación**: Python `3.11` (requerido por Chaquopy para compilación `.pyc` compatible con 32 y 64 bits).
-- **Gradle Wrapper**: `8.14.7` (AGP `8.9.1`, Kotlin `2.1.20`).
+- **Gradle Wrapper**: `9.9.1` (AGP `9.5.1`, Kotlin `2.4.21`, KSP `2.3.14`, Media3 `1.11.1`, Room `2.8.5`, Compose BOM `2026.09.00`).
 
-## Cómo compilar el APK Debug
+## Cómo compilar los APKs (Debug y Release v1.0.0)
 
 ### Opción 1: Desde GitHub Actions (sin PC, directo desde el teléfono)
-1. Abre la pestaña **Actions** en el repositorio de GitHub.
-2. Selecciona el workflow **apk Debug**.
-3. Pulsa **Run workflow** y elige `apk_mode` (`universal`, `individuales` para generar un APK de 32 bits y otro de 64 bits, `solo-32bits` o `solo-64bits`).
-4. Al finalizar, descarga el artefacto **AuraMusic-apk-Debug-...** con el APK o APKs listos para instalar.
+- **APK Debug** (`apk Debug` — `.github/workflows/build-android-apk.yml`):
+  1. Abre la pestaña **Actions** en el repositorio de GitHub.
+  2. Selecciona **apk Debug**, pulsa **Run workflow** y elige `apk_mode` (`universal`, `individuales`, `solo-32bits` o `solo-64bits`).
+  3. Descarga el artefacto **AuraMusic-apk-Debug-...**.
+- **APK Release oficial v1.0.0** (`apk Release` — `.github/workflows/build-android-release.yml`):
+  1. Configura los 4 Secrets de firma en **Settings → Secrets and variables → Actions**: `AURA_KEYSTORE_BASE64`, `AURA_KEYSTORE_PASSWORD`, `AURA_KEY_ALIAS` y `AURA_KEY_PASSWORD`.
+  2. Abre **Actions → apk Release**, pulsa **Run workflow**, deja `version_name = 1.0.0` y elige `apk_mode` (`universal-movil` con 32 y 64 bits ARM, `individuales`, `solo-32bits` o `solo-64bits`; excluye `x86_64`).
+  3. Descarga el artefacto firmado **AuraMusic-apk-Release-v1.0.0-...** listo para instalar o subir a Uptodown.
+- **Auditoría total** (`Lint y Auditoria Total` — `.github/workflows/lint-and-audit.yml`): ejecuta pruebas estructurales, Python (`ruff`/`mypy`), Rust (`fmt`/`clippy`/`cargo test`/`cargo-ndk`), `ktlint`, `lintDebug`, unit tests y reporte de dependencias desactualizadas en un `.zip` interactivo.
 
 ### Opción 2: Compilación local (Linux / macOS)
 ```bash
 cd android
 ./gradlew assembleDebug --no-daemon --no-build-cache
+# Para Release móvil (32 y 64 bits ARM sin x86_64):
+./gradlew assembleRelease -PauraAbis=armeabi-v7a,arm64-v8a --no-daemon --no-build-cache
 ```
-El APK generado se guarda en `android/app/build/outputs/apk/debug/`.
+Los APKs generados se guardan en `android/app/build/outputs/apk/debug/` y `android/app/build/outputs/apk/release/`.
 
 ## Entorno web del repositorio
 

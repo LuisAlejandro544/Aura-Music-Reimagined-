@@ -32,12 +32,10 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
-import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 import java.util.Locale
 import java.util.concurrent.CopyOnWriteArraySet
-import java.util.concurrent.atomic.AtomicInteger
 
 /**
  * Contrato desacoplado que implementa `AuraApplication` para que el servicio en primer plano
@@ -60,25 +58,21 @@ class AuraDownloadForegroundService : Service() {
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val mainHandler = Handler(Looper.getMainLooper())
     private val boundClients = CopyOnWriteArraySet<Messenger>()
-    private val commandChannel = Channel<suspend () -> Unit>(Channel.UNLIMITED)
-    private val queuedOrActiveCommands = AtomicInteger(0)
 
     private var activeDownloadJob: Job? = null
-    private var commandConsumerJob: Job? = null
+    private var activeCommandJob: Job? = null
     private var notificationObserverJob: Job? = null
     private var ipcDownloadObserverJob: Job? = null
     private var ipcEngineObserverJob: Job? = null
     private var wakeLock: PowerManager.WakeLock? = null
-    @Volatile
     private var isServiceBound = false
-    @Volatile
     private var idleTerminationArmed = false
 
     private val idleShutdownRunnable = Runnable {
         if (!isServiceBound &&
             boundClients.isEmpty() &&
             activeDownloadJob?.isActive != true &&
-            queuedOrActiveCommands.get() == 0
+            activeCommandJob?.isActive != true
         ) {
             idleTerminationArmed = true
             stopSelf()
@@ -93,9 +87,7 @@ class AuraDownloadForegroundService : Service() {
 
             when (msg.what) {
                 AuraDownloaderIpc.MSG_REGISTER_CLIENT -> {
-                    isServiceBound = true
                     cancelIdleShutdown()
-                    startIpcStateBroadcastIfNeeded()
                     msg.replyTo?.let { client ->
                         boundClients.add(client)
                         sendToClient(
@@ -125,7 +117,7 @@ class AuraDownloadForegroundService : Service() {
                     }
                     val quality = data.getString(AuraDownloaderIpc.KEY_QUALITY_KEY)
                         ?.let(AudioDownloadQuality::fromKey)
-                    enqueueCommand(downloader) {
+                    launchCommand(downloader) {
                         downloader.refreshEngineStatus(
                             autoUpdateOverride = autoUpdate,
                             qualityOverride = quality,
@@ -146,8 +138,7 @@ class AuraDownloadForegroundService : Service() {
                     } else {
                         null
                     }
-                    downloader.markUpdateQueued()
-                    enqueueCommand(downloader) {
+                    launchCommand(downloader) {
                         downloader.checkAndUpdateEngines(
                             force = force,
                             autoUpdateOverride = autoUpdate,
@@ -171,7 +162,7 @@ class AuraDownloadForegroundService : Service() {
                     } else {
                         null
                     }
-                    enqueueCommand(downloader) {
+                    launchCommand(downloader) {
                         downloader.inspectAudioUrl(
                             rawUrl = rawUrl,
                             autoUpdateOverride = autoUpdate,
@@ -192,7 +183,7 @@ class AuraDownloadForegroundService : Service() {
                     val quality = AudioDownloadQuality.fromKey(
                         data.getString(AuraDownloaderIpc.KEY_QUALITY_KEY),
                     )
-                    enqueueCommand(downloader) {
+                    launchCommand(downloader) {
                         downloader.setPreferredAudioQuality(quality)
                     }
                 }
@@ -207,35 +198,17 @@ class AuraDownloadForegroundService : Service() {
 
     private val incomingMessenger = Messenger(incomingHandler)
 
-    /**
-     * Encola comandos IPC secuencialmente en un único consumidor para no perder nunca
-     * actualizaciones manuales o inspecciones mientras Python finaliza su arranque inicial.
-     */
-    private fun enqueueCommand(
+    private fun launchCommand(
         downloader: YtDlpAudioDownloader,
         block: suspend () -> Unit,
     ) {
-        ensureCommandConsumerStarted(downloader)
-        queuedOrActiveCommands.incrementAndGet()
-        val accepted = commandChannel.trySend(block).isSuccess
-        if (!accepted) {
-            queuedOrActiveCommands.decrementAndGet()
-        }
-    }
-
-    private fun ensureCommandConsumerStarted(downloader: YtDlpAudioDownloader) {
-        if (commandConsumerJob?.isActive == true) return
-        commandConsumerJob = serviceScope.launch {
-            for (command in commandChannel) {
-                try {
-                    command()
-                } finally {
-                    val remaining = queuedOrActiveCommands.decrementAndGet().coerceAtLeast(0)
-                    if (remaining == 0) {
-                        mainHandler.post {
-                            scheduleIdleShutdownIfEligible(downloader)
-                        }
-                    }
+        if (activeCommandJob?.isActive == true) return
+        activeCommandJob = serviceScope.launch {
+            try {
+                block()
+            } finally {
+                mainHandler.post {
+                    scheduleIdleShutdownIfEligible(downloader)
                 }
             }
         }
@@ -404,31 +377,18 @@ class AuraDownloadForegroundService : Service() {
     }
 
     override fun onDestroy() {
-        val allowProcessKill = idleTerminationArmed &&
-            !isServiceBound &&
-            boundClients.isEmpty() &&
-            activeDownloadJob?.isActive != true &&
-            queuedOrActiveCommands.get() == 0
         if (activeServiceInstance === this) {
             activeServiceInstance = null
         }
         cancelIdleShutdown()
-        runCatching { commandChannel.close() }
         releaseWakeLockSafely()
         serviceScope.cancel()
         super.onDestroy()
 
-        if (allowProcessKill && isIsolatedDownloaderProcess()) {
-            // Programa la salida tras completar super.onDestroy() para que ActivityManager
-            // cierre el servicio limpiamente y no colisione con un re-enlace inmediato.
-            mainHandler.postDelayed(
-                {
-                    if (activeServiceInstance == null) {
-                        Process.killProcess(Process.myPid())
-                    }
-                },
-                PROCESS_KILL_SETTLE_DELAY_MS,
-            )
+        if (idleTerminationArmed && isIsolatedDownloaderProcess()) {
+            // Devuelve al sistema operativo el heap nativo de CPython / libpython cuando
+            // el descargador terminó su trabajo y no hay UI escuchando.
+            Process.killProcess(Process.myPid())
         }
     }
 
@@ -450,7 +410,7 @@ class AuraDownloadForegroundService : Service() {
         mainHandler.removeCallbacks(idleShutdownRunnable)
         val isBusy = downloader?.downloadState?.value?.isBusy == true ||
             activeDownloadJob?.isActive == true ||
-            queuedOrActiveCommands.get() > 0
+            activeCommandJob?.isActive == true
         if (!isServiceBound && boundClients.isEmpty() && !isBusy) {
             mainHandler.postDelayed(idleShutdownRunnable, IDLE_SHUTDOWN_DELAY_MS)
         }
@@ -703,8 +663,7 @@ class AuraDownloadForegroundService : Service() {
         private const val PROGRESS_NOTIFICATION_ID = 4201
         private const val RESULT_NOTIFICATION_ID = 4202
         private const val DEFAULT_ACCENT_ARGB = 0xFFA78BFA.toInt()
-        private const val IDLE_SHUTDOWN_DELAY_MS = 10_000L
-        private const val PROCESS_KILL_SETTLE_DELAY_MS = 150L
+        private const val IDLE_SHUTDOWN_DELAY_MS = 2_500L
 
         @Volatile
         private var activeServiceInstance: AuraDownloadForegroundService? = null

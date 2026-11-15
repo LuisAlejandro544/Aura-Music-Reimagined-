@@ -1,0 +1,198 @@
+# Flujo de compilación Release oficial en la nube (GitHub Actions) para Aura Music.
+# Se ejecuta EXCLUSIVAMENTE de forma manual (workflow_dispatch), sin caché alguna,
+# compila únicamente arquitecturas móviles de 32 bits (armeabi-v7a) y 64 bits (arm64-v8a)
+# —excluyendo x86_64 de PC/emulador—, aplica poda de código muerto en Rust + R8/ProGuard
+# seguro para Chaquopy/yt-dlp/JNI y firma el APK usando GitHub Secrets.
+
+name: apk Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      apk_mode:
+        description: "Tipo de APK Release móvil a compilar (solo 32 y 64 bits ARM, sin x86_64)"
+        required: true
+        default: "universal-movil"
+        type: choice
+        options:
+          - universal-movil
+          - individuales
+          - solo-32bits
+          - solo-64bits
+      version_name:
+        description: "Versión oficial visible de la app (versionName)"
+        required: true
+        default: "1.0.0"
+        type: string
+      version_code:
+        description: "Código numérico incremental de versión (versionCode)"
+        required: true
+        default: "1"
+        type: string
+
+jobs:
+  build-apk-release:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Validar GitHub Secrets de firma Release antes de compilar
+        env:
+          AURA_KEYSTORE_BASE64: ${{ secrets.AURA_KEYSTORE_BASE64 }}
+          AURA_KEYSTORE_PASSWORD: ${{ secrets.AURA_KEYSTORE_PASSWORD }}
+          AURA_KEY_ALIAS: ${{ secrets.AURA_KEY_ALIAS }}
+          AURA_KEY_PASSWORD: ${{ secrets.AURA_KEY_PASSWORD }}
+        run: |
+          missing=0
+          for var_name in AURA_KEYSTORE_BASE64 AURA_KEYSTORE_PASSWORD AURA_KEY_ALIAS AURA_KEY_PASSWORD; do
+            eval "val=\${$var_name:-}"
+            if [ -z "$val" ]; then
+              echo "::error::Falta el Secret de GitHub: $var_name"
+              missing=1
+            fi
+          done
+          if [ "$missing" -ne 0 ]; then
+            echo "Configura los 4 Secrets en Settings -> Secrets and variables -> Actions antes de lanzar apk Release."
+            exit 1
+          fi
+
+      - name: Descargar todo el código del proyecto
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          submodules: recursive
+
+      - name: Configurar JDK 17 (sin caché)
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Decodificar y verificar keystore Release desde GitHub Secrets
+        env:
+          AURA_KEYSTORE_BASE64: ${{ secrets.AURA_KEYSTORE_BASE64 }}
+          AURA_KEYSTORE_PASSWORD: ${{ secrets.AURA_KEYSTORE_PASSWORD }}
+          AURA_KEY_ALIAS: ${{ secrets.AURA_KEY_ALIAS }}
+        run: |
+          KEYSTORE_FILE="${{ runner.temp }}/aura-release.keystore"
+          printf '%s' "$AURA_KEYSTORE_BASE64" | tr -d '\r\n ' | base64 --decode > "$KEYSTORE_FILE"
+          chmod 600 "$KEYSTORE_FILE"
+          if [ ! -s "$KEYSTORE_FILE" ]; then
+            echo "::error::El Secret AURA_KEYSTORE_BASE64 generó un archivo vacío."
+            exit 1
+          fi
+          keytool -list -keystore "$KEYSTORE_FILE" -storepass "$AURA_KEYSTORE_PASSWORD" -alias "$AURA_KEY_ALIAS" >/dev/null
+          echo "AURA_KEYSTORE_PATH=$KEYSTORE_FILE" >> "$GITHUB_ENV"
+
+      - name: Configurar Python 3.11 para Chaquopy (sin caché)
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Instalar Clang / libclang-dev para bindgen de QuickJS-NG en Rust
+        run: |
+          sudo apt-get update && sudo apt-get install -y clang libclang-dev
+          LIBCLANG_FILE="$(find /usr/lib -name 'libclang*.so*' 2>/dev/null | head -n 1)"
+          if [ -n "$LIBCLANG_FILE" ]; then
+            echo "LIBCLANG_PATH=$(dirname "$LIBCLANG_FILE")" >> "$GITHUB_ENV"
+          fi
+
+      - name: Configurar Android SDK base
+        uses: android-actions/setup-android@v4
+        with:
+          packages: platform-tools
+
+      - name: Instalar Android SDK 37, Build Tools y NDK 27
+        run: |
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager --install "platform-tools" "platforms;android-37.0" "build-tools;37.0.0" "ndk;27.3.13750724"
+          NDK_PATH="$ANDROID_HOME/ndk/27.3.13750724"
+          echo "ANDROID_NDK_HOME=$NDK_PATH" >> "$GITHUB_ENV"
+          echo "ANDROID_NDK_ROOT=$NDK_PATH" >> "$GITHUB_ENV"
+
+      - name: Instalar Rust estable y targets móviles (solo 32 y 64 bits ARM)
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android,armv7-linux-androideabi
+
+      - name: Instalar cargo-ndk (sin caché)
+        run: cargo install cargo-ndk --locked
+
+      - name: Descargar dependencias de Rust y ejecutar tests nativos
+        working-directory: android/rust/aura_core
+        run: |
+          cargo fetch
+          cargo test
+
+      - name: Configurar Gradle 9.9.1 (sin caché)
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "9.9.1"
+          cache-disabled: true
+
+      - name: Dar permisos de ejecución a gradlew
+        working-directory: android
+        run: chmod +x gradlew
+
+      - name: Compilar APK Release firmado (solo 32 y 64 bits ARM) sin caché
+        working-directory: android
+        env:
+          APK_MODE: ${{ inputs.apk_mode }}
+          VERSION_NAME: ${{ inputs.version_name }}
+          VERSION_CODE: ${{ inputs.version_code }}
+          AURA_KEYSTORE_PASSWORD: ${{ secrets.AURA_KEYSTORE_PASSWORD }}
+          AURA_KEY_ALIAS: ${{ secrets.AURA_KEY_ALIAS }}
+          AURA_KEY_PASSWORD: ${{ secrets.AURA_KEY_PASSWORD }}
+        run: |
+          mkdir -p ../dist-apks
+          COMMON_FLAGS="-PauraRequireReleaseSigning=true -PauraVersionName=${VERSION_NAME} -PauraVersionCode=${VERSION_CODE} --no-daemon --no-build-cache --rerun-tasks"
+
+          if [ "$APK_MODE" = "universal-movil" ]; then
+            ./gradlew assembleRelease -PauraAbis=armeabi-v7a,arm64-v8a $COMMON_FLAGS
+            cp app/build/outputs/apk/release/app-release.apk "../dist-apks/AuraMusic-v${VERSION_NAME}-Release-universal-32-64bit.apk"
+          elif [ "$APK_MODE" = "individuales" ]; then
+            ./gradlew assembleRelease -PauraAbis=armeabi-v7a $COMMON_FLAGS
+            cp app/build/outputs/apk/release/app-release.apk "../dist-apks/AuraMusic-v${VERSION_NAME}-Release-32bit-armeabi-v7a.apk"
+            ./gradlew assembleRelease -PauraAbis=arm64-v8a $COMMON_FLAGS
+            cp app/build/outputs/apk/release/app-release.apk "../dist-apks/AuraMusic-v${VERSION_NAME}-Release-64bit-arm64-v8a.apk"
+          elif [ "$APK_MODE" = "solo-32bits" ]; then
+            ./gradlew assembleRelease -PauraAbis=armeabi-v7a $COMMON_FLAGS
+            cp app/build/outputs/apk/release/app-release.apk "../dist-apks/AuraMusic-v${VERSION_NAME}-Release-32bit-armeabi-v7a.apk"
+          elif [ "$APK_MODE" = "solo-64bits" ]; then
+            ./gradlew assembleRelease -PauraAbis=arm64-v8a $COMMON_FLAGS
+            cp app/build/outputs/apk/release/app-release.apk "../dist-apks/AuraMusic-v${VERSION_NAME}-Release-64bit-arm64-v8a.apk"
+          else
+            echo "Modo desconocido: $APK_MODE"
+            exit 1
+          fi
+
+      - name: Verificar firma Release, librerías Rust/QuickJS y exclusión de x86_64
+        env:
+          APK_MODE: ${{ inputs.apk_mode }}
+        run: |
+          APKSIGNER="$ANDROID_HOME/build-tools/37.0.0/apksigner"
+          for apk in dist-apks/*.apk; do
+            echo "=== Verificando $apk ==="
+            "$APKSIGNER" verify --verbose --print-certs "$apk"
+            if unzip -l "$apk" | grep -q "lib/x86_64/"; then
+              echo "::error::$apk contiene librerías x86_64 de PC no permitidas en Release."
+              exit 1
+            fi
+            if ! unzip -l "$apk" | grep -q "libaura_core.so"; then
+              echo "::error::Falta libaura_core.so en $apk"
+              exit 1
+            fi
+            if ! unzip -l "$apk" | grep -q "libaura_qjs.so"; then
+              echo "::error::Falta libaura_qjs.so en $apk"
+              exit 1
+            fi
+          done
+
+      - name: Limpiar keystore temporal
+        if: always()
+        run: rm -f "${{ runner.temp }}/aura-release.keystore"
+
+      - name: Subir artefacto APK Release v${{ inputs.version_name }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: AuraMusic-apk-Release-v${{ inputs.version_name }}-${{ inputs.apk_mode }}
+          path: dist-apks/*.apk

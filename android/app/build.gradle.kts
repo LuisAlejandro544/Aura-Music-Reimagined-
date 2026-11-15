@@ -17,8 +17,10 @@ android {
         // nativos requeridos por Media3 MediaSessionService, iconos adaptativos y mejor ABI Rust.
         minSdk = 26
         targetSdk = 36
-        versionCode = 2
-        versionName = "0.1.0"
+        versionCode = (project.findProperty("auraVersionCode") as? String)?.toIntOrNull() ?: 1
+        versionName = (project.findProperty("auraVersionName") as? String)
+            ?.takeIf { it.isNotBlank() }
+            ?: "1.0.0"
 
         // Soporte completo para dispositivos de 32 bits (armeabi-v7a) y 64 bits (arm64-v8a, x86_64),
         // configurable mediante `-PauraAbis=...` para compilar APK universal o individuales.
@@ -32,6 +34,44 @@ android {
         }
     }
 
+    val releaseKeystorePath = System.getenv("AURA_KEYSTORE_PATH")?.takeIf { it.isNotBlank() }
+        ?: (project.findProperty("auraKeystorePath") as? String)?.takeIf { it.isNotBlank() }
+    val releaseKeystorePassword = System.getenv("AURA_KEYSTORE_PASSWORD")?.takeIf { it.isNotBlank() }
+        ?: (project.findProperty("auraKeystorePassword") as? String)?.takeIf { it.isNotBlank() }
+    val releaseKeyAlias = System.getenv("AURA_KEY_ALIAS")?.takeIf { it.isNotBlank() }
+        ?: (project.findProperty("auraKeyAlias") as? String)?.takeIf { it.isNotBlank() }
+    val releaseKeyPassword = System.getenv("AURA_KEY_PASSWORD")?.takeIf { it.isNotBlank() }
+        ?: (project.findProperty("auraKeyPassword") as? String)?.takeIf { it.isNotBlank() }
+
+    val hasReleaseSigning = releaseKeystorePath != null &&
+        file(releaseKeystorePath).exists() &&
+        releaseKeystorePassword != null &&
+        releaseKeyAlias != null &&
+        releaseKeyPassword != null
+
+    val requireReleaseSigning = (project.findProperty("auraRequireReleaseSigning") as? String)
+        ?.equals("true", ignoreCase = true) == true
+    if (requireReleaseSigning && !hasReleaseSigning) {
+        error(
+            "Firma Release requerida: configura AURA_KEYSTORE_PATH, AURA_KEYSTORE_PASSWORD, " +
+                "AURA_KEY_ALIAS y AURA_KEY_PASSWORD antes de compilar Release.",
+        )
+    }
+
+    signingConfigs {
+        if (hasReleaseSigning) {
+            create("release") {
+                storeFile = file(releaseKeystorePath!!)
+                storePassword = releaseKeystorePassword
+                keyAlias = releaseKeyAlias
+                keyPassword = releaseKeyPassword
+                enableV1Signing = true
+                enableV2Signing = true
+                enableV3Signing = true
+            }
+        }
+    }
+
     buildTypes {
         release {
             isMinifyEnabled = true
@@ -40,9 +80,13 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro",
             )
-            // Firma con keystore de depuración si no existe keystore propio, facilitando
-            // pruebas directas en teléfono; en producción el usuario puede configurar su keystore.
-            signingConfig = signingConfigs.getByName("debug")
+            // Usa firma Release oficial cuando están presentes los secretos/credenciales;
+            // conserva debug como respaldo únicamente para pruebas locales sin keystore.
+            signingConfig = if (hasReleaseSigning) {
+                signingConfigs.getByName("release")
+            } else {
+                signingConfigs.getByName("debug")
+            }
         }
         debug {
             applicationIdSuffix = ".debug"

@@ -9,3 +9,5 @@ captures/
 .cxx/
 rust/aura_core/target/
 core/rust/src/main/jniLibs/
+*.keystore
+*.jks
