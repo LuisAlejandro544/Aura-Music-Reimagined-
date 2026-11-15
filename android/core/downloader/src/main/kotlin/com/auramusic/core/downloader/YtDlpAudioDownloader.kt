@@ -106,6 +106,17 @@ class YtDlpAudioDownloader(
     }
 
     /**
+     * Marca en el estado del motor que una actualización manual ya está en cola para ejecutarse
+     * inmediatamente después de cualquier lectura pendiente, evitando parpadeos del indicador.
+     */
+    fun markUpdateQueued() {
+        _engineStatus.value = _engineStatus.value.copy(
+            isUpdating = true,
+            updateMessage = "Buscando actualizaciones de yt-dlp y yt-dlp-ejs...",
+        )
+    }
+
+    /**
      * Inicializa Chaquopy (si aún no está iniciado) y lee las versiones activas
      * de Python, yt-dlp, yt-dlp-ejs y QuickJS-NG fuera del hilo principal.
      */
@@ -132,44 +143,59 @@ class YtDlpAudioDownloader(
             AuraRustBridge.getQuickJsVersion()
         }
 
-        val pyInfo = runCatching {
+        val pyResult = runCatching {
             pythonMutex.withLock {
                 val py = ensurePythonStarted()
                 val mod = py.getModule("aura_ytdlp")
                 val rawJson = mod.callAttr("get_engine_versions", updatesDir.absolutePath).toString()
                 JSONObject(rawJson)
             }
-        }.getOrNull()
-
-        val pythonVer = pyInfo?.optString("python_version")?.takeIf { it.isNotBlank() }
-            ?: "Python 3.11 (ligero)"
-        val ytDlpVer = pyInfo?.optString("yt_dlp_version")?.takeIf { it.isNotBlank() }
-            ?: "No inicializado"
-        val ytDlpEjsVer = pyInfo?.optString("yt_dlp_ejs_version")?.takeIf { it.isNotBlank() }
-            ?: "No inicializado"
-        val ytDlpUpdated = pyInfo?.optString("yt_dlp_updated_at")?.takeIf { it.isNotBlank() }
-        val ytDlpEjsUpdated = pyInfo?.optString("yt_dlp_ejs_updated_at")?.takeIf { it.isNotBlank() }
-
-        if (pyInfo != null) {
-            AuraDownloaderIpc.writeCachedEngineVersions(
-                context = context,
-                pythonVersion = pythonVer,
-                ytDlpVersion = ytDlpVer,
-                ytDlpEjsVersion = ytDlpEjsVer,
-                ytDlpUpdatedAt = ytDlpUpdated,
-                ytDlpEjsUpdatedAt = ytDlpEjsUpdated,
-            )
         }
 
-        _engineStatus.value = _engineStatus.value.copy(
-            pythonVersion = pythonVer,
-            ytDlpVersion = ytDlpVer,
-            ytDlpEjsVersion = ytDlpEjsVer,
-            quickJsVersion = quickJsVer,
-            ytDlpUpdatedAt = ytDlpUpdated,
-            ytDlpEjsUpdatedAt = ytDlpEjsUpdated,
-            autoUpdateEnabled = autoUpdate,
-            preferredQuality = quality,
+        pyResult.fold(
+            onSuccess = { pyInfo ->
+                val pythonVer = pyInfo.optString("python_version").takeIf { it.isNotBlank() }
+                    ?: "Python 3.11 (ligero)"
+                val ytDlpVer = pyInfo.optString("yt_dlp_version").takeIf { it.isNotBlank() }
+                    ?: "No inicializado"
+                val ytDlpEjsVer = pyInfo.optString("yt_dlp_ejs_version").takeIf { it.isNotBlank() }
+                    ?: "No inicializado"
+                val ytDlpUpdated = pyInfo.optString("yt_dlp_updated_at").takeIf { it.isNotBlank() }
+                val ytDlpEjsUpdated = pyInfo.optString("yt_dlp_ejs_updated_at").takeIf { it.isNotBlank() }
+
+                AuraDownloaderIpc.writeCachedEngineVersions(
+                    context = context,
+                    pythonVersion = pythonVer,
+                    ytDlpVersion = ytDlpVer,
+                    ytDlpEjsVersion = ytDlpEjsVer,
+                    ytDlpUpdatedAt = ytDlpUpdated,
+                    ytDlpEjsUpdatedAt = ytDlpEjsUpdated,
+                )
+
+                _engineStatus.value = _engineStatus.value.copy(
+                    pythonVersion = pythonVer,
+                    ytDlpVersion = ytDlpVer,
+                    ytDlpEjsVersion = ytDlpEjsVer,
+                    quickJsVersion = quickJsVer,
+                    ytDlpUpdatedAt = ytDlpUpdated,
+                    ytDlpEjsUpdatedAt = ytDlpEjsUpdated,
+                    autoUpdateEnabled = autoUpdate,
+                    preferredQuality = quality,
+                )
+            },
+            onFailure = { err ->
+                val detail = err.message?.takeIf { it.isNotBlank() } ?: err.javaClass.simpleName
+                _engineStatus.value = _engineStatus.value.copy(
+                    pythonVersion = "Python 3.11 (ligero)",
+                    ytDlpVersion = "No inicializado",
+                    ytDlpEjsVersion = "No inicializado",
+                    quickJsVersion = quickJsVer,
+                    autoUpdateEnabled = autoUpdate,
+                    preferredQuality = quality,
+                    isUpdating = false,
+                    updateMessage = "No se pudo inicializar el motor Python/yt-dlp: $detail",
+                )
+            },
         )
     }
 
@@ -261,6 +287,10 @@ class YtDlpAudioDownloader(
         }
         onUpdateCheckTimestamp?.invoke(now)
 
+        val quickJsVer = withContext(Dispatchers.Default) {
+            AuraRustBridge.getQuickJsVersion()
+        }
+
         return@withContext result.fold(
             onSuccess = { json ->
                 val ok = json.optBoolean("ok", true)
@@ -283,6 +313,7 @@ class YtDlpAudioDownloader(
                     pythonVersion = pythonVer,
                     ytDlpVersion = ytDlpVer,
                     ytDlpEjsVersion = ytDlpEjsVer,
+                    quickJsVersion = quickJsVer,
                     ytDlpUpdatedAt = ytDlpUpdated,
                     ytDlpEjsUpdatedAt = ytDlpEjsUpdated,
                     isUpdating = false,
@@ -291,9 +322,11 @@ class YtDlpAudioDownloader(
                 ok
             },
             onFailure = { err ->
+                val detail = err.message?.takeIf { it.isNotBlank() } ?: err.javaClass.simpleName
                 _engineStatus.value = _engineStatus.value.copy(
+                    quickJsVersion = quickJsVer,
                     isUpdating = false,
-                    updateMessage = "No se pudo actualizar: ${err.message ?: "error de red"}",
+                    updateMessage = "No se pudo actualizar: $detail",
                 )
                 false
             },

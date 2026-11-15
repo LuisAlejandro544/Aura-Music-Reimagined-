@@ -11,6 +11,7 @@ import importlib
 import json
 import os
 import shutil
+import ssl
 import sys
 import tempfile
 import time
@@ -116,6 +117,30 @@ def get_engine_versions(updates_dir: str) -> str:
     return json.dumps(payload)
 
 
+def _build_ssl_context() -> ssl.SSLContext:
+    """Construye un contexto SSL verificado usando certifi o almacenes CA de Android."""
+    try:
+        import certifi  # type: ignore[import-not-found]
+
+        cafile = certifi.where()
+        if cafile and os.path.isfile(cafile):
+            return ssl.create_default_context(cafile=cafile)
+    except (ImportError, OSError):
+        pass
+
+    ctx = ssl.create_default_context()
+    for ca_dir in (
+        "/apex/com.android.conscrypt/cacerts",
+        "/system/etc/security/cacerts",
+    ):
+        if os.path.isdir(ca_dir):
+            try:
+                ctx.load_verify_locations(capath=ca_dir)
+            except (OSError, ssl.SSLError):
+                pass
+    return ctx
+
+
 def _fetch_pypi_latest_wheel(pkg_name: str) -> tuple[str, str, str]:
     """Consulta la API oficial de PyPI y devuelve (version, wheel_url, sha256)."""
     api_url = f"https://pypi.org/pypi/{pkg_name}/json"
@@ -123,7 +148,7 @@ def _fetch_pypi_latest_wheel(pkg_name: str) -> tuple[str, str, str]:
         api_url,
         headers={"User-Agent": "AuraMusic/1.0 (Android)"},
     )
-    with urllib.request.urlopen(req, timeout=20) as resp:
+    with urllib.request.urlopen(req, timeout=20, context=_build_ssl_context()) as resp:
         data = json.loads(resp.read().decode("utf-8"))
 
     info = data.get("info", {})
@@ -167,7 +192,11 @@ def _download_and_install_wheel(
     staging_dir = os.path.join(updates_dir, f".staging_{module_prefix}_{stamp}")
     backup_dir = os.path.join(updates_dir, f".backup_{module_prefix}_{stamp}")
 
-    with tempfile.NamedTemporaryFile(suffix=".whl", delete=False) as tmp_file:
+    with tempfile.NamedTemporaryFile(
+        suffix=".whl",
+        delete=False,
+        dir=updates_dir,
+    ) as tmp_file:
         tmp_wheel_path = tmp_file.name
 
     try:
@@ -177,7 +206,7 @@ def _download_and_install_wheel(
         )
         hasher = hashlib.sha256()
         with (
-            urllib.request.urlopen(req, timeout=45) as resp,
+            urllib.request.urlopen(req, timeout=45, context=_build_ssl_context()) as resp,
             open(tmp_wheel_path, "wb") as out_f,
         ):
             while True:
@@ -269,11 +298,13 @@ def update_packages(updates_dir: str) -> str:
         except (
             urllib.error.URLError,
             urllib.error.HTTPError,
+            ssl.SSLError,
             TimeoutError,
             OSError,
             RuntimeError,
             ValueError,
             zipfile.BadZipFile,
+            ImportError,
         ) as exc:
             errors.append(f"{pkg_name}: {exc}")
 

@@ -887,20 +887,20 @@ test('Disco Local con Aura SVG logo and adaptive/notification drawables are wire
   const monoXml = path.join(rootDir, 'android/app/src/main/res/drawable/ic_launcher_monochrome.xml');
   const brandXml = path.join(rootDir, 'android/app/src/main/res/drawable/ic_aura_brand_logo.xml');
   const launcherXml = fs.readFileSync(
-    path.join(rootDir, 'android/app/src/main/res/mipmap-anydpi/ic_launcher.xml'),
+    path.join(rootDir, 'android/app/src/main/res/mipmap-anydpi-v26/ic_launcher.xml'),
     'utf8',
   );
   const launcherRoundXml = fs.readFileSync(
-    path.join(rootDir, 'android/app/src/main/res/mipmap-anydpi/ic_launcher_round.xml'),
+    path.join(rootDir, 'android/app/src/main/res/mipmap-anydpi-v26/ic_launcher_round.xml'),
     'utf8',
   );
   const playerNotifXml = fs.readFileSync(
     path.join(rootDir, 'android/core/player/src/main/res/drawable/ic_aura_notification.xml'),
     'utf8',
   );
-  const dlNotifXml = path.join(
-    rootDir,
-    'android/core/downloader/src/main/res/drawable/ic_aura_download_notification.xml',
+  const dlNotifXml = fs.readFileSync(
+    path.join(rootDir, 'android/core/downloader/src/main/res/drawable/ic_aura_download_notification.xml'),
+    'utf8',
   );
   const dlServiceKt = fs.readFileSync(
     path.join(rootDir, 'android/core/downloader/src/main/kotlin/com/auramusic/core/downloader/AuraDownloadForegroundService.kt'),
@@ -915,13 +915,26 @@ test('Disco Local con Aura SVG logo and adaptive/notification drawables are wire
   assert.ok(fs.existsSync(monoSvg), 'Missing android/app/branding/aura_music_monochrome.svg');
   assert.ok(fs.existsSync(monoXml), 'Missing ic_launcher_monochrome.xml');
   assert.ok(fs.existsSync(brandXml), 'Missing ic_aura_brand_logo.xml');
-  assert.ok(fs.existsSync(dlNotifXml), 'Missing ic_aura_download_notification.xml');
+  assert.ok(
+    !fs.existsSync(path.join(rootDir, 'android/app/src/main/res/mipmap-anydpi/ic_launcher.xml')),
+    'Unqualified mipmap-anydpi must not override density raster PNGs in OEM file managers',
+  );
+
+  for (const density of ['mdpi', 'hdpi', 'xhdpi', 'xxhdpi', 'xxxhdpi']) {
+    for (const fileName of ['ic_launcher.png', 'ic_launcher_round.png']) {
+      const pngPath = path.join(rootDir, `android/app/src/main/res/mipmap-${density}/${fileName}`);
+      assert.ok(fs.existsSync(pngPath), `Missing raster launcher icon: mipmap-${density}/${fileName}`);
+      assert.ok(fs.statSync(pngPath).size > 500, `Raster launcher icon is unexpectedly empty: mipmap-${density}/${fileName}`);
+    }
+  }
 
   assert.match(bgXml, /<gradient/);
   assert.match(fgXml, /<gradient/);
   assert.match(launcherXml, /<monochrome android:drawable="@drawable\/ic_launcher_monochrome"/);
   assert.match(launcherRoundXml, /<monochrome android:drawable="@drawable\/ic_launcher_monochrome"/);
   assert.match(playerNotifXml, /evenOdd/);
+  assert.doesNotMatch(playerNotifXml, /android:tint=/);
+  assert.doesNotMatch(dlNotifXml, /android:tint=/);
   assert.match(dlServiceKt, /R\.drawable\.ic_aura_download_notification/);
   assert.match(startupKt, /R\.drawable\.ic_aura_brand_logo/);
 });
@@ -1831,5 +1844,70 @@ test('GitHub lint-and-audit workflow covers Kotlin, Rust, Python, outdated deps,
   assert.match(workflow, /AuraMusic-Lint-Audit-Bundle\.zip/);
 });
 
+test('downloader IPC queues commands sequentially, recovers broken bindings, surfaces status errors, and uses writable wheel temp dir', () => {
+  const serviceKt = fs.readFileSync(
+    path.join(rootDir, 'android/core/downloader/src/main/kotlin/com/auramusic/core/downloader/AuraDownloadForegroundService.kt'),
+    'utf8',
+  );
+  const remoteClientKt = fs.readFileSync(
+    path.join(rootDir, 'android/core/downloader/src/main/kotlin/com/auramusic/core/downloader/AuraDownloaderRemoteClient.kt'),
+    'utf8',
+  );
+  const downloaderKt = fs.readFileSync(
+    path.join(rootDir, 'android/core/downloader/src/main/kotlin/com/auramusic/core/downloader/YtDlpAudioDownloader.kt'),
+    'utf8',
+  );
+  const pyScript = fs.readFileSync(
+    path.join(rootDir, 'android/core/downloader/src/main/python/aura_ytdlp.py'),
+    'utf8',
+  );
+  const appGradle = fs.readFileSync(
+    path.join(rootDir, 'android/app/build.gradle.kts'),
+    'utf8',
+  );
 
+  // 1. Cola secuencial de comandos en el servicio :downloader (sin descartar comandos mientras refresca)
+  assert.match(serviceKt, /Channel<suspend \(\) -> Unit>\(Channel\.UNLIMITED\)/);
+  assert.match(serviceKt, /private fun enqueueCommand\(/);
+  assert.match(serviceKt, /queuedOrActiveCommands/);
+  assert.match(serviceKt, /PROCESS_KILL_SETTLE_DELAY_MS/);
+  assert.doesNotMatch(serviceKt, /if \(activeCommandJob\?\.isActive == true\) return/);
+
+  // 2. Recuperación de enlace IPC, timeout y cola tipada en AuraDownloaderRemoteClient
+  assert.match(remoteClientKt, /sealed interface PendingCommand/);
+  assert.match(remoteClientKt, /CONNECT_TIMEOUT_MS/);
+  assert.match(remoteClientKt, /bindGeneration/);
+  assert.match(remoteClientKt, /override fun onServiceDisconnected/);
+  assert.match(remoteClientKt, /override fun onBindingDied/);
+  assert.match(remoteClientKt, /override fun onNullBinding/);
+  assert.match(remoteClientKt, /isBound\s*=\s*false/);
+  assert.match(remoteClientKt, /pendingLocalUpdate/);
+  assert.match(remoteClientKt, /awaitingRemoteUpdateStart/);
+
+  // 3. Visibilidad real de estado/errores, SSL Android y wheels temporales en Python
+  assert.match(downloaderKt, /fun markUpdateQueued\(/);
+  assert.match(downloaderKt, /No se pudo inicializar el motor Python\/yt-dlp/);
+  assert.match(pyScript, /def _build_ssl_context\(/);
+  assert.match(pyScript, /NamedTemporaryFile\([^)]*dir=updates_dir/);
+  assert.match(appGradle, /versionCode\s*=\s*2/);
+});
+
+test('downloadable full Aura Music PNG logos exist for Uptodown in both branding and web public assets', () => {
+  const assetPaths = [
+    'public/aura_music_logo_512.png',
+    'public/aura_music_logo_1024.png',
+    'public/aura_music_logo.svg',
+    'android/app/branding/aura_music_logo_512.png',
+    'android/app/branding/aura_music_logo_1024.png',
+  ];
+  for (const relPath of assetPaths) {
+    const fullPath = path.join(rootDir, relPath);
+    assert.ok(fs.existsSync(fullPath), `Missing logo asset: ${relPath}`);
+    assert.ok(fs.statSync(fullPath).size > 1000, `Logo asset is unexpectedly small: ${relPath}`);
+  }
+
+  const appTsx = fs.readFileSync(path.join(rootDir, 'src/App.tsx'), 'utf8');
+  assert.match(appTsx, /href="\/aura_music_logo_512\.png"/);
+  assert.match(appTsx, /download="aura_music_logo_512\.png"/);
+});
 

@@ -17,7 +17,7 @@ android {
         // nativos requeridos por Media3 MediaSessionService, iconos adaptativos y mejor ABI Rust.
         minSdk = 26
         targetSdk = 36
-        versionCode = 1
+        versionCode = 2
         versionName = "0.1.0"
 
         // Soporte completo para dispositivos de 32 bits (armeabi-v7a) y 64 bits (arm64-v8a, x86_64),
