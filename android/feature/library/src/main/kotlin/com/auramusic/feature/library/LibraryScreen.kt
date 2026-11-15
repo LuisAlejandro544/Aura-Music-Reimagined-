@@ -1,6 +1,13 @@
 package com.auramusic.feature.library
 
 import android.graphics.Bitmap
+import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -77,6 +84,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
@@ -98,6 +106,7 @@ import com.auramusic.core.model.DeleteEffectFrameRenderer
 import com.auramusic.core.model.ImportProgress
 import com.auramusic.core.model.Track
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.nio.ByteBuffer
@@ -329,6 +338,12 @@ fun LibraryScreen(
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
+                    .animateContentSize(
+                        animationSpec = spring(
+                            dampingRatio = 0.85f,
+                            stiffness = Spring.StiffnessMedium,
+                        ),
+                    )
                     .padding(horizontal = 20.dp)
                     .padding(bottom = 28.dp),
                 verticalArrangement = Arrangement.spacedBy(10.dp),
@@ -528,64 +543,80 @@ private fun TrackRowCard(
             }
 
             Box {
+                val menuIconRotation = rememberLibraryMenuTriggerRotation(menuExpanded)
                 IconButton(onClick = { menuExpanded = true }) {
                     Icon(
                         imageVector = Icons.Rounded.MoreVert,
                         contentDescription = "Opciones de ${track.title}",
+                        modifier = Modifier.graphicsLayer {
+                            rotationZ = menuIconRotation
+                        },
                     )
                 }
                 DropdownMenu(
                     expanded = menuExpanded,
                     onDismissRequest = { menuExpanded = false },
                 ) {
-                    DropdownMenuItem(
-                        text = { Text("Reproducir siguiente") },
-                        leadingIcon = { Icon(Icons.AutoMirrored.Rounded.PlaylistPlay, contentDescription = null) },
-                        onClick = {
-                            menuExpanded = false
-                            onPlayNext()
-                        },
-                    )
-                    DropdownMenuItem(
-                        text = { Text("Añadir a la cola") },
-                        leadingIcon = { Icon(Icons.AutoMirrored.Rounded.QueueMusic, contentDescription = null) },
-                        onClick = {
-                            menuExpanded = false
-                            onAddToQueue()
-                        },
-                    )
-                    DropdownMenuItem(
-                        text = { Text("Añadir a playlist") },
-                        leadingIcon = { Icon(Icons.AutoMirrored.Rounded.PlaylistAdd, contentDescription = null) },
-                        onClick = {
-                            menuExpanded = false
-                            onAddToPlaylist()
-                        },
-                    )
-                    DropdownMenuItem(
-                        text = { Text("Editar metadatos") },
-                        leadingIcon = { Icon(Icons.Rounded.Edit, contentDescription = null) },
-                        onClick = {
-                            menuExpanded = false
-                            onEditMetadata()
-                        },
-                    )
-                    DropdownMenuItem(
-                        text = { Text("Cambiar carátula") },
-                        leadingIcon = { Icon(Icons.Rounded.Image, contentDescription = null) },
-                        onClick = {
-                            menuExpanded = false
-                            onChangeCover()
-                        },
-                    )
-                    DropdownMenuItem(
-                        text = { Text("Quitar de Aura Music") },
-                        leadingIcon = { Icon(Icons.Rounded.DeleteOutline, contentDescription = null) },
-                        onClick = {
-                            menuExpanded = false
-                            onDelete()
-                        },
-                    )
+                    AuraLibraryMenuItemReveal(index = 0) {
+                        DropdownMenuItem(
+                            text = { Text("Reproducir siguiente") },
+                            leadingIcon = { Icon(Icons.AutoMirrored.Rounded.PlaylistPlay, contentDescription = null) },
+                            onClick = {
+                                menuExpanded = false
+                                onPlayNext()
+                            },
+                        )
+                    }
+                    AuraLibraryMenuItemReveal(index = 1) {
+                        DropdownMenuItem(
+                            text = { Text("Añadir a la cola") },
+                            leadingIcon = { Icon(Icons.AutoMirrored.Rounded.QueueMusic, contentDescription = null) },
+                            onClick = {
+                                menuExpanded = false
+                                onAddToQueue()
+                            },
+                        )
+                    }
+                    AuraLibraryMenuItemReveal(index = 2) {
+                        DropdownMenuItem(
+                            text = { Text("Añadir a playlist") },
+                            leadingIcon = { Icon(Icons.AutoMirrored.Rounded.PlaylistAdd, contentDescription = null) },
+                            onClick = {
+                                menuExpanded = false
+                                onAddToPlaylist()
+                            },
+                        )
+                    }
+                    AuraLibraryMenuItemReveal(index = 3) {
+                        DropdownMenuItem(
+                            text = { Text("Editar metadatos") },
+                            leadingIcon = { Icon(Icons.Rounded.Edit, contentDescription = null) },
+                            onClick = {
+                                menuExpanded = false
+                                onEditMetadata()
+                            },
+                        )
+                    }
+                    AuraLibraryMenuItemReveal(index = 4) {
+                        DropdownMenuItem(
+                            text = { Text("Cambiar carátula") },
+                            leadingIcon = { Icon(Icons.Rounded.Image, contentDescription = null) },
+                            onClick = {
+                                menuExpanded = false
+                                onChangeCover()
+                            },
+                        )
+                    }
+                    AuraLibraryMenuItemReveal(index = 5) {
+                        DropdownMenuItem(
+                            text = { Text("Quitar de Aura Music") },
+                            leadingIcon = { Icon(Icons.Rounded.DeleteOutline, contentDescription = null) },
+                            onClick = {
+                                menuExpanded = false
+                                onDelete()
+                            },
+                        )
+                    }
                 }
             }
         }
@@ -930,6 +961,60 @@ private fun RustDeleteEffectHost(
                 )
             }
         }
+    }
+}
+
+/**
+ * Anima la rotación del botón de tres puntos (`MoreVert`) al desplegar o cerrar
+ * el menú de opciones de una canción en la Biblioteca.
+ */
+@Composable
+private fun rememberLibraryMenuTriggerRotation(expanded: Boolean): Float {
+    val rotation by animateFloatAsState(
+        targetValue = if (expanded) 90f else 0f,
+        animationSpec = spring(
+            dampingRatio = 0.74f,
+            stiffness = Spring.StiffnessMedium,
+        ),
+        label = "library_menu_trigger_rotation",
+    )
+    return rotation
+}
+
+/**
+ * Revela cada fila del `DropdownMenu` en cascada rápida usando únicamente `graphicsLayer`
+ * (alpha, desplazamiento y micro-escala) para evitar saltos de medida en el popup.
+ */
+@Composable
+private fun AuraLibraryMenuItemReveal(
+    index: Int,
+    content: @Composable () -> Unit,
+) {
+    val progress = remember { Animatable(0f) }
+    LaunchedEffect(Unit) {
+        if (index > 0) {
+            delay((index * 18L).coerceAtMost(90L))
+        }
+        progress.animateTo(
+            targetValue = 1f,
+            animationSpec = tween(
+                durationMillis = 155,
+                easing = FastOutSlowInEasing,
+            ),
+        )
+    }
+    Box(
+        modifier = Modifier.graphicsLayer {
+            val p = progress.value
+            alpha = p
+            translationY = (1f - p) * -14f
+            val scale = 0.94f + 0.06f * p
+            scaleX = scale
+            scaleY = scale
+            transformOrigin = TransformOrigin(0.88f, 0f)
+        },
+    ) {
+        content()
     }
 }
 

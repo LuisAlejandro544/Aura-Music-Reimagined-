@@ -54,6 +54,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
@@ -376,48 +377,60 @@ private fun ArtistTrackRow(
             }
 
             Box {
+                val menuIconRotation = rememberPlaylistsMenuTriggerRotation(menuExpanded)
                 IconButton(onClick = { menuExpanded = true }) {
                     Icon(
                         imageVector = Icons.Rounded.MoreVert,
                         contentDescription = "Opciones de ${track.title}",
+                        modifier = Modifier.graphicsLayer {
+                            rotationZ = menuIconRotation
+                        },
                     )
                 }
                 DropdownMenu(
                     expanded = menuExpanded,
                     onDismissRequest = { menuExpanded = false },
                 ) {
-                    DropdownMenuItem(
-                        text = { Text("Reproducir siguiente") },
-                        leadingIcon = { Icon(Icons.AutoMirrored.Rounded.PlaylistPlay, contentDescription = null) },
-                        onClick = {
-                            menuExpanded = false
-                            onPlayNext()
-                        },
-                    )
-                    DropdownMenuItem(
-                        text = { Text("Añadir a la cola") },
-                        leadingIcon = { Icon(Icons.AutoMirrored.Rounded.QueueMusic, contentDescription = null) },
-                        onClick = {
-                            menuExpanded = false
-                            onAddToQueue()
-                        },
-                    )
-                    DropdownMenuItem(
-                        text = { Text("Añadir a playlist") },
-                        leadingIcon = { Icon(Icons.AutoMirrored.Rounded.PlaylistAdd, contentDescription = null) },
-                        onClick = {
-                            menuExpanded = false
-                            onAddToPlaylist()
-                        },
-                    )
-                    DropdownMenuItem(
-                        text = { Text("Editar metadatos") },
-                        leadingIcon = { Icon(Icons.Rounded.Edit, contentDescription = null) },
-                        onClick = {
-                            menuExpanded = false
-                            onEditMetadata()
-                        },
-                    )
+                    AuraPlaylistsMenuItemReveal(index = 0) {
+                        DropdownMenuItem(
+                            text = { Text("Reproducir siguiente") },
+                            leadingIcon = { Icon(Icons.AutoMirrored.Rounded.PlaylistPlay, contentDescription = null) },
+                            onClick = {
+                                menuExpanded = false
+                                onPlayNext()
+                            },
+                        )
+                    }
+                    AuraPlaylistsMenuItemReveal(index = 1) {
+                        DropdownMenuItem(
+                            text = { Text("Añadir a la cola") },
+                            leadingIcon = { Icon(Icons.AutoMirrored.Rounded.QueueMusic, contentDescription = null) },
+                            onClick = {
+                                menuExpanded = false
+                                onAddToQueue()
+                            },
+                        )
+                    }
+                    AuraPlaylistsMenuItemReveal(index = 2) {
+                        DropdownMenuItem(
+                            text = { Text("Añadir a playlist") },
+                            leadingIcon = { Icon(Icons.AutoMirrored.Rounded.PlaylistAdd, contentDescription = null) },
+                            onClick = {
+                                menuExpanded = false
+                                onAddToPlaylist()
+                            },
+                        )
+                    }
+                    AuraPlaylistsMenuItemReveal(index = 3) {
+                        DropdownMenuItem(
+                            text = { Text("Editar metadatos") },
+                            leadingIcon = { Icon(Icons.Rounded.Edit, contentDescription = null) },
+                            onClick = {
+                                menuExpanded = false
+                                onEditMetadata()
+                            },
+                        )
+                    }
                 }
             }
         }

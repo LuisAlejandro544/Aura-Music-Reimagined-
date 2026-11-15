@@ -38,26 +38,9 @@ fun AuraAppRoot(viewModel: AuraViewModel) {
     val backStackEntry by navController.currentBackStackEntryAsState()
     val currentRoute = backStackEntry?.destination?.route
 
-    val tracks by viewModel.tracks.collectAsStateWithLifecycle()
-    val likedTracks by viewModel.likedTracks.collectAsStateWithLifecycle()
-    val likedCount by viewModel.likedCount.collectAsStateWithLifecycle()
     val playlists by viewModel.playlists.collectAsStateWithLifecycle()
-    val artistPlaylists by viewModel.artistPlaylists.collectAsStateWithLifecycle()
     val playbackState by viewModel.playbackState.collectAsStateWithLifecycle()
-    val sleepTimerState by viewModel.sleepTimerState.collectAsStateWithLifecycle()
-    val importProgress by viewModel.importProgress.collectAsStateWithLifecycle()
-    val downloadState by viewModel.downloadState.collectAsStateWithLifecycle()
-    val downloaderEngineStatus by viewModel.downloaderEngineStatus.collectAsStateWithLifecycle()
-    val accentColor by viewModel.accentColor.collectAsStateWithLifecycle()
     val dynamicCoverColorsEnabled by viewModel.dynamicCoverColorsEnabled.collectAsStateWithLifecycle()
-    val deleteAnimationsEnabled by viewModel.deleteAnimationsEnabled.collectAsStateWithLifecycle()
-    val equalizerState by viewModel.equalizerState.collectAsStateWithLifecycle()
-    val audioEffects by viewModel.audioEffects.collectAsStateWithLifecycle()
-    val playbackTuning by viewModel.playbackTuning.collectAsStateWithLifecycle()
-    val headphonePreferences by viewModel.headphonePreferences.collectAsStateWithLifecycle()
-    val audioOutputRoute by viewModel.audioOutputRoute.collectAsStateWithLifecycle()
-    val rustEngineInfo by viewModel.rustEngineInfo.collectAsStateWithLifecycle()
-    val systemFolderState by viewModel.systemFolderState.collectAsStateWithLifecycle()
     val appContext = LocalContext.current
 
     val snackbarHostState = remember { SnackbarHostState() }
@@ -158,21 +141,14 @@ fun AuraAppRoot(viewModel: AuraViewModel) {
             NavHost(
                 navController = navController,
                 startDestination = AuraRoutes.LIBRARY,
+                enterTransition = { AuraNavTransitions.enterTransition(this) },
+                exitTransition = { AuraNavTransitions.exitTransition(this) },
+                popEnterTransition = { AuraNavTransitions.popEnterTransition(this) },
+                popExitTransition = { AuraNavTransitions.popExitTransition(this) },
             ) {
                 auraLibraryAndPlaylistsGraph(
                     navController = navController,
                     viewModel = viewModel,
-                    tracks = tracks,
-                    likedTracks = likedTracks,
-                    likedCount = likedCount,
-                    playlists = playlists,
-                    artistPlaylists = artistPlaylists,
-                    playbackState = playbackState,
-                    importProgress = importProgress,
-                    downloadState = downloadState,
-                    downloaderEngineStatus = downloaderEngineStatus,
-                    accentColor = accentColor,
-                    deleteAnimationsEnabled = deleteAnimationsEnabled,
                     deleteEffectRenderer = deleteEffectRenderer,
                     safLaunchers = safLaunchers,
                     onShowQueueFeedback = showQueueFeedback,
@@ -183,27 +159,12 @@ fun AuraAppRoot(viewModel: AuraViewModel) {
                 auraSettingsGraph(
                     navController = navController,
                     viewModel = viewModel,
-                    accentColor = accentColor,
-                    dynamicCoverColorsEnabled = dynamicCoverColorsEnabled,
-                    deleteAnimationsEnabled = deleteAnimationsEnabled,
-                    rustEngineInfo = rustEngineInfo,
-                    audioOutputRoute = audioOutputRoute,
-                    headphonePreferences = headphonePreferences,
-                    systemFolderState = systemFolderState,
                     requestSystemStoragePermission = requestSystemStoragePermission,
                 )
 
                 auraPlayerAndAudioGraph(
                     navController = navController,
                     viewModel = viewModel,
-                    playbackState = playbackState,
-                    playbackTuning = playbackTuning,
-                    equalizerState = equalizerState,
-                    audioEffects = audioEffects,
-                    sleepTimerState = sleepTimerState,
-                    audioOutputRoute = audioOutputRoute,
-                    headphonePreferences = headphonePreferences,
-                    dynamicCoverColorsEnabled = dynamicCoverColorsEnabled,
                     safLaunchers = safLaunchers,
                     onRequestAddToPlaylist = { track -> trackForPlaylistSheet = track },
                     onRequestEditMetadata = { track -> trackPendingMetadataEdit = track },

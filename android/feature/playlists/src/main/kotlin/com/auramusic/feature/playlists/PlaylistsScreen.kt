@@ -1,6 +1,9 @@
 package com.auramusic.feature.playlists
 
 import android.graphics.Bitmap
+import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.spring
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -648,6 +651,12 @@ fun AddToPlaylistBottomSheet(
         Column(
             modifier = Modifier
                 .fillMaxWidth()
+                .animateContentSize(
+                    animationSpec = spring(
+                        dampingRatio = 0.85f,
+                        stiffness = Spring.StiffnessMedium,
+                    ),
+                )
                 .padding(horizontal = 20.dp)
                 .padding(bottom = 28.dp),
         ) {
@@ -1005,61 +1014,76 @@ private fun PlaylistTrackRow(
             }
 
             Box {
+                val menuIconRotation = rememberPlaylistsMenuTriggerRotation(menuExpanded)
                 IconButton(onClick = { menuExpanded = true }) {
                     Icon(
                         imageVector = Icons.Rounded.MoreVert,
                         contentDescription = "Opciones de ${track.title}",
+                        modifier = Modifier.graphicsLayer {
+                            rotationZ = menuIconRotation
+                        },
                     )
                 }
                 DropdownMenu(
                     expanded = menuExpanded,
                     onDismissRequest = { menuExpanded = false },
                 ) {
-                    DropdownMenuItem(
-                        text = { Text("Reproducir siguiente") },
-                        leadingIcon = { Icon(Icons.AutoMirrored.Rounded.PlaylistPlay, contentDescription = null) },
-                        onClick = {
-                            menuExpanded = false
-                            onPlayNext()
-                        },
-                    )
-                    DropdownMenuItem(
-                        text = { Text("Añadir a la cola") },
-                        leadingIcon = { Icon(Icons.AutoMirrored.Rounded.QueueMusic, contentDescription = null) },
-                        onClick = {
-                            menuExpanded = false
-                            onAddToQueue()
-                        },
-                    )
-                    if (onAddToPlaylist != null) {
+                    var menuIndex = 0
+                    AuraPlaylistsMenuItemReveal(index = menuIndex++) {
                         DropdownMenuItem(
-                            text = { Text("Añadir a playlist") },
-                            leadingIcon = { Icon(Icons.AutoMirrored.Rounded.PlaylistAdd, contentDescription = null) },
+                            text = { Text("Reproducir siguiente") },
+                            leadingIcon = { Icon(Icons.AutoMirrored.Rounded.PlaylistPlay, contentDescription = null) },
                             onClick = {
                                 menuExpanded = false
-                                onAddToPlaylist()
+                                onPlayNext()
                             },
                         )
+                    }
+                    AuraPlaylistsMenuItemReveal(index = menuIndex++) {
+                        DropdownMenuItem(
+                            text = { Text("Añadir a la cola") },
+                            leadingIcon = { Icon(Icons.AutoMirrored.Rounded.QueueMusic, contentDescription = null) },
+                            onClick = {
+                                menuExpanded = false
+                                onAddToQueue()
+                            },
+                        )
+                    }
+                    if (onAddToPlaylist != null) {
+                        AuraPlaylistsMenuItemReveal(index = menuIndex++) {
+                            DropdownMenuItem(
+                                text = { Text("Añadir a playlist") },
+                                leadingIcon = { Icon(Icons.AutoMirrored.Rounded.PlaylistAdd, contentDescription = null) },
+                                onClick = {
+                                    menuExpanded = false
+                                    onAddToPlaylist()
+                                },
+                            )
+                        }
                     }
                     if (onEditMetadata != null) {
-                        DropdownMenuItem(
-                            text = { Text("Editar metadatos") },
-                            leadingIcon = { Icon(Icons.Rounded.Edit, contentDescription = null) },
-                            onClick = {
-                                menuExpanded = false
-                                onEditMetadata()
-                            },
-                        )
+                        AuraPlaylistsMenuItemReveal(index = menuIndex++) {
+                            DropdownMenuItem(
+                                text = { Text("Editar metadatos") },
+                                leadingIcon = { Icon(Icons.Rounded.Edit, contentDescription = null) },
+                                onClick = {
+                                    menuExpanded = false
+                                    onEditMetadata()
+                                },
+                            )
+                        }
                     }
                     if (onRemoveFromPlaylist != null) {
-                        DropdownMenuItem(
-                            text = { Text("Quitar de la playlist") },
-                            leadingIcon = { Icon(Icons.Rounded.RemoveCircleOutline, contentDescription = null) },
-                            onClick = {
-                                menuExpanded = false
-                                onRemoveFromPlaylist()
-                            },
-                        )
+                        AuraPlaylistsMenuItemReveal(index = menuIndex) {
+                            DropdownMenuItem(
+                                text = { Text("Quitar de la playlist") },
+                                leadingIcon = { Icon(Icons.Rounded.RemoveCircleOutline, contentDescription = null) },
+                                onClick = {
+                                    menuExpanded = false
+                                    onRemoveFromPlaylist()
+                                },
+                            )
+                        }
                     }
                 }
             }

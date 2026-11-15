@@ -578,6 +578,8 @@ def inspect_audio_preview(
         "quiet": True,
         "no_warnings": False,
         "skip_download": True,
+        "retries": 2,
+        "extractor_retries": 2,
         "socket_timeout": 20,
     }
 

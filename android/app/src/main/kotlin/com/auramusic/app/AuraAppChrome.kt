@@ -8,6 +8,11 @@ import android.provider.Settings
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.layout.Column
@@ -178,8 +183,15 @@ fun AuraBottomChrome(
     Column(modifier = modifier.navigationBarsPadding()) {
         AnimatedVisibility(
             visible = playbackState.currentTrack != null,
-            enter = slideInVertically { it },
-            exit = slideOutVertically { it },
+            enter = slideInVertically(
+                animationSpec = spring(
+                    dampingRatio = 0.86f,
+                    stiffness = Spring.StiffnessMedium,
+                ),
+            ) { it } + fadeIn(tween(180)),
+            exit = slideOutVertically(
+                animationSpec = tween(170),
+            ) { it } + fadeOut(tween(140)),
         ) {
             MiniPlayerBar(
                 playbackState = playbackState,

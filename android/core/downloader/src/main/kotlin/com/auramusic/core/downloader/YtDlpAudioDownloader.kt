@@ -13,6 +13,7 @@ import com.auramusic.core.model.DownloaderEngineStatus
 import com.auramusic.core.rust.AuraRustBridge
 import com.chaquo.python.Python
 import com.chaquo.python.android.AndroidPlatform
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -154,16 +155,16 @@ class YtDlpAudioDownloader(
         val pyInfo = pyResult.getOrNull()
         val pyFailure = pyResult.exceptionOrNull()
 
-        val pythonVer = pyInfo?.optString("python_version")?.takeIf { it.isNotBlank() }
+        val pythonVer = pyInfo?.optCleanString("python_version")
             ?: "Python 3.11 (ligero)"
-        val ytDlpVer = pyInfo?.optString("yt_dlp_version")?.takeIf { it.isNotBlank() }
+        val ytDlpVer = pyInfo?.optCleanString("yt_dlp_version")
             ?: "No inicializado"
-        val ytDlpEjsVer = pyInfo?.optString("yt_dlp_ejs_version")?.takeIf { it.isNotBlank() }
+        val ytDlpEjsVer = pyInfo?.optCleanString("yt_dlp_ejs_version")
             ?: "No inicializado"
-        val ytDlpUpdated = pyInfo?.optString("yt_dlp_updated_at")?.takeIf { it.isNotBlank() }
-        val ytDlpEjsUpdated = pyInfo?.optString("yt_dlp_ejs_updated_at")?.takeIf { it.isNotBlank() }
-        val ytDlpErr = pyInfo?.optString("yt_dlp_error")?.takeIf { it.isNotBlank() }
-        val ytDlpEjsErr = pyInfo?.optString("yt_dlp_ejs_error")?.takeIf { it.isNotBlank() }
+        val ytDlpUpdated = pyInfo?.optCleanString("yt_dlp_updated_at")
+        val ytDlpEjsUpdated = pyInfo?.optCleanString("yt_dlp_ejs_updated_at")
+        val ytDlpErr = pyInfo?.optCleanString("yt_dlp_error")
+        val ytDlpEjsErr = pyInfo?.optCleanString("yt_dlp_ejs_error")
 
         val diagnosticMessage = when {
             pyFailure != null ->
@@ -293,11 +294,11 @@ class YtDlpAudioDownloader(
         return@withContext result.fold(
             onSuccess = { json ->
                 val ok = json.optBoolean("ok", true)
-                val pythonVer = json.optString("python_version", _engineStatus.value.pythonVersion)
-                val ytDlpVer = json.optString("yt_dlp_version", _engineStatus.value.ytDlpVersion)
-                val ytDlpEjsVer = json.optString("yt_dlp_ejs_version", _engineStatus.value.ytDlpEjsVersion)
-                val ytDlpUpdated = json.optString("yt_dlp_updated_at").takeIf { it.isNotBlank() }
-                val ytDlpEjsUpdated = json.optString("yt_dlp_ejs_updated_at").takeIf { it.isNotBlank() }
+                val pythonVer = json.optCleanString("python_version") ?: _engineStatus.value.pythonVersion
+                val ytDlpVer = json.optCleanString("yt_dlp_version") ?: _engineStatus.value.ytDlpVersion
+                val ytDlpEjsVer = json.optCleanString("yt_dlp_ejs_version") ?: _engineStatus.value.ytDlpEjsVersion
+                val ytDlpUpdated = json.optCleanString("yt_dlp_updated_at")
+                val ytDlpEjsUpdated = json.optCleanString("yt_dlp_ejs_updated_at")
 
                 AuraDownloaderIpc.writeCachedEngineVersions(
                     context = context,
@@ -315,7 +316,7 @@ class YtDlpAudioDownloader(
                     ytDlpUpdatedAt = ytDlpUpdated,
                     ytDlpEjsUpdatedAt = ytDlpEjsUpdated,
                     isUpdating = false,
-                    updateMessage = json.optString("message").takeIf { it.isNotBlank() },
+                    updateMessage = json.optCleanString("message"),
                 )
                 ok
             },
@@ -351,105 +352,115 @@ class YtDlpAudioDownloader(
 
         if (_downloadState.value.isBusy) return@withContext
 
-        cleanupPreviewThumbs()
+        try {
+            cleanupPreviewThumbs()
 
-        val autoUpdate = autoUpdateOverride
-            ?: if (!remoteWorkerMode && preferencesRepository != null) {
-                preferencesRepository.autoUpdateEnabled.first()
-            } else {
-                cachedAutoUpdateEnabled
-            }
-        val preferredQuality = qualityOverride
-            ?: if (!remoteWorkerMode && preferencesRepository != null) {
-                preferencesRepository.audioDownloadQuality.first()
-            } else {
-                cachedPreferredQuality
-            }
-        cachedAutoUpdateEnabled = autoUpdate
-        cachedPreferredQuality = preferredQuality
+            val autoUpdate = autoUpdateOverride
+                ?: if (!remoteWorkerMode && preferencesRepository != null) {
+                    preferencesRepository.autoUpdateEnabled.first()
+                } else {
+                    cachedAutoUpdateEnabled
+                }
+            val preferredQuality = qualityOverride
+                ?: if (!remoteWorkerMode && preferencesRepository != null) {
+                    preferencesRepository.audioDownloadQuality.first()
+                } else {
+                    cachedPreferredQuality
+                }
+            cachedAutoUpdateEnabled = autoUpdate
+            cachedPreferredQuality = preferredQuality
 
-        if (autoUpdate) {
+            if (autoUpdate) {
+                _downloadState.value = DownloadState(
+                    status = DownloadStatus.CHECKING_UPDATES,
+                    sourceUrl = cleanUrl,
+                    statusMessage = "Verificando actualizaciones de yt-dlp y yt-dlp-ejs...",
+                )
+                checkAndUpdateEngines(
+                    force = false,
+                    autoUpdateOverride = autoUpdate,
+                    lastCheckOverride = lastCheckOverride,
+                )
+            }
+
             _downloadState.value = DownloadState(
-                status = DownloadStatus.CHECKING_UPDATES,
+                status = DownloadStatus.FETCHING_INFO,
                 sourceUrl = cleanUrl,
-                statusMessage = "Verificando actualizaciones de yt-dlp y yt-dlp-ejs...",
+                statusMessage = "Obteniendo información del enlace con QuickJS-NG...",
             )
-            checkAndUpdateEngines(
-                force = false,
-                autoUpdateOverride = autoUpdate,
-                lastCheckOverride = lastCheckOverride,
+
+            _engineStatus.value = _engineStatus.value.copy(
+                autoUpdateEnabled = autoUpdate,
+                preferredQuality = preferredQuality,
             )
-        }
+            val qjsPath = AuraRustBridge.resolveQuickJsBinaryPath(context)
 
-        _downloadState.value = DownloadState(
-            status = DownloadStatus.FETCHING_INFO,
-            sourceUrl = cleanUrl,
-            statusMessage = "Obteniendo información del enlace con QuickJS-NG...",
-        )
-
-        _engineStatus.value = _engineStatus.value.copy(
-            autoUpdateEnabled = autoUpdate,
-            preferredQuality = preferredQuality,
-        )
-        val qjsPath = AuraRustBridge.resolveQuickJsBinaryPath(context)
-
-        val inspectResult = runCatching {
-            pythonMutex.withLock {
-                val py = ensurePythonStarted()
-                val mod = py.getModule("aura_ytdlp")
-                val rawJson = mod.callAttr(
-                    "inspect_audio_preview",
-                    cleanUrl,
-                    previewCacheDir.absolutePath,
-                    updatesDir.absolutePath,
-                    qjsPath,
-                    preferredQuality.key,
-                ).toString()
-                JSONObject(rawJson)
+            val inspectResult = runCatching {
+                pythonMutex.withLock {
+                    val py = ensurePythonStarted()
+                    val mod = py.getModule("aura_ytdlp")
+                    val rawJson = mod.callAttr(
+                        "inspect_audio_preview",
+                        cleanUrl,
+                        previewCacheDir.absolutePath,
+                        updatesDir.absolutePath,
+                        qjsPath,
+                        preferredQuality.key,
+                    ).toString()
+                    JSONObject(rawJson)
+                }
             }
-        }
 
-        val info = inspectResult.getOrElse { err ->
+            val info = inspectResult.getOrElse { err ->
+                _downloadState.value = DownloadState(
+                    status = DownloadStatus.ERROR,
+                    sourceUrl = cleanUrl,
+                    errorMessage = humanizeDownloadError(err.message ?: err.javaClass.simpleName),
+                )
+                return@withContext
+            }
+
+            val availableFormats = parseAvailableFormats(info)
+            val rawSelectedId = info.optCleanString("selected_format_id")
+            val defaultOption = DownloadFormatHelper.pickDefaultOption(availableFormats, preferredQuality)
+            val initialSelectedId = availableFormats.firstOrNull { it.formatId == rawSelectedId }?.formatId
+                ?: defaultOption?.formatId
+
+            val basePreview = DownloadPreview(
+                sourceUrl = info.optCleanString("webpage_url") ?: cleanUrl,
+                videoId = info.optCleanString("video_id") ?: "",
+                title = info.optCleanString("title", rejectLiteralNull = false) ?: "Audio sin título",
+                channelOrArtist = info.optCleanString("artist", rejectLiteralNull = false) ?: "Descarga web",
+                durationMs = info.optLong("duration_ms", 0L),
+                estimatedSizeBytes = info.optLong("estimated_size_bytes", 0L),
+                audioFormatLabel = info.optCleanString("audio_format_label") ?: "",
+                localThumbnailPath = info.optCleanString("thumbnail_path"),
+                availableFormats = availableFormats,
+                selectedFormatId = initialSelectedId,
+            )
+            val preview = if (initialSelectedId != null) {
+                DownloadFormatHelper.selectOption(basePreview, initialSelectedId)
+            } else {
+                basePreview
+            }
+
+            _downloadState.value = DownloadState(
+                status = DownloadStatus.PREVIEW_READY,
+                sourceUrl = cleanUrl,
+                title = preview.title,
+                totalBytes = preview.estimatedSizeBytes,
+                preview = preview,
+                statusMessage = "Confirma los datos antes de iniciar la descarga.",
+            )
+        } catch (ce: CancellationException) {
+            throw ce
+        } catch (t: Throwable) {
             _downloadState.value = DownloadState(
                 status = DownloadStatus.ERROR,
                 sourceUrl = cleanUrl,
-                errorMessage = humanizeDownloadError(err.message),
+                errorMessage = humanizeDownloadError(t.message ?: t.javaClass.simpleName),
             )
-            return@withContext
         }
-
-        val availableFormats = parseAvailableFormats(info)
-        val rawSelectedId = info.optString("selected_format_id").takeIf { it.isNotBlank() }
-        val defaultOption = DownloadFormatHelper.pickDefaultOption(availableFormats, preferredQuality)
-        val initialSelectedId = availableFormats.firstOrNull { it.formatId == rawSelectedId }?.formatId
-            ?: defaultOption?.formatId
-
-        val basePreview = DownloadPreview(
-            sourceUrl = info.optString("webpage_url").takeIf { it.isNotBlank() } ?: cleanUrl,
-            videoId = info.optString("video_id"),
-            title = info.optString("title", "Audio sin título"),
-            channelOrArtist = info.optString("artist", "Descarga web"),
-            durationMs = info.optLong("duration_ms", 0L),
-            estimatedSizeBytes = info.optLong("estimated_size_bytes", 0L),
-            audioFormatLabel = info.optString("audio_format_label"),
-            localThumbnailPath = info.optString("thumbnail_path").takeIf { it.isNotBlank() },
-            availableFormats = availableFormats,
-            selectedFormatId = initialSelectedId,
-        )
-        val preview = if (initialSelectedId != null) {
-            DownloadFormatHelper.selectOption(basePreview, initialSelectedId)
-        } else {
-            basePreview
-        }
-
-        _downloadState.value = DownloadState(
-            status = DownloadStatus.PREVIEW_READY,
-            sourceUrl = cleanUrl,
-            title = preview.title,
-            totalBytes = preview.estimatedSizeBytes,
-            preview = preview,
-            statusMessage = "Confirma los datos antes de iniciar la descarga.",
-        )
     }
 
     private fun parseAvailableFormats(info: JSONObject): List<DownloadAudioFormatOption> {
@@ -457,16 +468,16 @@ class YtDlpAudioDownloader(
         return buildList(array.length()) {
             for (idx in 0 until array.length()) {
                 val item = array.optJSONObject(idx) ?: continue
-                val formatId = item.optString("format_id").trim()
+                val formatId = item.optCleanString("format_id")?.trim().orEmpty()
                 if (formatId.isEmpty()) continue
                 add(
                     DownloadAudioFormatOption(
                         formatId = formatId,
-                        extension = item.optString("extension", "audio"),
-                        codec = item.optString("codec", ""),
+                        extension = item.optCleanString("extension") ?: "audio",
+                        codec = item.optCleanString("codec") ?: "",
                         bitrateKbps = item.optInt("bitrate_kbps", 0),
                         estimatedSizeBytes = item.optLong("estimated_size_bytes", 0L),
-                        label = item.optString("label", ""),
+                        label = item.optCleanString("label") ?: "",
                     ),
                 )
             }
@@ -574,194 +585,212 @@ class YtDlpAudioDownloader(
         if (_downloadState.value.isBusy) return@withContext
         cancelRequested.set(false)
 
-        val autoUpdate = autoUpdateOverride
-            ?: if (!remoteWorkerMode && preferencesRepository != null) {
-                preferencesRepository.autoUpdateEnabled.first()
-            } else {
-                cachedAutoUpdateEnabled
-            }
-        val preferredQuality = qualityOverride
-            ?: if (!remoteWorkerMode && preferencesRepository != null) {
-                preferencesRepository.audioDownloadQuality.first()
-            } else {
-                cachedPreferredQuality
-            }
-        cachedAutoUpdateEnabled = autoUpdate
-        cachedPreferredQuality = preferredQuality
-
-        if (preview == null && autoUpdate) {
-            _downloadState.value = DownloadState(
-                status = DownloadStatus.CHECKING_UPDATES,
-                sourceUrl = cleanUrl,
-                statusMessage = "Verificando actualizaciones de yt-dlp y yt-dlp-ejs...",
-            )
-            checkAndUpdateEngines(
-                force = false,
-                autoUpdateOverride = autoUpdate,
-                lastCheckOverride = lastCheckOverride,
-            )
-        }
-
-        if (cancelRequested.get()) {
-            _downloadState.value = DownloadState(
-                status = DownloadStatus.CANCELLED,
-                sourceUrl = cleanUrl,
-                title = preview?.title,
-                statusMessage = "Descarga cancelada por el usuario.",
-            )
-            return@withContext
-        }
-
-        _downloadState.value = DownloadState(
-            status = DownloadStatus.RESOLVING,
-            sourceUrl = cleanUrl,
-            title = preview?.title,
-            totalBytes = preview?.estimatedSizeBytes ?: 0L,
-            preview = preview,
-            statusMessage = "Resolviendo flujo de audio con QuickJS-NG...",
-        )
-
-        val qjsPath = AuraRustBridge.resolveQuickJsBinaryPath(context)
-
-        val downloadResult = runCatching {
-            pythonMutex.withLock {
-                val py = ensurePythonStarted()
-                val mod = py.getModule("aura_ytdlp")
-                val callback = PyProgressBridge { payloadJson ->
-                    onPythonProgress(payloadJson, preview?.estimatedSizeBytes ?: 0L)
+        try {
+            val autoUpdate = autoUpdateOverride
+                ?: if (!remoteWorkerMode && preferencesRepository != null) {
+                    preferencesRepository.autoUpdateEnabled.first()
+                } else {
+                    cachedAutoUpdateEnabled
                 }
-                val cancelBridge = PyCancelBridge { cancelRequested.get() }
-                val resultJson = mod.callAttr(
-                    "download_audio",
-                    cleanUrl,
-                    downloadsDir.absolutePath,
-                    updatesDir.absolutePath,
-                    qjsPath,
-                    callback,
-                    cancelBridge,
-                    preferredQuality.key,
-                    preview?.selectedFormatId,
-                ).toString()
-                JSONObject(resultJson)
+            val preferredQuality = qualityOverride
+                ?: if (!remoteWorkerMode && preferencesRepository != null) {
+                    preferencesRepository.audioDownloadQuality.first()
+                } else {
+                    cachedPreferredQuality
+                }
+            cachedAutoUpdateEnabled = autoUpdate
+            cachedPreferredQuality = preferredQuality
+
+            if (preview == null && autoUpdate) {
+                _downloadState.value = DownloadState(
+                    status = DownloadStatus.CHECKING_UPDATES,
+                    sourceUrl = cleanUrl,
+                    statusMessage = "Verificando actualizaciones de yt-dlp y yt-dlp-ejs...",
+                )
+                checkAndUpdateEngines(
+                    force = false,
+                    autoUpdateOverride = autoUpdate,
+                    lastCheckOverride = lastCheckOverride,
+                )
             }
-        }
 
-        val info = downloadResult.getOrElse { err ->
-            val rawMsg = err.message.orEmpty()
-            val wasCancelled = cancelRequested.get() ||
-                rawMsg.contains("DownloadCancelledError", ignoreCase = true) ||
-                rawMsg.contains("cancelada por el usuario", ignoreCase = true)
-
-            if (wasCancelled) {
-                cleanupPartialDownloadFiles()
+            if (cancelRequested.get()) {
                 _downloadState.value = DownloadState(
                     status = DownloadStatus.CANCELLED,
                     sourceUrl = cleanUrl,
                     title = preview?.title,
                     statusMessage = "Descarga cancelada por el usuario.",
                 )
-            } else {
-                _downloadState.value = DownloadState(
-                    status = DownloadStatus.ERROR,
-                    sourceUrl = cleanUrl,
-                    title = preview?.title,
-                    errorMessage = humanizeDownloadError(err.message),
-                )
+                return@withContext
             }
-            return@withContext
-        }
-
-        val audioFile = File(info.optString("audio_path"))
-        val thumbPath = info.optString("thumbnail_path").takeIf { it.isNotBlank() }
-        val thumbFile = thumbPath?.let(::File)?.takeIf { it.exists() }
-            ?: preview?.localThumbnailPath?.let(::File)?.takeIf { it.exists() }
-        val title = info.optString("title", preview?.title ?: "Audio descargado")
-        val artist = info.optString("artist", preview?.channelOrArtist ?: "Descarga web")
-        val album = info.optString("album", "Descargas Aura")
-        val durationMs = info.optLong("duration_ms", preview?.durationMs ?: 0L)
-
-        _downloadState.value = _downloadState.value.copy(
-            status = DownloadStatus.IMPORTING,
-            title = title,
-            progressPercent = 100f,
-            speedBytesPerSec = 0L,
-            statusMessage = "Leyendo metadatos con Rust (lofty) y agregando a tu biblioteca...",
-        )
-
-        if (remoteWorkerMode || audioImporter == null) {
-            val pendingDir = AuraDownloaderIpc.pendingImportsDir(context)
-            val seq = pendingSeq.incrementAndGet()
-            val stamp = System.currentTimeMillis()
-            // Preserva la miniatura fuera de preview_thumbs antes de limpiar la caché temporal.
-            val stagedThumbPath = if (thumbFile != null && thumbFile.exists()) {
-                val stagedFile = File(pendingDir, "thumb_${stamp}_$seq.img")
-                runCatching {
-                    thumbFile.copyTo(stagedFile, overwrite = true)
-                    stagedFile.absolutePath
-                }.getOrNull()
-            } else {
-                null
-            }
-
-            val descriptor = PendingDownloadedImport(
-                sourceUrl = cleanUrl,
-                audioPath = audioFile.absolutePath,
-                thumbnailPath = stagedThumbPath,
-                title = title,
-                artist = artist,
-                album = album,
-                durationMs = durationMs,
-                accentArgb = accentArgb,
-            )
-            val descriptorFile = File(pendingDir, "dl_${stamp}_$seq.json")
-            val tmpFile = File(pendingDir, "dl_${stamp}_$seq.json.tmp")
-            tmpFile.writeText(descriptor.toJson())
-            if (!tmpFile.renameTo(descriptorFile)) {
-                descriptorFile.writeText(descriptor.toJson())
-                tmpFile.delete()
-            }
-
-            cleanupPreviewThumbs()
-            onPendingImportCreated?.invoke(descriptorFile.absolutePath)
 
             _downloadState.value = DownloadState(
-                status = DownloadStatus.COMPLETED,
+                status = DownloadStatus.RESOLVING,
                 sourceUrl = cleanUrl,
+                title = preview?.title,
+                totalBytes = preview?.estimatedSizeBytes ?: 0L,
+                preview = preview,
+                statusMessage = "Resolviendo flujo de audio con QuickJS-NG...",
+            )
+
+            val qjsPath = AuraRustBridge.resolveQuickJsBinaryPath(context)
+
+            val downloadResult = runCatching {
+                pythonMutex.withLock {
+                    val py = ensurePythonStarted()
+                    val mod = py.getModule("aura_ytdlp")
+                    val callback = PyProgressBridge { payloadJson ->
+                        onPythonProgress(payloadJson, preview?.estimatedSizeBytes ?: 0L)
+                    }
+                    val cancelBridge = PyCancelBridge { cancelRequested.get() }
+                    val resultJson = mod.callAttr(
+                        "download_audio",
+                        cleanUrl,
+                        downloadsDir.absolutePath,
+                        updatesDir.absolutePath,
+                        qjsPath,
+                        callback,
+                        cancelBridge,
+                        preferredQuality.key,
+                        preview?.selectedFormatId,
+                    ).toString()
+                    JSONObject(resultJson)
+                }
+            }
+
+            val info = downloadResult.getOrElse { err ->
+                val rawMsg = err.message.orEmpty()
+                val wasCancelled = cancelRequested.get() ||
+                    rawMsg.contains("DownloadCancelledError", ignoreCase = true) ||
+                    rawMsg.contains("cancelada por el usuario", ignoreCase = true)
+
+                if (wasCancelled) {
+                    cleanupPartialDownloadFiles()
+                    _downloadState.value = DownloadState(
+                        status = DownloadStatus.CANCELLED,
+                        sourceUrl = cleanUrl,
+                        title = preview?.title,
+                        statusMessage = "Descarga cancelada por el usuario.",
+                    )
+                } else {
+                    _downloadState.value = DownloadState(
+                        status = DownloadStatus.ERROR,
+                        sourceUrl = cleanUrl,
+                        title = preview?.title,
+                        errorMessage = humanizeDownloadError(err.message ?: err.javaClass.simpleName),
+                    )
+                }
+                return@withContext
+            }
+
+            val audioPath = info.optCleanString("audio_path")
+                ?: throw IllegalStateException("yt-dlp no devolvió la ruta del archivo de audio.")
+            val audioFile = File(audioPath)
+            val thumbPath = info.optCleanString("thumbnail_path")
+            val thumbFile = thumbPath?.let(::File)?.takeIf { it.exists() }
+                ?: preview?.localThumbnailPath?.let(::File)?.takeIf { it.exists() }
+            val title = info.optCleanString("title", rejectLiteralNull = false)
+                ?: preview?.title
+                ?: "Audio descargado"
+            val artist = info.optCleanString("artist", rejectLiteralNull = false)
+                ?: preview?.channelOrArtist
+                ?: "Descarga web"
+            val album = info.optCleanString("album", rejectLiteralNull = false) ?: "Descargas Aura"
+            val durationMs = info.optLong("duration_ms", preview?.durationMs ?: 0L)
+
+            _downloadState.value = _downloadState.value.copy(
+                status = DownloadStatus.IMPORTING,
                 title = title,
                 progressPercent = 100f,
-                statusMessage = "Agregada a tu biblioteca: $title",
+                speedBytesPerSec = 0L,
+                statusMessage = "Leyendo metadatos con Rust (lofty) y agregando a tu biblioteca...",
             )
-            return@withContext
-        }
 
-        val importedTrack = audioImporter.importDownloadedAudioFile(
-            audioFile = audioFile,
-            fallbackTitle = title,
-            fallbackArtist = artist,
-            fallbackAlbum = album,
-            fallbackDurationMs = durationMs,
-            thumbnailFile = thumbFile,
-            accentArgb = accentArgb,
-        )
+            if (remoteWorkerMode || audioImporter == null) {
+                val pendingDir = AuraDownloaderIpc.pendingImportsDir(context)
+                val seq = pendingSeq.incrementAndGet()
+                val stamp = System.currentTimeMillis()
+                // Preserva la miniatura fuera de preview_thumbs antes de limpiar la caché temporal.
+                val stagedThumbPath = if (thumbFile != null && thumbFile.exists()) {
+                    val stagedFile = File(pendingDir, "thumb_${stamp}_$seq.img")
+                    runCatching {
+                        thumbFile.copyTo(stagedFile, overwrite = true)
+                        stagedFile.absolutePath
+                    }.getOrNull()
+                } else {
+                    null
+                }
 
-        cleanupPreviewThumbs()
+                val descriptor = PendingDownloadedImport(
+                    sourceUrl = cleanUrl,
+                    audioPath = audioFile.absolutePath,
+                    thumbnailPath = stagedThumbPath,
+                    title = title,
+                    artist = artist,
+                    album = album,
+                    durationMs = durationMs,
+                    accentArgb = accentArgb,
+                )
+                val descriptorFile = File(pendingDir, "dl_${stamp}_$seq.json")
+                val tmpFile = File(pendingDir, "dl_${stamp}_$seq.json.tmp")
+                tmpFile.writeText(descriptor.toJson())
+                if (!tmpFile.renameTo(descriptorFile)) {
+                    descriptorFile.writeText(descriptor.toJson())
+                    tmpFile.delete()
+                }
 
-        _downloadState.value = if (importedTrack != null) {
-            DownloadState(
-                status = DownloadStatus.COMPLETED,
-                sourceUrl = cleanUrl,
-                title = importedTrack.title,
-                progressPercent = 100f,
-                statusMessage = "Agregada a tu biblioteca: ${importedTrack.title}",
-                lastCompletedTrack = importedTrack,
+                cleanupPreviewThumbs()
+                onPendingImportCreated?.invoke(descriptorFile.absolutePath)
+
+                _downloadState.value = DownloadState(
+                    status = DownloadStatus.COMPLETED,
+                    sourceUrl = cleanUrl,
+                    title = title,
+                    progressPercent = 100f,
+                    statusMessage = "Agregada a tu biblioteca: $title",
+                )
+                return@withContext
+            }
+
+            val importedTrack = audioImporter.importDownloadedAudioFile(
+                audioFile = audioFile,
+                fallbackTitle = title,
+                fallbackArtist = artist,
+                fallbackAlbum = album,
+                fallbackDurationMs = durationMs,
+                thumbnailFile = thumbFile,
+                accentArgb = accentArgb,
             )
-        } else {
-            DownloadState(
-                status = DownloadStatus.COMPLETED,
+
+            cleanupPreviewThumbs()
+
+            _downloadState.value = if (importedTrack != null) {
+                DownloadState(
+                    status = DownloadStatus.COMPLETED,
+                    sourceUrl = cleanUrl,
+                    title = importedTrack.title,
+                    progressPercent = 100f,
+                    statusMessage = "Agregada a tu biblioteca: ${importedTrack.title}",
+                    lastCompletedTrack = importedTrack,
+                )
+            } else {
+                DownloadState(
+                    status = DownloadStatus.COMPLETED,
+                    sourceUrl = cleanUrl,
+                    title = title,
+                    progressPercent = 100f,
+                    statusMessage = "La pista ya existía o se completó en tu biblioteca.",
+                )
+            }
+        } catch (ce: CancellationException) {
+            throw ce
+        } catch (t: Throwable) {
+            cleanupPartialDownloadFiles()
+            _downloadState.value = DownloadState(
+                status = DownloadStatus.ERROR,
                 sourceUrl = cleanUrl,
-                title = title,
-                progressPercent = 100f,
-                statusMessage = "La pista ya existía o se completó en tu biblioteca.",
+                title = preview?.title,
+                errorMessage = humanizeDownloadError(t.message ?: t.javaClass.simpleName),
             )
         }
     }
@@ -806,13 +835,13 @@ class YtDlpAudioDownloader(
     private fun onPythonProgress(payloadJson: String, fallbackTotalBytes: Long) {
         if (cancelRequested.get()) return
         val json = runCatching { JSONObject(payloadJson) }.getOrNull() ?: return
-        val stage = json.optString("stage")
+        val stage = json.optCleanString("stage") ?: ""
         val percent = json.optDouble("percent", 0.0).toFloat()
         val downloaded = json.optLong("downloaded", 0L)
         val reportedTotal = json.optLong("total", 0L)
         val total = if (reportedTotal > 0L) reportedTotal else fallbackTotalBytes
         val speedBps = json.optLong("speed_bps", 0L).coerceAtLeast(0L)
-        val title = json.optString("title").takeIf { it.isNotBlank() }
+        val title = json.optCleanString("title", rejectLiteralNull = false)
 
         val mappedStatus = when (stage) {
             "resolving" -> DownloadStatus.RESOLVING
@@ -887,14 +916,26 @@ class YtDlpAudioDownloader(
         }
 
         fun humanizeDownloadError(rawMessage: String?): String {
-            val msg = rawMessage.orEmpty()
+            val msg = rawMessage.orEmpty().trim()
             return when {
                 msg.contains("Sign in to confirm", ignoreCase = true) ||
                     msg.contains("not a bot", ignoreCase = true) ->
                     "YouTube bloqueó temporalmente esta IP pidiendo verificación antibot. " +
                         "Intenta actualizar yt-dlp/yt-dlp-ejs o cambiar de red."
                 msg.contains("HTTP Error 403", ignoreCase = true) ->
-                    "YouTube devolvió error 403. Prueba pulsar 'Actualizar ahora' para bajar el parche más reciente de yt-dlp y yt-dlp-ejs."
+                    "YouTube devolvió error 403. Prueba pulsar 'Buscar y actualizar ahora' para bajar el parche más reciente de yt-dlp y yt-dlp-ejs."
+                msg.contains("Private video", ignoreCase = true) ->
+                    "El vídeo o audio es privado y no se puede analizar."
+                msg.contains("Video unavailable", ignoreCase = true) ||
+                    msg.contains("This video is unavailable", ignoreCase = true) ->
+                    "El contenido no está disponible en este momento o fue eliminado."
+                msg.contains("Requested format is not available", ignoreCase = true) ->
+                    "El formato solicitado no está disponible para este enlace; prueba otro preset de calidad."
+                msg.contains("timed out", ignoreCase = true) ||
+                    msg.contains("timeout", ignoreCase = true) ||
+                    msg.contains("Temporary failure in name resolution", ignoreCase = true) ||
+                    msg.contains("NameResolutionError", ignoreCase = true) ->
+                    "Tiempo de espera agotado o sin conexión estable al consultar el enlace. Verifica tu red e inténtalo de nuevo."
                 msg.contains("Unsupported URL", ignoreCase = true) ->
                     "El enlace ingresado no es compatible o está incompleto."
                 msg.isBlank() ->

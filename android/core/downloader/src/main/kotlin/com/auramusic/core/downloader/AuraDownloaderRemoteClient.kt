@@ -83,10 +83,16 @@ class AuraDownloaderRemoteClient(
                 AuraDownloaderIpc.MSG_DOWNLOAD_STATE -> {
                     val raw = msg.data.getString(AuraDownloaderIpc.KEY_JSON) ?: return
                     val parsed = AuraDownloaderIpc.downloadStateFromJson(raw)
-                    if (awaitingInspectAck && parsed.status == DownloadStatus.IDLE) {
-                        // Evita que la instantánea inicial de MSG_REGISTER_CLIENT borre
-                        // la transición local a FETCHING_INFO mientras llega MSG_INSPECT_URL.
-                        return
+                    val isInitialSnapshot = msg.data.getBoolean(AuraDownloaderIpc.KEY_INITIAL_SNAPSHOT, false)
+                    if (awaitingInspectAck) {
+                        if (isInitialSnapshot && !parsed.isBusy) {
+                            // Evita que la instantánea inicial de MSG_REGISTER_CLIENT borre
+                            // la transición local a FETCHING_INFO mientras llega MSG_INSPECT_URL.
+                            return
+                        }
+                        if (parsed.status == DownloadStatus.IDLE) {
+                            return
+                        }
                     }
                     if (parsed.status != DownloadStatus.IDLE) {
                         awaitingInspectAck = false
@@ -376,14 +382,14 @@ class AuraDownloaderRemoteClient(
     }
 
     fun checkAndUpdateEngines(force: Boolean = true) {
+        awaitingUpdateAck = true
+        _engineStatus.value = _engineStatus.value.copy(
+            isUpdating = true,
+            updateMessage = "Buscando actualizaciones de yt-dlp y yt-dlp-ejs...",
+        )
         scope.launch(Dispatchers.IO) {
             val autoUpdate = preferencesRepository.autoUpdateEnabled.first()
             val lastCheck = preferencesRepository.lastUpdateCheckEpochMs.first()
-            awaitingUpdateAck = true
-            _engineStatus.value = _engineStatus.value.copy(
-                isUpdating = true,
-                updateMessage = "Buscando actualizaciones de yt-dlp y yt-dlp-ejs...",
-            )
             val msg = Message.obtain(null, AuraDownloaderIpc.MSG_CHECK_UPDATES).apply {
                 data = Bundle().apply {
                     putBoolean(AuraDownloaderIpc.KEY_FORCE, force)
@@ -535,13 +541,41 @@ class AuraDownloaderRemoteClient(
         }
     }
 
+    /**
+     * Envía o encola de forma atómica un comando hacia `:downloader` bajo `bindingLock`,
+     * eliminando la ventana de carrera entre comprobación de enlace y `onServiceConnected`.
+     */
     private fun enqueueOrSendMessage(msg: Message) {
-        val remote = synchronized(bindingLock) { serviceMessenger }
-        if (remote != null && sendRawMessage(remote, msg)) {
+        val remote = synchronized(bindingLock) {
+            val current = serviceMessenger
+            if (current == null) {
+                pendingCommands.add(msg)
+            }
+            current
+        }
+        if (remote == null) {
+            bindToDownloaderService()
             return
         }
-        synchronized(bindingLock) {
-            pendingCommands.add(msg)
+        if (sendRawMessage(remote, msg)) {
+            return
+        }
+        val latestRemote = synchronized(bindingLock) {
+            val current = serviceMessenger
+            if (current != null && current !== remote) {
+                current
+            } else {
+                pendingCommands.add(msg)
+                null
+            }
+        }
+        if (latestRemote != null && sendRawMessage(latestRemote, msg)) {
+            return
+        }
+        if (latestRemote != null) {
+            synchronized(bindingLock) {
+                pendingCommands.add(msg)
+            }
         }
         bindToDownloaderService()
     }
@@ -619,9 +653,7 @@ class AuraDownloaderRemoteClient(
         awaitingUpdateAck = false
 
         val currentDownload = _downloadState.value
-        if (currentDownload.status == DownloadStatus.FETCHING_INFO ||
-            currentDownload.status == DownloadStatus.CHECKING_UPDATES
-        ) {
+        if (currentDownload.isBusy) {
             _downloadState.value = DownloadState(
                 status = DownloadStatus.ERROR,
                 sourceUrl = currentDownload.sourceUrl,

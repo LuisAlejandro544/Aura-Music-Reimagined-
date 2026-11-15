@@ -1,5 +1,15 @@
 package com.auramusic.feature.downloader
 
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
@@ -366,35 +376,58 @@ fun DownloaderScreen(
                 }
             }
 
-            val preview = downloadState.preview
-            if (downloadState.status == DownloadStatus.PREVIEW_READY && preview != null) {
-                item {
-                    DownloadPreviewCard(
-                        preview = preview,
-                        onSelectFormat = onSelectPreviewFormat,
-                        onConfirmDownload = onConfirmDownload,
-                        onCancel = onCancelPreview,
-                    )
-                }
-            } else if (downloadState.status != DownloadStatus.IDLE) {
-                item {
-                    DownloadStatusCard(
-                        downloadState = downloadState,
-                        onPlayDownloadedTrack = onPlayDownloadedTrack,
-                        onCancelDownload = onCancelDownload,
-                        onDismiss = onDismissDownloadStatus,
-                    )
-                }
-            }
+            item(key = "downloader_feedback_and_engine") {
+                Column {
+                    val preview = downloadState.preview
+                    val feedbackKey = when {
+                        downloadState.status == DownloadStatus.PREVIEW_READY && preview != null -> "preview"
+                        downloadState.status != DownloadStatus.IDLE -> "status_${downloadState.status}"
+                        else -> "idle"
+                    }
+                    AnimatedContent(
+                        targetState = feedbackKey,
+                        transitionSpec = {
+                            (fadeIn(tween(210)) + expandVertically(
+                                animationSpec = spring(
+                                    dampingRatio = 0.85f,
+                                    stiffness = Spring.StiffnessMedium,
+                                ),
+                            )) togetherWith (fadeOut(tween(150)) + shrinkVertically(tween(160)))
+                        },
+                        label = "downloader_feedback_transition",
+                    ) { targetKey ->
+                        val currentPreview = downloadState.preview
+                        if (targetKey == "preview" && currentPreview != null) {
+                            Column {
+                                DownloadPreviewCard(
+                                    preview = currentPreview,
+                                    onSelectFormat = onSelectPreviewFormat,
+                                    onConfirmDownload = onConfirmDownload,
+                                    onCancel = onCancelPreview,
+                                )
+                                Spacer(modifier = Modifier.height(14.dp))
+                            }
+                        } else if (targetKey != "idle" && downloadState.status != DownloadStatus.IDLE) {
+                            Column {
+                                DownloadStatusCard(
+                                    downloadState = downloadState,
+                                    onPlayDownloadedTrack = onPlayDownloadedTrack,
+                                    onCancelDownload = onCancelDownload,
+                                    onDismiss = onDismissDownloadStatus,
+                                )
+                                Spacer(modifier = Modifier.height(14.dp))
+                            }
+                        }
+                    }
 
-            item {
-                EngineUpdaterCard(
-                    engineStatus = engineStatus,
-                    isDownloadBusy = downloadState.isBusy,
-                    onCheckUpdates = onCheckUpdates,
-                    onToggleAutoUpdate = onToggleAutoUpdate,
-                    onDismissUpdateMessage = onDismissUpdateMessage,
-                )
+                    EngineUpdaterCard(
+                        engineStatus = engineStatus,
+                        isDownloadBusy = downloadState.isBusy,
+                        onCheckUpdates = onCheckUpdates,
+                        onToggleAutoUpdate = onToggleAutoUpdate,
+                        onDismissUpdateMessage = onDismissUpdateMessage,
+                    )
+                }
             }
         }
     }
@@ -879,7 +912,14 @@ private fun EngineUpdaterCard(
         tonalElevation = 1.dp,
     ) {
         Column(
-            modifier = Modifier.padding(16.dp),
+            modifier = Modifier
+                .animateContentSize(
+                    animationSpec = spring(
+                        dampingRatio = 0.85f,
+                        stiffness = Spring.StiffnessMedium,
+                    ),
+                )
+                .padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -1024,8 +1064,12 @@ private fun EngineVersionRow(
     }
 }
 
-private fun buildVersionWithDate(version: String, updatedAt: String?): String =
-    if (updatedAt.isNullOrBlank()) version else "$version ($updatedAt)"
+private fun buildVersionWithDate(version: String, updatedAt: String?): String {
+    val cleanDate = updatedAt?.trim()?.takeIf {
+        it.isNotEmpty() && !it.equals("null", ignoreCase = true)
+    }
+    return if (cleanDate == null) version else "$version ($cleanDate)"
+}
 
 private fun formatPreviewDuration(durationMs: Long): String {
     if (durationMs <= 0L) return "Desconocida"

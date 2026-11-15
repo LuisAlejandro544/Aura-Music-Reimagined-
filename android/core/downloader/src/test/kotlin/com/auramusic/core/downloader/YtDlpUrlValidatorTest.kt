@@ -31,5 +31,14 @@ class YtDlpUrlValidatorTest {
 
         val forbiddenMsg = YtDlpAudioDownloader.humanizeDownloadError("HTTP Error 403: Forbidden")
         assertTrue(forbiddenMsg.contains("403"))
+
+        val timeoutMsg = YtDlpAudioDownloader.humanizeDownloadError("urlopen error timed out")
+        assertTrue(timeoutMsg.contains("Tiempo de espera"))
+
+        val privateMsg = YtDlpAudioDownloader.humanizeDownloadError("ERROR: Private video. Sign in if you've been granted access")
+        assertTrue(privateMsg.contains("privado"))
+
+        val unavailableMsg = YtDlpAudioDownloader.humanizeDownloadError("ERROR: Video unavailable")
+        assertTrue(unavailableMsg.contains("no está disponible"))
     }
 }

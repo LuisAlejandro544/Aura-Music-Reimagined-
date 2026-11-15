@@ -1,5 +1,15 @@
 package com.auramusic.feature.player
 
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.animation.togetherWith
+import androidx.compose.animation.animateContentSize
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -75,6 +85,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.FilterQuality
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -134,30 +145,43 @@ fun MiniPlayerBar(
                         .padding(horizontal = 10.dp, vertical = 8.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    SquareCoverArt(
-                        coverPath = track.coverFilePath,
-                        contentDescription = track.title,
-                        modifier = Modifier.size(48.dp),
-                        cornerRadiusDp = 10,
-                    )
+                    AnimatedContent(
+                        targetState = track,
+                        contentKey = { it.id },
+                        transitionSpec = {
+                            (fadeIn(tween(180)) + slideInHorizontally(tween(200)) { it / 8 })
+                                .togetherWith(fadeOut(tween(140)) + slideOutHorizontally(tween(180)) { -it / 8 })
+                        },
+                        modifier = Modifier.weight(1f),
+                        label = "mini_player_track_switch",
+                    ) { activeTrack ->
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            SquareCoverArt(
+                                coverPath = activeTrack.coverFilePath,
+                                contentDescription = activeTrack.title,
+                                modifier = Modifier.size(48.dp),
+                                cornerRadiusDp = 10,
+                            )
 
-                    Spacer(modifier = Modifier.width(12.dp))
+                            Spacer(modifier = Modifier.width(12.dp))
 
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(
-                            text = track.title,
-                            style = MaterialTheme.typography.titleSmall,
-                            fontWeight = FontWeight.SemiBold,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                        )
-                        Text(
-                            text = track.artist,
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                        )
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = activeTrack.title,
+                                    style = MaterialTheme.typography.titleSmall,
+                                    fontWeight = FontWeight.SemiBold,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                                Text(
+                                    text = activeTrack.artist,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                            }
+                        }
                     }
 
                     IconButton(onClick = { onToggleLike(track.id) }) {
@@ -290,10 +314,14 @@ fun PlayerScreen(
                     },
                     actions = {
                         Box {
+                            val menuTriggerRotation = rememberPlayerMenuTriggerRotation(showOptionsMenu)
                             IconButton(onClick = { showOptionsMenu = true }) {
                                 Icon(
                                     imageVector = Icons.Rounded.MoreVert,
                                     contentDescription = "Opciones del reproductor",
+                                    modifier = Modifier.graphicsLayer {
+                                        rotationZ = menuTriggerRotation
+                                    },
                                 )
                             }
 
@@ -336,152 +364,168 @@ fun PlayerScreen(
                                     "Velocidad y Crossfade"
                                 }
 
-                                DropdownMenuItem(
-                                    text = { Text(tuningLabel) },
-                                    leadingIcon = {
-                                        Icon(
-                                            imageVector = Icons.Rounded.Speed,
-                                            contentDescription = null,
-                                            tint = if (hasCustomTuning) {
-                                                MaterialTheme.colorScheme.primary
-                                            } else {
-                                                MaterialTheme.colorScheme.onSurfaceVariant
-                                            },
-                                        )
-                                    },
-                                    onClick = {
-                                        showOptionsMenu = false
-                                        showTuningSheet = true
-                                    },
-                                )
+                                AuraPlayerMenuItemReveal(index = 0) {
+                                    DropdownMenuItem(
+                                        text = { Text(tuningLabel) },
+                                        leadingIcon = {
+                                            Icon(
+                                                imageVector = Icons.Rounded.Speed,
+                                                contentDescription = null,
+                                                tint = if (hasCustomTuning) {
+                                                    MaterialTheme.colorScheme.primary
+                                                } else {
+                                                    MaterialTheme.colorScheme.onSurfaceVariant
+                                                },
+                                            )
+                                        },
+                                        onClick = {
+                                            showOptionsMenu = false
+                                            showTuningSheet = true
+                                        },
+                                    )
+                                }
 
-                                DropdownMenuItem(
-                                    text = {
-                                        Text(
-                                            if (sleepTimerState.isActive) {
-                                                "Temporizador (${SleepTimerHelper.formatShortLabel(sleepTimerState)})"
-                                            } else {
-                                                "Temporizador"
-                                            },
-                                        )
-                                    },
-                                    leadingIcon = {
-                                        Icon(
-                                            imageVector = Icons.Rounded.Timer,
-                                            contentDescription = null,
-                                            tint = if (sleepTimerState.isActive) {
-                                                MaterialTheme.colorScheme.primary
-                                            } else {
-                                                MaterialTheme.colorScheme.onSurfaceVariant
-                                            },
-                                        )
-                                    },
-                                    onClick = {
-                                        showOptionsMenu = false
-                                        showSleepTimerSheet = true
-                                    },
-                                )
+                                AuraPlayerMenuItemReveal(index = 1) {
+                                    DropdownMenuItem(
+                                        text = {
+                                            Text(
+                                                if (sleepTimerState.isActive) {
+                                                    "Temporizador (${SleepTimerHelper.formatShortLabel(sleepTimerState)})"
+                                                } else {
+                                                    "Temporizador"
+                                                },
+                                            )
+                                        },
+                                        leadingIcon = {
+                                            Icon(
+                                                imageVector = Icons.Rounded.Timer,
+                                                contentDescription = null,
+                                                tint = if (sleepTimerState.isActive) {
+                                                    MaterialTheme.colorScheme.primary
+                                                } else {
+                                                    MaterialTheme.colorScheme.onSurfaceVariant
+                                                },
+                                            )
+                                        },
+                                        onClick = {
+                                            showOptionsMenu = false
+                                            showSleepTimerSheet = true
+                                        },
+                                    )
+                                }
 
-                                DropdownMenuItem(
-                                    text = { Text("Ecualizador") },
-                                    leadingIcon = {
-                                        Icon(
-                                            imageVector = Icons.Rounded.Tune,
-                                            contentDescription = null,
-                                        )
-                                    },
-                                    onClick = {
-                                        showOptionsMenu = false
-                                        onOpenEqualizer()
-                                    },
-                                )
+                                AuraPlayerMenuItemReveal(index = 2) {
+                                    DropdownMenuItem(
+                                        text = { Text("Ecualizador") },
+                                        leadingIcon = {
+                                            Icon(
+                                                imageVector = Icons.Rounded.Tune,
+                                                contentDescription = null,
+                                            )
+                                        },
+                                        onClick = {
+                                            showOptionsMenu = false
+                                            onOpenEqualizer()
+                                        },
+                                    )
+                                }
 
                                 val effectsSummary = PlaybackTuningHelper.formatEffectsSummary(audioEffects)
-                                DropdownMenuItem(
-                                    text = {
-                                        Text(
-                                            if (effectsSummary != null) {
-                                                "8D, Reverb y Slowed ($effectsSummary)"
-                                            } else {
-                                                "8D, Reverb y Slowed"
-                                            },
-                                        )
-                                    },
-                                    leadingIcon = {
-                                        Icon(
-                                            imageVector = Icons.Rounded.SurroundSound,
-                                            contentDescription = null,
-                                            tint = if (audioEffects.isAnyEffectEnabled) {
-                                                MaterialTheme.colorScheme.primary
-                                            } else {
-                                                MaterialTheme.colorScheme.onSurfaceVariant
-                                            },
-                                        )
-                                    },
-                                    onClick = {
-                                        showOptionsMenu = false
-                                        onOpenAudioEffects()
-                                    },
-                                )
+                                AuraPlayerMenuItemReveal(index = 3) {
+                                    DropdownMenuItem(
+                                        text = {
+                                            Text(
+                                                if (effectsSummary != null) {
+                                                    "8D, Reverb y Slowed ($effectsSummary)"
+                                                } else {
+                                                    "8D, Reverb y Slowed"
+                                                },
+                                            )
+                                        },
+                                        leadingIcon = {
+                                            Icon(
+                                                imageVector = Icons.Rounded.SurroundSound,
+                                                contentDescription = null,
+                                                tint = if (audioEffects.isAnyEffectEnabled) {
+                                                    MaterialTheme.colorScheme.primary
+                                                } else {
+                                                    MaterialTheme.colorScheme.onSurfaceVariant
+                                                },
+                                            )
+                                        },
+                                        onClick = {
+                                            showOptionsMenu = false
+                                            onOpenAudioEffects()
+                                        },
+                                    )
+                                }
 
-                                DropdownMenuItem(
-                                    text = { Text("Cola de reproducción") },
-                                    leadingIcon = {
-                                        Icon(
-                                            imageVector = Icons.AutoMirrored.Rounded.QueueMusic,
-                                            contentDescription = null,
-                                        )
-                                    },
-                                    onClick = {
-                                        showOptionsMenu = false
-                                        onOpenQueue()
-                                    },
-                                )
+                                AuraPlayerMenuItemReveal(index = 4) {
+                                    DropdownMenuItem(
+                                        text = { Text("Cola de reproducción") },
+                                        leadingIcon = {
+                                            Icon(
+                                                imageVector = Icons.AutoMirrored.Rounded.QueueMusic,
+                                                contentDescription = null,
+                                            )
+                                        },
+                                        onClick = {
+                                            showOptionsMenu = false
+                                            onOpenQueue()
+                                        },
+                                    )
+                                }
 
                                 if (track != null) {
                                     HorizontalDivider(
                                         modifier = Modifier.padding(vertical = 4.dp),
                                         color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f),
                                     )
-                                    DropdownMenuItem(
-                                        text = { Text("Editar metadatos") },
-                                        leadingIcon = {
-                                            Icon(
-                                                imageVector = Icons.Rounded.Edit,
-                                                contentDescription = null,
-                                            )
-                                        },
-                                        onClick = {
-                                            showOptionsMenu = false
-                                            onEditMetadata(track)
-                                        },
-                                    )
-                                    DropdownMenuItem(
-                                        text = { Text("Cambiar carátula") },
-                                        leadingIcon = {
-                                            Icon(
-                                                imageVector = Icons.Rounded.Image,
-                                                contentDescription = null,
-                                            )
-                                        },
-                                        onClick = {
-                                            showOptionsMenu = false
-                                            onChangeCover(track)
-                                        },
-                                    )
-                                    DropdownMenuItem(
-                                        text = { Text("Añadir a playlist") },
-                                        leadingIcon = {
-                                            Icon(
-                                                imageVector = Icons.AutoMirrored.Rounded.PlaylistAdd,
-                                                contentDescription = null,
-                                            )
-                                        },
-                                        onClick = {
-                                            showOptionsMenu = false
-                                            onOpenAddToPlaylist(track)
-                                        },
-                                    )
+                                    AuraPlayerMenuItemReveal(index = 5) {
+                                        DropdownMenuItem(
+                                            text = { Text("Editar metadatos") },
+                                            leadingIcon = {
+                                                Icon(
+                                                    imageVector = Icons.Rounded.Edit,
+                                                    contentDescription = null,
+                                                )
+                                            },
+                                            onClick = {
+                                                showOptionsMenu = false
+                                                onEditMetadata(track)
+                                            },
+                                        )
+                                    }
+                                    AuraPlayerMenuItemReveal(index = 6) {
+                                        DropdownMenuItem(
+                                            text = { Text("Cambiar carátula") },
+                                            leadingIcon = {
+                                                Icon(
+                                                    imageVector = Icons.Rounded.Image,
+                                                    contentDescription = null,
+                                                )
+                                            },
+                                            onClick = {
+                                                showOptionsMenu = false
+                                                onChangeCover(track)
+                                            },
+                                        )
+                                    }
+                                    AuraPlayerMenuItemReveal(index = 7) {
+                                        DropdownMenuItem(
+                                            text = { Text("Añadir a playlist") },
+                                            leadingIcon = {
+                                                Icon(
+                                                    imageVector = Icons.AutoMirrored.Rounded.PlaylistAdd,
+                                                    contentDescription = null,
+                                                )
+                                            },
+                                            onClick = {
+                                                showOptionsMenu = false
+                                                onOpenAddToPlaylist(track)
+                                            },
+                                        )
+                                    }
                                 }
                             }
                         }
@@ -875,6 +919,12 @@ private fun PlaybackTuningBottomSheet(
         Column(
             modifier = Modifier
                 .fillMaxWidth()
+                .animateContentSize(
+                    animationSpec = spring(
+                        dampingRatio = 0.85f,
+                        stiffness = Spring.StiffnessMedium,
+                    ),
+                )
                 .verticalScroll(rememberScrollState())
                 .padding(horizontal = 20.dp)
                 .padding(bottom = 28.dp),

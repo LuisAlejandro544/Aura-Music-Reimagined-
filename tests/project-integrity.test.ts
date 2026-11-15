@@ -2090,3 +2090,152 @@ test('release APK size optimizations avoid duplicate QuickJS-NG in libaura_core.
   assert.match(playerGradle, /debugImplementation\(libs\.androidx\.media3\.ui\)/);
   assert.doesNotMatch(playerGradle, /(^|\n)\s*implementation\(libs\.androidx\.media3\.ui\)/);
 });
+
+test('downloader UI reacts live inside NavHost destinations, strips literal JSON nulls, and delivers ordered IPC states', () => {
+  const rootKt = fs.readFileSync(
+    path.join(rootDir, 'android/app/src/main/kotlin/com/auramusic/app/AuraAppRoot.kt'),
+    'utf8',
+  );
+  const navGraphKt = fs.readFileSync(
+    path.join(rootDir, 'android/app/src/main/kotlin/com/auramusic/app/AuraNavGraph.kt'),
+    'utf8',
+  );
+  const ipcKt = fs.readFileSync(
+    path.join(rootDir, 'android/core/downloader/src/main/kotlin/com/auramusic/core/downloader/AuraDownloaderIpc.kt'),
+    'utf8',
+  );
+  const remoteClientKt = fs.readFileSync(
+    path.join(rootDir, 'android/core/downloader/src/main/kotlin/com/auramusic/core/downloader/AuraDownloaderRemoteClient.kt'),
+    'utf8',
+  );
+  const serviceKt = fs.readFileSync(
+    path.join(rootDir, 'android/core/downloader/src/main/kotlin/com/auramusic/core/downloader/AuraDownloadForegroundService.kt'),
+    'utf8',
+  );
+  const ytDlpKt = fs.readFileSync(
+    path.join(rootDir, 'android/core/downloader/src/main/kotlin/com/auramusic/core/downloader/YtDlpAudioDownloader.kt'),
+    'utf8',
+  );
+  const downloaderScreenKt = fs.readFileSync(
+    path.join(rootDir, 'android/feature/downloader/src/main/kotlin/com/auramusic/feature/downloader/DownloaderScreen.kt'),
+    'utf8',
+  );
+  const auraQjsRs = fs.readFileSync(
+    path.join(rootDir, 'android/rust/aura_core/src/bin/aura_qjs.rs'),
+    'utf8',
+  );
+
+  // 1. NavHost no congela snapshots de pantallas: DOWNLOADER colecta sus StateFlows dentro de composable(...)
+  assert.doesNotMatch(rootKt, /viewModel\.downloadState\.collectAsStateWithLifecycle/);
+  assert.doesNotMatch(rootKt, /viewModel\.downloaderEngineStatus\.collectAsStateWithLifecycle/);
+  assert.match(
+    navGraphKt,
+    /composable\(AuraRoutes\.DOWNLOADER\)\s*\{[\s\S]*viewModel\.downloadState\.collectAsStateWithLifecycle\(\)[\s\S]*viewModel\.downloaderEngineStatus\.collectAsStateWithLifecycle\(\)/,
+  );
+
+  // 2. Sanitización de JSONObject.NULL y cadena literal "null" en IPC, worker y UI
+  assert.match(ipcKt, /internal fun JSONObject\.optCleanString\(/);
+  assert.match(ipcKt, /KEY_INITIAL_SNAPSHOT/);
+  assert.match(ytDlpKt, /optCleanString\("yt_dlp_updated_at"\)/);
+  assert.match(ytDlpKt, /optCleanString\("yt_dlp_error"\)/);
+  assert.match(downloaderScreenKt, /equals\("null",\s*ignoreCase\s*=\s*true\)/);
+
+  // 3. Entrega IPC ordenada sin cancelaciones collectLatest, cola atómica bajo bindingLock y recuperación isBusy
+  assert.match(serviceKt, /downloader\.downloadState\.collect\s*\{/);
+  assert.match(serviceKt, /downloader\.engineStatus\.collect\s*\{/);
+  assert.match(serviceKt, /isInitialSnapshot\s*=\s*true/);
+  assert.match(remoteClientKt, /KEY_INITIAL_SNAPSHOT/);
+  assert.match(remoteClientKt, /synchronized\(bindingLock\)\s*\{\s*val current = serviceMessenger[\s\S]*pendingCommands\.add\(msg\)/);
+  assert.match(remoteClientKt, /if\s*\(currentDownload\.isBusy\)/);
+
+  // 4. aura_qjs maneja flags con valor (--memory-limit / --stack-size) sin confundirlos con scripts
+  assert.match(auraQjsRs, /"--memory-limit"\s*\|\s*"--stack-size"/);
+  assert.match(auraQjsRs, /IsTerminal/);
+});
+
+test('navigation transitions, mini-player switch, staggered GPU menus, and modal sheets are wired cleanly', () => {
+  const navTransitionsPath = path.join(rootDir, 'android/app/src/main/kotlin/com/auramusic/app/AuraNavTransitions.kt');
+  const rootKt = fs.readFileSync(
+    path.join(rootDir, 'android/app/src/main/kotlin/com/auramusic/app/AuraAppRoot.kt'),
+    'utf8',
+  );
+  const chromeKt = fs.readFileSync(
+    path.join(rootDir, 'android/app/src/main/kotlin/com/auramusic/app/AuraAppChrome.kt'),
+    'utf8',
+  );
+  const playerMotionPath = path.join(
+    rootDir,
+    'android/feature/player/src/main/kotlin/com/auramusic/feature/player/PlayerMotion.kt',
+  );
+  const playerScreenKt = fs.readFileSync(
+    path.join(rootDir, 'android/feature/player/src/main/kotlin/com/auramusic/feature/player/PlayerScreen.kt'),
+    'utf8',
+  );
+  const sleepTimerKt = fs.readFileSync(
+    path.join(rootDir, 'android/feature/player/src/main/kotlin/com/auramusic/feature/player/SleepTimerBottomSheet.kt'),
+    'utf8',
+  );
+  const libraryScreenKt = fs.readFileSync(
+    path.join(rootDir, 'android/feature/library/src/main/kotlin/com/auramusic/feature/library/LibraryScreen.kt'),
+    'utf8',
+  );
+  const playlistsMotionPath = path.join(
+    rootDir,
+    'android/feature/playlists/src/main/kotlin/com/auramusic/feature/playlists/PlaylistsMotion.kt',
+  );
+  const playlistsScreenKt = fs.readFileSync(
+    path.join(rootDir, 'android/feature/playlists/src/main/kotlin/com/auramusic/feature/playlists/PlaylistsScreen.kt'),
+    'utf8',
+  );
+  const artistDetailKt = fs.readFileSync(
+    path.join(rootDir, 'android/feature/playlists/src/main/kotlin/com/auramusic/feature/playlists/ArtistDetailScreen.kt'),
+    'utf8',
+  );
+  const downloaderScreenKt = fs.readFileSync(
+    path.join(rootDir, 'android/feature/downloader/src/main/kotlin/com/auramusic/feature/downloader/DownloaderScreen.kt'),
+    'utf8',
+  );
+
+  // 1. Transiciones diferenciadas en NavHost
+  assert.ok(fs.existsSync(navTransitionsPath), 'Missing AuraNavTransitions.kt');
+  const navTransitionsKt = fs.readFileSync(navTransitionsPath, 'utf8');
+  assert.match(navTransitionsKt, /TOP_TAB/);
+  assert.match(navTransitionsKt, /MODAL_SHEET_RISE/);
+  assert.match(navTransitionsKt, /SHARED_AXIS_X/);
+  assert.match(rootKt, /enterTransition\s*=\s*\{\s*AuraNavTransitions\.enterTransition\(this\)/);
+  assert.match(rootKt, /exitTransition\s*=\s*\{\s*AuraNavTransitions\.exitTransition\(this\)/);
+  assert.match(rootKt, /popEnterTransition\s*=\s*\{\s*AuraNavTransitions\.popEnterTransition\(this\)/);
+  assert.match(rootKt, /popExitTransition\s*=\s*\{\s*AuraNavTransitions\.popExitTransition\(this\)/);
+
+  // 2. MiniPlayerBar con AnimatedVisibility spring y cambio suave de pista
+  assert.match(chromeKt, /spring\(/);
+  assert.match(chromeKt, /fadeIn\(/);
+  assert.match(playerScreenKt, /mini_player_track_switch/);
+
+  // 3. Menús desplegables con rotación de disparador y cascada GPU (sin AnimatedVisibility dentro de Popup)
+  assert.ok(fs.existsSync(playerMotionPath), 'Missing PlayerMotion.kt');
+  assert.ok(fs.existsSync(playlistsMotionPath), 'Missing PlaylistsMotion.kt');
+  const playerMotionKt = fs.readFileSync(playerMotionPath, 'utf8');
+  const playlistsMotionKt = fs.readFileSync(playlistsMotionPath, 'utf8');
+  assert.match(playerMotionKt, /graphicsLayer/);
+  assert.match(playlistsMotionKt, /graphicsLayer/);
+  assert.match(playerScreenKt, /rememberPlayerMenuTriggerRotation/);
+  assert.match(playerScreenKt, /AuraPlayerMenuItemReveal/);
+  assert.match(libraryScreenKt, /rememberLibraryMenuTriggerRotation/);
+  assert.match(libraryScreenKt, /AuraLibraryMenuItemReveal/);
+  assert.match(playlistsScreenKt, /rememberPlaylistsMenuTriggerRotation/);
+  assert.match(playlistsScreenKt, /AuraPlaylistsMenuItemReveal/);
+  assert.match(artistDetailKt, /rememberPlaylistsMenuTriggerRotation/);
+  assert.match(artistDetailKt, /AuraPlaylistsMenuItemReveal/);
+
+  // 4. Hojas modales y tarjetas de descarga con animateContentSize / AnimatedVisibility / AnimatedContent
+  assert.match(playerScreenKt, /animateContentSize\(/);
+  assert.match(sleepTimerKt, /animateContentSize\(/);
+  assert.match(sleepTimerKt, /AnimatedVisibility\(/);
+  assert.match(libraryScreenKt, /animateContentSize\(/);
+  assert.match(playlistsScreenKt, /animateContentSize\(/);
+  assert.match(downloaderScreenKt, /AnimatedContent\(/);
+  assert.match(downloaderScreenKt, /animateContentSize\(/);
+});
+
+

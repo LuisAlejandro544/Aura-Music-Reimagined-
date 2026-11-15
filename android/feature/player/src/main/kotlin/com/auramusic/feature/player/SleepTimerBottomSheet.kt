@@ -1,5 +1,14 @@
 package com.auramusic.feature.player
 
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -85,6 +94,12 @@ fun SleepTimerBottomSheet(
         Column(
             modifier = Modifier
                 .fillMaxWidth()
+                .animateContentSize(
+                    animationSpec = spring(
+                        dampingRatio = 0.85f,
+                        stiffness = Spring.StiffnessMedium,
+                    ),
+                )
                 .verticalScroll(rememberScrollState())
                 .padding(horizontal = 20.dp)
                 .padding(bottom = 28.dp),
@@ -127,7 +142,16 @@ fun SleepTimerBottomSheet(
             }
 
             // Tarjeta de estado activo cuando el temporizador está corriendo.
-            if (sleepTimerState.isActive) {
+            AnimatedVisibility(
+                visible = sleepTimerState.isActive,
+                enter = fadeIn(tween(180)) + expandVertically(
+                    animationSpec = spring(
+                        dampingRatio = 0.85f,
+                        stiffness = Spring.StiffnessMedium,
+                    ),
+                ),
+                exit = fadeOut(tween(140)) + shrinkVertically(tween(160)),
+            ) {
                 Surface(
                     shape = RoundedCornerShape(16.dp),
                     color = MaterialTheme.colorScheme.primaryContainer,

@@ -7,21 +7,21 @@
 //! - `-`: lee y ejecuta código JavaScript desde stdin.
 
 use std::fs;
-use std::io::{self, Read};
+use std::io::{self, IsTerminal, Read};
 use std::process::ExitCode;
 
 use aura_core::js_runtime::{QUICKJS_VERSION_STRING, eval_script_with_args};
 
 fn main() -> ExitCode {
     let raw_args: Vec<String> = std::env::args().skip(1).collect();
-    if raw_args.is_empty() {
+    if raw_args.is_empty() && io::stdin().is_terminal() {
         eprintln!("Uso: aura_qjs [--version | --script <archivo.js> | -e <codigo> | <archivo.js>]");
         return ExitCode::from(2);
     }
 
     let mut script_path: Option<String> = None;
     let mut eval_code: Option<String> = None;
-    let mut read_stdin = false;
+    let mut read_stdin = raw_args.is_empty();
     let mut script_args: Vec<String> = Vec::new();
 
     let mut i = 0;
@@ -53,7 +53,17 @@ fn main() -> ExitCode {
                 script_args.extend_from_slice(&raw_args[i + 1..]);
                 break;
             }
-            "--std" | "--module" | "-m" | "-q" | "--quit" => {
+            "--memory-limit" | "--stack-size" | "-I" | "--include" => {
+                // Consume el argumento del flag para no interpretarlo como ruta de script JS.
+                if i + 1 < raw_args.len() {
+                    i += 1;
+                }
+            }
+            other
+                if other.starts_with("--memory-limit=")
+                    || other.starts_with("--stack-size=")
+                    || other.starts_with("--include=") => {}
+            "--std" | "--module" | "-m" | "-q" | "--quit" | "--bignum" | "--dump" | "-d" => {
                 // Flags informativos aceptados para compatibilidad con invocaciones estilo qjs.
             }
             "-" => {

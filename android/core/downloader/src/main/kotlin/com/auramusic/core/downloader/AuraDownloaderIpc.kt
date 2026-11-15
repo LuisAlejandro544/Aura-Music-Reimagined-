@@ -51,6 +51,7 @@ object AuraDownloaderIpc {
     const val KEY_FORCE = "force"
     const val KEY_EPOCH_MS = "epoch_ms"
     const val KEY_FILE_PATH = "file_path"
+    const val KEY_INITIAL_SNAPSHOT = "initial_snapshot"
 
     private const val ENGINE_VERSIONS_FILE = "engine_versions.json"
     private const val PENDING_IMPORTS_DIR = "pending_imports"
@@ -93,14 +94,14 @@ object AuraDownloaderIpc {
             if (!file.exists()) return null
             val json = JSONObject(file.readText())
             CachedEngineVersions(
-                pythonVersion = json.optString("python_version").takeIf { it.isNotBlank() }
+                pythonVersion = json.optCleanString("python_version")
                     ?: "Python 3.11 (ligero)",
-                ytDlpVersion = json.optString("yt_dlp_version").takeIf { it.isNotBlank() }
+                ytDlpVersion = json.optCleanString("yt_dlp_version")
                     ?: "No inicializado",
-                ytDlpEjsVersion = json.optString("yt_dlp_ejs_version").takeIf { it.isNotBlank() }
+                ytDlpEjsVersion = json.optCleanString("yt_dlp_ejs_version")
                     ?: "No inicializado",
-                ytDlpUpdatedAt = json.optString("yt_dlp_updated_at").takeIf { it.isNotBlank() },
-                ytDlpEjsUpdatedAt = json.optString("yt_dlp_ejs_updated_at").takeIf { it.isNotBlank() },
+                ytDlpUpdatedAt = json.optCleanString("yt_dlp_updated_at"),
+                ytDlpEjsUpdatedAt = json.optCleanString("yt_dlp_ejs_updated_at"),
             )
         }.getOrNull()
     }
@@ -125,20 +126,20 @@ object AuraDownloaderIpc {
     fun downloadStateFromJson(raw: String): DownloadState =
         runCatching {
             val obj = JSONObject(raw)
-            val statusName = obj.optString("status", DownloadStatus.IDLE.name)
+            val statusName = obj.optCleanString("status") ?: DownloadStatus.IDLE.name
             val status = runCatching { DownloadStatus.valueOf(statusName) }.getOrDefault(DownloadStatus.IDLE)
             val previewObj = obj.optJSONObject("preview")
             val trackObj = obj.optJSONObject("lastCompletedTrack")
             DownloadState(
                 status = status,
-                sourceUrl = obj.optString("sourceUrl"),
-                title = obj.optString("title").takeIf { it.isNotBlank() },
+                sourceUrl = obj.optCleanString("sourceUrl") ?: "",
+                title = obj.optCleanString("title", rejectLiteralNull = false),
                 progressPercent = obj.optDouble("progressPercent", 0.0).toFloat(),
                 downloadedBytes = obj.optLong("downloadedBytes", 0L),
                 totalBytes = obj.optLong("totalBytes", 0L),
                 speedBytesPerSec = obj.optLong("speedBytesPerSec", 0L),
-                statusMessage = obj.optString("statusMessage").takeIf { it.isNotBlank() },
-                errorMessage = obj.optString("errorMessage").takeIf { it.isNotBlank() },
+                statusMessage = obj.optCleanString("statusMessage"),
+                errorMessage = obj.optCleanString("errorMessage"),
                 preview = previewObj?.let(::previewFromJsonObject),
                 lastCompletedTrack = trackObj?.let(::trackFromJsonObject),
             )
@@ -162,16 +163,16 @@ object AuraDownloaderIpc {
         runCatching {
             val obj = JSONObject(raw)
             DownloaderEngineStatus(
-                pythonVersion = obj.optString("pythonVersion", "Python 3.11 (ligero)"),
-                ytDlpVersion = obj.optString("ytDlpVersion", "No inicializado"),
-                ytDlpEjsVersion = obj.optString("ytDlpEjsVersion", "No inicializado"),
-                quickJsVersion = obj.optString("quickJsVersion", "QuickJS-NG (Rust)"),
-                ytDlpUpdatedAt = obj.optString("ytDlpUpdatedAt").takeIf { it.isNotBlank() },
-                ytDlpEjsUpdatedAt = obj.optString("ytDlpEjsUpdatedAt").takeIf { it.isNotBlank() },
+                pythonVersion = obj.optCleanString("pythonVersion") ?: "Python 3.11 (ligero)",
+                ytDlpVersion = obj.optCleanString("ytDlpVersion") ?: "No inicializado",
+                ytDlpEjsVersion = obj.optCleanString("ytDlpEjsVersion") ?: "No inicializado",
+                quickJsVersion = obj.optCleanString("quickJsVersion") ?: "QuickJS-NG (Rust)",
+                ytDlpUpdatedAt = obj.optCleanString("ytDlpUpdatedAt"),
+                ytDlpEjsUpdatedAt = obj.optCleanString("ytDlpEjsUpdatedAt"),
                 isUpdating = obj.optBoolean("isUpdating", false),
-                updateMessage = obj.optString("updateMessage").takeIf { it.isNotBlank() },
+                updateMessage = obj.optCleanString("updateMessage"),
                 autoUpdateEnabled = obj.optBoolean("autoUpdateEnabled", true),
-                preferredQuality = AudioDownloadQuality.fromKey(obj.optString("preferredQuality")),
+                preferredQuality = AudioDownloadQuality.fromKey(obj.optCleanString("preferredQuality")),
             )
         }.getOrDefault(DownloaderEngineStatus())
 
@@ -216,16 +217,15 @@ object AuraDownloaderIpc {
             buildList(formatsArr.length()) {
                 for (i in 0 until formatsArr.length()) {
                     val item = formatsArr.optJSONObject(i) ?: continue
-                    val id = item.optString("formatId")
-                    if (id.isBlank()) continue
+                    val id = item.optCleanString("formatId") ?: continue
                     add(
                         DownloadAudioFormatOption(
                             formatId = id,
-                            extension = item.optString("extension", "audio"),
-                            codec = item.optString("codec", ""),
+                            extension = item.optCleanString("extension") ?: "audio",
+                            codec = item.optCleanString("codec") ?: "",
                             bitrateKbps = item.optInt("bitrateKbps", 0),
                             estimatedSizeBytes = item.optLong("estimatedSizeBytes", 0L),
-                            label = item.optString("label", ""),
+                            label = item.optCleanString("label") ?: "",
                         ),
                     )
                 }
@@ -234,16 +234,16 @@ object AuraDownloaderIpc {
             emptyList()
         }
         return DownloadPreview(
-            sourceUrl = obj.optString("sourceUrl"),
-            videoId = obj.optString("videoId"),
-            title = obj.optString("title", "Audio sin título"),
-            channelOrArtist = obj.optString("channelOrArtist", "Descarga web"),
+            sourceUrl = obj.optCleanString("sourceUrl") ?: "",
+            videoId = obj.optCleanString("videoId") ?: "",
+            title = obj.optCleanString("title", rejectLiteralNull = false) ?: "Audio sin título",
+            channelOrArtist = obj.optCleanString("channelOrArtist", rejectLiteralNull = false) ?: "Descarga web",
             durationMs = obj.optLong("durationMs", 0L),
             estimatedSizeBytes = obj.optLong("estimatedSizeBytes", 0L),
-            audioFormatLabel = obj.optString("audioFormatLabel"),
-            localThumbnailPath = obj.optString("localThumbnailPath").takeIf { it.isNotBlank() },
+            audioFormatLabel = obj.optCleanString("audioFormatLabel") ?: "",
+            localThumbnailPath = obj.optCleanString("localThumbnailPath"),
             availableFormats = formats,
-            selectedFormatId = obj.optString("selectedFormatId").takeIf { it.isNotBlank() },
+            selectedFormatId = obj.optCleanString("selectedFormatId"),
         )
     }
 
@@ -263,20 +263,35 @@ object AuraDownloaderIpc {
 
     private fun trackFromJsonObject(obj: JSONObject): Track = Track(
         id = obj.optLong("id", 0L),
-        contentUri = obj.optString("contentUri"),
-        title = obj.optString("title"),
-        artist = obj.optString("artist"),
-        album = obj.optString("album"),
+        contentUri = obj.optCleanString("contentUri") ?: "",
+        title = obj.optCleanString("title", rejectLiteralNull = false) ?: "",
+        artist = obj.optCleanString("artist", rejectLiteralNull = false) ?: "",
+        album = obj.optCleanString("album", rejectLiteralNull = false) ?: "",
         durationMs = obj.optLong("durationMs", 0L),
-        coverFilePath = obj.optString("coverFilePath").takeIf { it.isNotBlank() },
+        coverFilePath = obj.optCleanString("coverFilePath"),
         isProceduralCover = obj.optBoolean("isProceduralCover", false),
         isLiked = obj.optBoolean("isLiked", false),
-        trackFingerprint = obj.optString("trackFingerprint"),
+        trackFingerprint = obj.optCleanString("trackFingerprint") ?: "",
         addedAt = obj.optLong(
             "addedAt",
             obj.optLong("addedAtEpochMs", System.currentTimeMillis()),
         ),
     )
+}
+
+/**
+ * Lee una cadena de [JSONObject] evitando que valores `JSONObject.NULL` (provenientes de `None`
+ * en Python) o cadenas `"null"` heredadas en disco se propaguen como texto literal a la UI.
+ */
+internal fun JSONObject.optCleanString(
+    key: String,
+    rejectLiteralNull: Boolean = true,
+): String? {
+    if (!has(key) || isNull(key)) return null
+    val raw = optString(key, "").trim()
+    if (raw.isEmpty()) return null
+    if (rejectLiteralNull && raw.equals("null", ignoreCase = true)) return null
+    return raw
 }
 
 data class CachedEngineVersions(
@@ -315,15 +330,14 @@ data class PendingDownloadedImport(
     companion object {
         fun fromJson(raw: String): PendingDownloadedImport? = runCatching {
             val obj = JSONObject(raw)
-            val audioPath = obj.optString("audioPath")
-            if (audioPath.isBlank()) return null
+            val audioPath = obj.optCleanString("audioPath") ?: return null
             PendingDownloadedImport(
-                sourceUrl = obj.optString("sourceUrl"),
+                sourceUrl = obj.optCleanString("sourceUrl") ?: "",
                 audioPath = audioPath,
-                thumbnailPath = obj.optString("thumbnailPath").takeIf { it.isNotBlank() },
-                title = obj.optString("title", "Audio descargado"),
-                artist = obj.optString("artist", "Descarga web"),
-                album = obj.optString("album", "Descargas Aura"),
+                thumbnailPath = obj.optCleanString("thumbnailPath"),
+                title = obj.optCleanString("title", rejectLiteralNull = false) ?: "Audio descargado",
+                artist = obj.optCleanString("artist", rejectLiteralNull = false) ?: "Descarga web",
+                album = obj.optCleanString("album", rejectLiteralNull = false) ?: "Descargas Aura",
                 durationMs = obj.optLong("durationMs", 0L),
                 accentArgb = obj.optInt("accentArgb", 0xFFA78BFA.toInt()),
             )

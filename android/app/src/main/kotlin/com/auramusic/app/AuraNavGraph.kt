@@ -8,21 +8,7 @@ import androidx.navigation.NavHostController
 import androidx.navigation.NavType
 import androidx.navigation.compose.composable
 import androidx.navigation.navArgument
-import com.auramusic.core.model.AppAccentColor
-import com.auramusic.core.model.ArtistPlaylist
-import com.auramusic.core.model.AudioEffectsState
-import com.auramusic.core.model.AudioOutputRouteState
 import com.auramusic.core.model.DeleteEffectFrameRenderer
-import com.auramusic.core.model.DownloadState
-import com.auramusic.core.model.DownloaderEngineStatus
-import com.auramusic.core.model.EqualizerState
-import com.auramusic.core.model.HeadphonePreferences
-import com.auramusic.core.model.ImportProgress
-import com.auramusic.core.model.PlaybackState
-import com.auramusic.core.model.PlaybackTuning
-import com.auramusic.core.model.Playlist
-import com.auramusic.core.model.SleepTimerState
-import com.auramusic.core.model.SystemFolderStorageState
 import com.auramusic.core.model.Track
 import com.auramusic.feature.downloader.DownloaderScreen
 import com.auramusic.feature.effects.AudioEffectsScreen
@@ -43,22 +29,12 @@ import com.auramusic.feature.settings.SettingsVisualEffectsScreen
 
 /**
  * Subgrafo de navegación para Biblioteca, Playlists, Favoritos, Artistas y Descargador.
- * Mantiene `AuraAppRoot` limpio y enfocado únicamente en la orquestación global.
+ * Cada destino colecta sus propios `StateFlow` directamente dentro de `composable(...)`
+ * porque `NavHost` conserva las lambdas iniciales del grafo y no reenvía snapshots externos.
  */
 internal fun NavGraphBuilder.auraLibraryAndPlaylistsGraph(
     navController: NavHostController,
     viewModel: AuraViewModel,
-    tracks: List<Track>,
-    likedTracks: List<Track>,
-    likedCount: Int,
-    playlists: List<Playlist>,
-    artistPlaylists: List<ArtistPlaylist>,
-    playbackState: PlaybackState,
-    importProgress: ImportProgress,
-    downloadState: DownloadState,
-    downloaderEngineStatus: DownloaderEngineStatus,
-    accentColor: AppAccentColor,
-    deleteAnimationsEnabled: Boolean,
     deleteEffectRenderer: DeleteEffectFrameRenderer,
     safLaunchers: AuraSafLaunchers,
     onShowQueueFeedback: (String) -> Unit,
@@ -66,6 +42,13 @@ internal fun NavGraphBuilder.auraLibraryAndPlaylistsGraph(
     onRequestEditMetadata: (Track) -> Unit,
 ) {
     composable(AuraRoutes.LIBRARY) {
+        val tracks by viewModel.tracks.collectAsStateWithLifecycle()
+        val likedCount by viewModel.likedCount.collectAsStateWithLifecycle()
+        val playbackState by viewModel.playbackState.collectAsStateWithLifecycle()
+        val importProgress by viewModel.importProgress.collectAsStateWithLifecycle()
+        val deleteAnimationsEnabled by viewModel.deleteAnimationsEnabled.collectAsStateWithLifecycle()
+        val accentColor by viewModel.accentColor.collectAsStateWithLifecycle()
+
         LibraryScreen(
             tracks = tracks,
             likedCount = likedCount,
@@ -102,6 +85,10 @@ internal fun NavGraphBuilder.auraLibraryAndPlaylistsGraph(
     }
 
     composable(AuraRoutes.PLAYLISTS) {
+        val playlists by viewModel.playlists.collectAsStateWithLifecycle()
+        val likedCount by viewModel.likedCount.collectAsStateWithLifecycle()
+        val artistPlaylists by viewModel.artistPlaylists.collectAsStateWithLifecycle()
+
         PlaylistsScreen(
             playlists = playlists,
             likedCount = likedCount,
@@ -122,6 +109,9 @@ internal fun NavGraphBuilder.auraLibraryAndPlaylistsGraph(
     }
 
     composable(AuraRoutes.LIKED) {
+        val likedTracks by viewModel.likedTracks.collectAsStateWithLifecycle()
+        val playbackState by viewModel.playbackState.collectAsStateWithLifecycle()
+
         LikedSongsScreen(
             tracks = likedTracks,
             currentPlayingTrackId = playbackState.currentTrack?.id,
@@ -150,6 +140,9 @@ internal fun NavGraphBuilder.auraLibraryAndPlaylistsGraph(
             .collectAsStateWithLifecycle(initialValue = "Playlist")
         val playlistTracks by viewModel.observeTracksForPlaylist(playlistId)
             .collectAsStateWithLifecycle(initialValue = emptyList())
+        val playbackState by viewModel.playbackState.collectAsStateWithLifecycle()
+        val deleteAnimationsEnabled by viewModel.deleteAnimationsEnabled.collectAsStateWithLifecycle()
+        val accentColor by viewModel.accentColor.collectAsStateWithLifecycle()
 
         PlaylistDetailScreen(
             playlistName = playlistName ?: "Playlist",
@@ -184,6 +177,7 @@ internal fun NavGraphBuilder.auraLibraryAndPlaylistsGraph(
         val artistKey = Uri.decode(encodedKey)
         val artistPlaylist by viewModel.observeArtistPlaylist(artistKey)
             .collectAsStateWithLifecycle(initialValue = null)
+        val playbackState by viewModel.playbackState.collectAsStateWithLifecycle()
 
         ArtistDetailScreen(
             artistPlaylist = artistPlaylist,
@@ -206,6 +200,10 @@ internal fun NavGraphBuilder.auraLibraryAndPlaylistsGraph(
     }
 
     composable(AuraRoutes.DOWNLOADER) {
+        val downloadState by viewModel.downloadState.collectAsStateWithLifecycle()
+        val downloaderEngineStatus by viewModel.downloaderEngineStatus.collectAsStateWithLifecycle()
+        val tracks by viewModel.tracks.collectAsStateWithLifecycle()
+
         DownloaderScreen(
             downloadState = downloadState,
             engineStatus = downloaderEngineStatus,
@@ -246,16 +244,17 @@ internal fun NavGraphBuilder.auraLibraryAndPlaylistsGraph(
 internal fun NavGraphBuilder.auraSettingsGraph(
     navController: NavHostController,
     viewModel: AuraViewModel,
-    accentColor: AppAccentColor,
-    dynamicCoverColorsEnabled: Boolean,
-    deleteAnimationsEnabled: Boolean,
-    rustEngineInfo: String,
-    audioOutputRoute: AudioOutputRouteState,
-    headphonePreferences: HeadphonePreferences,
-    systemFolderState: SystemFolderStorageState,
     requestSystemStoragePermission: () -> Unit,
 ) {
     composable(AuraRoutes.SETTINGS) {
+        val accentColor by viewModel.accentColor.collectAsStateWithLifecycle()
+        val dynamicCoverColorsEnabled by viewModel.dynamicCoverColorsEnabled.collectAsStateWithLifecycle()
+        val deleteAnimationsEnabled by viewModel.deleteAnimationsEnabled.collectAsStateWithLifecycle()
+        val rustEngineInfo by viewModel.rustEngineInfo.collectAsStateWithLifecycle()
+        val audioOutputRoute by viewModel.audioOutputRoute.collectAsStateWithLifecycle()
+        val headphonePreferences by viewModel.headphonePreferences.collectAsStateWithLifecycle()
+        val systemFolderState by viewModel.systemFolderState.collectAsStateWithLifecycle()
+
         SettingsScreen(
             selectedAccent = accentColor,
             dynamicCoverColorsEnabled = dynamicCoverColorsEnabled,
@@ -293,6 +292,8 @@ internal fun NavGraphBuilder.auraSettingsGraph(
     }
 
     composable(AuraRoutes.SETTINGS_THEME) {
+        val accentColor by viewModel.accentColor.collectAsStateWithLifecycle()
+
         SettingsAccentThemeScreen(
             selectedAccent = accentColor,
             onSelectAccent = viewModel::selectAccentColor,
@@ -301,6 +302,9 @@ internal fun NavGraphBuilder.auraSettingsGraph(
     }
 
     composable(AuraRoutes.SETTINGS_VISUAL_FX) {
+        val dynamicCoverColorsEnabled by viewModel.dynamicCoverColorsEnabled.collectAsStateWithLifecycle()
+        val deleteAnimationsEnabled by viewModel.deleteAnimationsEnabled.collectAsStateWithLifecycle()
+
         SettingsVisualEffectsScreen(
             dynamicCoverColorsEnabled = dynamicCoverColorsEnabled,
             deleteAnimationsEnabled = deleteAnimationsEnabled,
@@ -311,6 +315,9 @@ internal fun NavGraphBuilder.auraSettingsGraph(
     }
 
     composable(AuraRoutes.SETTINGS_HEADPHONES) {
+        val audioOutputRoute by viewModel.audioOutputRoute.collectAsStateWithLifecycle()
+        val headphonePreferences by viewModel.headphonePreferences.collectAsStateWithLifecycle()
+
         SettingsHeadphonesScreen(
             outputRoute = audioOutputRoute,
             headphonePreferences = headphonePreferences,
@@ -323,6 +330,8 @@ internal fun NavGraphBuilder.auraSettingsGraph(
     }
 
     composable(AuraRoutes.SETTINGS_MEDIA_BUTTONS) {
+        val headphonePreferences by viewModel.headphonePreferences.collectAsStateWithLifecycle()
+
         SettingsMediaButtonsScreen(
             headphonePreferences = headphonePreferences,
             onSetDoubleTapNext = viewModel::setDoubleTapNextEnabled,
@@ -335,6 +344,8 @@ internal fun NavGraphBuilder.auraSettingsGraph(
     }
 
     composable(AuraRoutes.SETTINGS_SYSTEM_FOLDER) {
+        val systemFolderState by viewModel.systemFolderState.collectAsStateWithLifecycle()
+
         SettingsSystemFolderScreen(
             state = systemFolderState,
             onToggleEnabled = { enabled ->
@@ -362,19 +373,13 @@ internal fun NavGraphBuilder.auraSettingsGraph(
 internal fun NavGraphBuilder.auraPlayerAndAudioGraph(
     navController: NavHostController,
     viewModel: AuraViewModel,
-    playbackState: PlaybackState,
-    playbackTuning: PlaybackTuning,
-    equalizerState: EqualizerState,
-    audioEffects: AudioEffectsState,
-    sleepTimerState: SleepTimerState,
-    audioOutputRoute: AudioOutputRouteState,
-    headphonePreferences: HeadphonePreferences,
-    dynamicCoverColorsEnabled: Boolean,
     safLaunchers: AuraSafLaunchers,
     onRequestAddToPlaylist: (Track) -> Unit,
     onRequestEditMetadata: (Track) -> Unit,
 ) {
     composable(AuraRoutes.EQUALIZER) {
+        val equalizerState by viewModel.equalizerState.collectAsStateWithLifecycle()
+
         EqualizerScreen(
             equalizerState = equalizerState,
             onBack = { navController.popBackStack() },
@@ -386,6 +391,10 @@ internal fun NavGraphBuilder.auraPlayerAndAudioGraph(
     }
 
     composable(AuraRoutes.AUDIO_EFFECTS) {
+        val audioEffects by viewModel.audioEffects.collectAsStateWithLifecycle()
+        val audioOutputRoute by viewModel.audioOutputRoute.collectAsStateWithLifecycle()
+        val headphonePreferences by viewModel.headphonePreferences.collectAsStateWithLifecycle()
+
         AudioEffectsScreen(
             effectsState = audioEffects,
             onBack = { navController.popBackStack() },
@@ -412,6 +421,12 @@ internal fun NavGraphBuilder.auraPlayerAndAudioGraph(
     }
 
     composable(AuraRoutes.PLAYER) {
+        val playbackState by viewModel.playbackState.collectAsStateWithLifecycle()
+        val playbackTuning by viewModel.playbackTuning.collectAsStateWithLifecycle()
+        val audioEffects by viewModel.audioEffects.collectAsStateWithLifecycle()
+        val sleepTimerState by viewModel.sleepTimerState.collectAsStateWithLifecycle()
+        val dynamicCoverColorsEnabled by viewModel.dynamicCoverColorsEnabled.collectAsStateWithLifecycle()
+
         PlayerScreen(
             playbackState = playbackState,
             playbackTuning = playbackTuning,
@@ -459,6 +474,9 @@ internal fun NavGraphBuilder.auraPlayerAndAudioGraph(
     }
 
     composable(AuraRoutes.QUEUE) {
+        val playbackState by viewModel.playbackState.collectAsStateWithLifecycle()
+        val dynamicCoverColorsEnabled by viewModel.dynamicCoverColorsEnabled.collectAsStateWithLifecycle()
+
         QueueScreen(
             playbackState = playbackState,
             dynamicCoverColorsEnabled = dynamicCoverColorsEnabled,

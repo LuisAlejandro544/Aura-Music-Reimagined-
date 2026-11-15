@@ -27,6 +27,7 @@ import com.auramusic.core.model.AuraProcessRoleResolver
 import com.auramusic.core.model.DownloadState
 import com.auramusic.core.model.DownloadStatus
 import com.auramusic.core.model.DownloaderEngineStatus
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -99,14 +100,15 @@ class AuraDownloadForegroundService : Service() {
                     msg.replyTo?.let { client ->
                         boundClients.add(client)
                         sendToClient(
-                            client,
-                            AuraDownloaderIpc.MSG_DOWNLOAD_STATE,
-                            AuraDownloaderIpc.downloadStateToJson(downloader.downloadState.value),
+                            client = client,
+                            what = AuraDownloaderIpc.MSG_DOWNLOAD_STATE,
+                            json = AuraDownloaderIpc.downloadStateToJson(downloader.downloadState.value),
+                            isInitialSnapshot = true,
                         )
                         sendToClient(
-                            client,
-                            AuraDownloaderIpc.MSG_ENGINE_STATUS,
-                            AuraDownloaderIpc.engineStatusToJson(downloader.engineStatus.value),
+                            client = client,
+                            what = AuraDownloaderIpc.MSG_ENGINE_STATUS,
+                            json = AuraDownloaderIpc.engineStatusToJson(downloader.engineStatus.value),
                         )
                     }
                 }
@@ -225,6 +227,10 @@ class AuraDownloadForegroundService : Service() {
                 commandMutex.withLock {
                     block()
                 }
+            } catch (ce: CancellationException) {
+                throw ce
+            } catch (_: Throwable) {
+                // Los fallos controlados ya se propagan por DownloadState/EngineStatus; evita cerrar el worker IPC.
             } finally {
                 pendingCommandCount.decrementAndGet()
                 mainHandler.post {
@@ -267,14 +273,15 @@ class AuraDownloadForegroundService : Service() {
         val downloader = (applicationContext as? AuraDownloadHost)?.provideAudioDownloader() ?: return
         if (ipcDownloadObserverJob?.isActive != true) {
             ipcDownloadObserverJob = serviceScope.launch {
-                downloader.downloadState.collectLatest { state ->
+                // Usa collect estricto para no cancelar entregas intermedias o terminales hacia MAIN.
+                downloader.downloadState.collect { state ->
                     broadcastDownloadStateToClients(state)
                 }
             }
         }
         if (ipcEngineObserverJob?.isActive != true) {
             ipcEngineObserverJob = serviceScope.launch {
-                downloader.engineStatus.collectLatest { status ->
+                downloader.engineStatus.collect { status ->
                     broadcastEngineStatusToClients(status)
                 }
             }
@@ -486,10 +493,18 @@ class AuraDownloadForegroundService : Service() {
         }
     }
 
-    private fun sendToClient(client: Messenger, what: Int, json: String): Boolean {
+    private fun sendToClient(
+        client: Messenger,
+        what: Int,
+        json: String,
+        isInitialSnapshot: Boolean = false,
+    ): Boolean {
         val msg = Message.obtain(null, what).apply {
             data = Bundle().apply {
                 putString(AuraDownloaderIpc.KEY_JSON, json)
+                if (isInitialSnapshot) {
+                    putBoolean(AuraDownloaderIpc.KEY_INITIAL_SNAPSHOT, true)
+                }
             }
         }
         return runCatching { client.send(msg) }.isSuccess
