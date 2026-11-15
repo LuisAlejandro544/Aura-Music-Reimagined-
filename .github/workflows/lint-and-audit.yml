@@ -1,0 +1,263 @@
+# Flujo manual de auditoría integral y lints multi-lenguaje para Aura Music.
+# Ejecuta análisis de Kotlin/Android, Rust, Python, integridad estructural, compilación
+# continua con `--continue` (no se detiene en el primer error) y auditoría de dependencias
+# viejas. Genera un archivo .zip en Artifacts con logs crudos, reportes XML/HTML de Android Lint
+# y una página interactiva (`index.html`) consultable sin conexión desde el teléfono.
+
+name: Lint y Auditoria Total
+
+on:
+  workflow_dispatch:
+    inputs:
+      compile_apk:
+        description: "Compilar APK y ejecutar unit tests con --continue para capturar todos los errores"
+        required: true
+        default: true
+        type: boolean
+      run_rust_ndk_check:
+        description: "Verificar compilación cruzada Rust (32 y 64 bits) con cargo-ndk"
+        required: true
+        default: true
+        type: boolean
+      check_outdated_deps:
+        description: "Consultar Maven, Crates.io, Gradle y PyPI para detectar dependencias desactualizadas"
+        required: true
+        default: true
+        type: boolean
+
+jobs:
+  lint-and-audit:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Descargar todo el código del proyecto
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          submodules: recursive
+
+      - name: Inicializar directorios de logs y códigos de salida
+        run: |
+          mkdir -p audit-logs audit-bundle
+          echo '{}' > audit-logs/exit-codes.json
+
+      - name: Configurar JDK 17 (sin caché)
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Configurar Python 3.11 y linters Python (ruff, mypy)
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Instalar herramientas de análisis Python
+        continue-on-error: true
+        run: |
+          python3 -m pip install --upgrade pip
+          pip install ruff mypy
+
+      - name: Configurar Node.js para pruebas estructurales y entorno Web
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Instalar Clang / libclang-dev para bindgen de QuickJS-NG en Rust
+        run: |
+          sudo apt-get update && sudo apt-get install -y clang libclang-dev
+          LIBCLANG_FILE="$(find /usr/lib -name 'libclang*.so*' 2>/dev/null | head -n 1)"
+          if [ -n "$LIBCLANG_FILE" ]; then
+            echo "LIBCLANG_PATH=$(dirname "$LIBCLANG_FILE")" >> "$GITHUB_ENV"
+          fi
+
+      - name: Configurar Android SDK base
+        uses: android-actions/setup-android@v4
+        with:
+          packages: platform-tools
+
+      - name: Instalar Android SDK 35, Build Tools y NDK 27
+        run: |
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager --install "platform-tools" "platforms;android-35" "build-tools;35.0.1" "ndk;27.2.12479018"
+          NDK_PATH="$ANDROID_HOME/ndk/27.2.12479018"
+          echo "ANDROID_NDK_HOME=$NDK_PATH" >> "$GITHUB_ENV"
+
+      - name: Instalar Rust estable, clippy, rustfmt y targets Android (32 y 64 bits)
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy,rustfmt
+          targets: aarch64-linux-android,armv7-linux-androideabi,x86_64-linux-android
+
+      - name: Instalar cargo-ndk
+        run: cargo install cargo-ndk --locked
+
+      - name: Descargar ktlint CLI para lint estático de Kotlin
+        continue-on-error: true
+        run: |
+          curl -fsSL -o /tmp/ktlint "https://github.com/pinterest/ktlint/releases/download/1.5.0/ktlint"
+          chmod +x /tmp/ktlint
+
+      - name: Configurar Gradle 8.14.7 (sin caché)
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.14.7"
+          cache-disabled: true
+
+      - name: 1. Auditar integridad estructural, Web y esquemas Room
+        run: |
+          set +e
+          {
+            echo "=== npm ci ==="
+            npm ci
+            RC_NPM=$?
+            echo "=== tests/project-integrity.test.ts ==="
+            npx --yes tsx --test tests/project-integrity.test.ts
+            RC_INT=$?
+            echo "=== npm run lint && npm run build ==="
+            npm run lint && npm run build
+            RC_WEB=$?
+            RC=$((RC_NPM + RC_INT + RC_WEB))
+          } > audit-logs/integrity-and-web.log 2>&1
+          python3 -c "import json; p='audit-logs/exit-codes.json'; d=json.load(open(p)); d['integrity-and-web']=$RC; json.dump(d, open(p,'w'))"
+
+      - name: 2. Lint y compilación de Python (py_compile, ruff, mypy)
+        run: |
+          set +e
+          PY_TARGETS="android/core/downloader/src/main/python/aura_ytdlp.py .github/scripts/check_outdated_deps.py .github/scripts/generate_audit_report.py"
+          {
+            echo "=== python3 -m py_compile ==="
+            python3 -m py_compile $PY_TARGETS
+            RC_PYC=$?
+            echo ""
+            echo "=== ruff check ==="
+            ruff check $PY_TARGETS
+            RC_RUFF=$?
+            echo ""
+            echo "=== ruff format --check ==="
+            ruff format --check $PY_TARGETS
+            RC_FMT=$?
+            echo ""
+            echo "=== mypy --ignore-missing-imports ==="
+            mypy --ignore-missing-imports $PY_TARGETS
+            RC_MYPY=$?
+            RC=$((RC_PYC + RC_RUFF + RC_FMT + RC_MYPY))
+          } > audit-logs/python-lint.log 2>&1
+          python3 -c "import json; p='audit-logs/exit-codes.json'; d=json.load(open(p)); d['python-lint']=$RC; json.dump(d, open(p,'w'))"
+
+      - name: 3. Lint, tests y check multi-ABI de Rust (fmt, check, clippy, test, cargo-ndk)
+        env:
+          RUN_NDK: ${{ inputs.run_rust_ndk_check }}
+        run: |
+          set +e
+          {
+            cd android/rust/aura_core
+            echo "=== cargo fetch ==="
+            cargo fetch
+            RC_FETCH=$?
+            echo ""
+            echo "=== cargo fmt --check ==="
+            cargo fmt --all -- --check
+            RC_FMT=$?
+            echo ""
+            echo "=== cargo check --all-targets ==="
+            cargo check --all-targets
+            RC_CHK=$?
+            echo ""
+            echo "=== cargo clippy --all-targets ==="
+            cargo clippy --all-targets -- -W clippy::all
+            RC_CLIPPY=$?
+            echo ""
+            echo "=== cargo test ==="
+            cargo test
+            RC_TEST=$?
+            RC_NDK=0
+            if [ "$RUN_NDK" = "true" ]; then
+              echo ""
+              echo "=== cargo ndk check (32 y 64 bits) ==="
+              cargo ndk -t armeabi-v7a -t arm64-v8a -t x86_64 --platform 26 check --lib --bin aura_qjs
+              RC_NDK=$?
+            fi
+            RC=$((RC_FETCH + RC_FMT + RC_CHK + RC_CLIPPY + RC_TEST + RC_NDK))
+          } > audit-logs/rust-lint-and-test.log 2>&1
+          python3 -c "import json; p='audit-logs/exit-codes.json'; d=json.load(open(p)); d['rust-lint-and-test']=$RC; json.dump(d, open(p,'w'))"
+
+      - name: 4. Lint estático de Kotlin con ktlint
+        run: |
+          set +e
+          {
+            if [ -x /tmp/ktlint ]; then
+              /tmp/ktlint "android/**/src/**/*.kt"
+              RC=$?
+            else
+              echo "ktlint no estuvo disponible en este runner."
+              RC=0
+            fi
+          } > audit-logs/kotlin-ktlint.log 2>&1
+          python3 -c "import json; p='audit-logs/exit-codes.json'; d=json.load(open(p)); d['kotlin-ktlint']=$RC; json.dump(d, open(p,'w'))"
+
+      - name: 5. Ejecutar Android Lint en todos los módulos (--continue)
+        run: |
+          set +e
+          chmod +x android/gradlew
+          (
+            cd android
+            ./gradlew lintDebug --continue --no-daemon --no-build-cache --warning-mode all
+          ) > audit-logs/gradle-lint.log 2>&1
+          RC=$?
+          python3 -c "import json; p='audit-logs/exit-codes.json'; d=json.load(open(p)); d['gradle-lint']=$RC; json.dump(d, open(p,'w'))"
+
+      - name: 6. Compilar APK Debug y ejecutar Unit Tests (--continue, sigue compilando tras errores)
+        if: ${{ inputs.compile_apk }}
+        run: |
+          set +e
+          chmod +x android/gradlew
+          (
+            cd android
+            ./gradlew assembleDebug testDebugUnitTest -PauraAbis=armeabi-v7a,arm64-v8a,x86_64 --continue --no-daemon --no-build-cache --warning-mode all
+          ) > audit-logs/gradle-compile-and-test.log 2>&1
+          RC=$?
+          python3 -c "import json; p='audit-logs/exit-codes.json'; d=json.load(open(p)); d['gradle-compile-and-test']=$RC; json.dump(d, open(p,'w'))"
+
+      - name: 7. Verificar consistencia de esquemas Room tras KSP
+        run: |
+          set +e
+          {
+            echo "=== Estado de android/core/database/schemas/ ==="
+            find android/core/database/schemas -type f -print
+            echo ""
+            echo "=== Diff frente al esquema versionado ==="
+            git diff --stat android/core/database/schemas/
+            git diff android/core/database/schemas/
+            RC=0
+          } > audit-logs/room-schema-diff.log 2>&1
+          python3 -c "import json; p='audit-logs/exit-codes.json'; d=json.load(open(p)); d['room-schema-diff']=$RC; json.dump(d, open(p,'w'))"
+
+      - name: 8. Auditar dependencias desactualizadas (Gradle, Rust, Python)
+        if: ${{ inputs.check_outdated_deps }}
+        run: |
+          set +e
+          python3 .github/scripts/check_outdated_deps.py \
+            --root . \
+            --output-json audit-logs/outdated-deps.json \
+            --output-log audit-logs/outdated-deps.log
+          RC=$?
+          python3 -c "import json; p='audit-logs/exit-codes.json'; d=json.load(open(p)); d['outdated-deps']=$RC; json.dump(d, open(p,'w'))"
+
+      - name: 9. Construir página HTML interactiva y paquete .zip de auditoría
+        if: always()
+        run: |
+          python3 .github/scripts/generate_audit_report.py \
+            --logs-dir audit-logs \
+            --deps-json audit-logs/outdated-deps.json \
+            --android-dir android \
+            --output-dir audit-bundle \
+            --zip-path dist-audit/AuraMusic-Lint-Audit-Bundle.zip \
+            --exit-codes-json audit-logs/exit-codes.json
+
+      - name: 10. Subir artefacto .zip con reporte HTML interactivo y logs crudos
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: AuraMusic-Lint-Audit-Report
+          path: dist-audit/AuraMusic-Lint-Audit-Bundle.zip
