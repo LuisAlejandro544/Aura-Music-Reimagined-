@@ -27,6 +27,7 @@ import androidx.compose.material.icons.automirrored.rounded.PlaylistPlay
 import androidx.compose.material.icons.automirrored.rounded.QueueMusic
 import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.DeleteOutline
+import androidx.compose.material.icons.rounded.Edit
 import androidx.compose.material.icons.rounded.Favorite
 import androidx.compose.material.icons.rounded.FavoriteBorder
 import androidx.compose.material.icons.rounded.MoreVert
@@ -390,6 +391,7 @@ fun LikedSongsScreen(
     onPlayNext: (Track) -> Unit = {},
     onAddToQueue: (Track) -> Unit = {},
     onAddToPlaylist: (Track) -> Unit = {},
+    onEditMetadata: (Track) -> Unit = {},
 ) {
     Scaffold(
         containerColor = MaterialTheme.colorScheme.background,
@@ -467,6 +469,7 @@ fun LikedSongsScreen(
                         onPlayNext = { onPlayNext(track) },
                         onAddToQueue = { onAddToQueue(track) },
                         onAddToPlaylist = { onAddToPlaylist(track) },
+                        onEditMetadata = { onEditMetadata(track) },
                         onRemoveFromPlaylist = null,
                     )
                 }
@@ -490,6 +493,7 @@ fun PlaylistDetailScreen(
     onRemoveFromPlaylist: (Long) -> Unit,
     onPlayNext: (Track) -> Unit = {},
     onAddToQueue: (Track) -> Unit = {},
+    onEditMetadata: (Track) -> Unit = {},
     deleteAnimationsEnabled: Boolean = true,
     accentArgb: Int = 0xFFA78BFA.toInt(),
     deleteEffectRenderer: DeleteEffectFrameRenderer? = null,
@@ -575,6 +579,7 @@ fun PlaylistDetailScreen(
                             onPlayNext = { onPlayNext(track) },
                             onAddToQueue = { onAddToQueue(track) },
                             onAddToPlaylist = null,
+                            onEditMetadata = { onEditMetadata(track) },
                             onRemoveFromPlaylist = { trackPendingRemove = track },
                         )
                     }
@@ -900,6 +905,7 @@ private fun PlaylistTrackRow(
     onPlayNext: () -> Unit,
     onAddToQueue: () -> Unit,
     onAddToPlaylist: (() -> Unit)?,
+    onEditMetadata: (() -> Unit)? = null,
     onRemoveFromPlaylist: (() -> Unit)?,
 ) {
     var menuExpanded by remember { mutableStateOf(false) }
@@ -1004,6 +1010,16 @@ private fun PlaylistTrackRow(
                             onClick = {
                                 menuExpanded = false
                                 onAddToPlaylist()
+                            },
+                        )
+                    }
+                    if (onEditMetadata != null) {
+                        DropdownMenuItem(
+                            text = { Text("Editar metadatos") },
+                            leadingIcon = { Icon(Icons.Rounded.Edit, contentDescription = null) },
+                            onClick = {
+                                menuExpanded = false
+                                onEditMetadata()
                             },
                         )
                     }

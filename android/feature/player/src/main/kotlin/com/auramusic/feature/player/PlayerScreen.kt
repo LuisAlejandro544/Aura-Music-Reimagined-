@@ -23,6 +23,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.PlaylistAdd
 import androidx.compose.material.icons.automirrored.rounded.QueueMusic
+import androidx.compose.material.icons.rounded.Edit
 import androidx.compose.material.icons.rounded.Favorite
 import androidx.compose.material.icons.rounded.FavoriteBorder
 import androidx.compose.material.icons.rounded.Image
@@ -37,6 +38,7 @@ import androidx.compose.material.icons.rounded.Shuffle
 import androidx.compose.material.icons.rounded.SkipNext
 import androidx.compose.material.icons.rounded.SkipPrevious
 import androidx.compose.material.icons.rounded.Speed
+import androidx.compose.material.icons.rounded.SurroundSound
 import androidx.compose.material.icons.rounded.Tune
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -77,6 +79,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import coil3.compose.AsyncImage
+import com.auramusic.core.model.AudioEffectsState
 import com.auramusic.core.model.PlaybackState
 import com.auramusic.core.model.PlaybackTuning
 import com.auramusic.core.model.PlaybackTuningHelper
@@ -211,6 +214,7 @@ fun MiniPlayerBar(
 fun PlayerScreen(
     playbackState: PlaybackState,
     playbackTuning: PlaybackTuning = PlaybackTuning(),
+    audioEffects: AudioEffectsState = AudioEffectsState(),
     dynamicCoverColorsEnabled: Boolean = true,
     onCollapse: () -> Unit,
     onTogglePlayPause: () -> Unit,
@@ -221,8 +225,10 @@ fun PlayerScreen(
     onCycleRepeat: () -> Unit,
     onToggleLike: (Long) -> Unit,
     onOpenAddToPlaylist: (Track) -> Unit,
+    onEditMetadata: (Track) -> Unit = {},
     onChangeCover: (Track) -> Unit,
     onOpenEqualizer: () -> Unit,
+    onOpenAudioEffects: () -> Unit = {},
     onOpenQueue: () -> Unit = {},
     onSetPlaybackSpeed: (Float) -> Unit = {},
     onSetCrossfadeEnabled: (Boolean) -> Unit = {},
@@ -332,6 +338,34 @@ fun PlayerScreen(
                                 },
                             )
 
+                            val effectsSummary = PlaybackTuningHelper.formatEffectsSummary(audioEffects)
+                            DropdownMenuItem(
+                                text = {
+                                    Text(
+                                        if (effectsSummary != null) {
+                                            "8D, Reverb y Slowed ($effectsSummary)"
+                                        } else {
+                                            "8D, Reverb y Slowed"
+                                        },
+                                    )
+                                },
+                                leadingIcon = {
+                                    Icon(
+                                        imageVector = Icons.Rounded.SurroundSound,
+                                        contentDescription = null,
+                                        tint = if (audioEffects.isAnyEffectEnabled) {
+                                            MaterialTheme.colorScheme.primary
+                                        } else {
+                                            MaterialTheme.colorScheme.onSurfaceVariant
+                                        },
+                                    )
+                                },
+                                onClick = {
+                                    showOptionsMenu = false
+                                    onOpenAudioEffects()
+                                },
+                            )
+
                             DropdownMenuItem(
                                 text = { Text("Cola de reproducción") },
                                 leadingIcon = {
@@ -350,6 +384,19 @@ fun PlayerScreen(
                                 HorizontalDivider(
                                     modifier = Modifier.padding(vertical = 4.dp),
                                     color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f),
+                                )
+                                DropdownMenuItem(
+                                    text = { Text("Editar metadatos") },
+                                    leadingIcon = {
+                                        Icon(
+                                            imageVector = Icons.Rounded.Edit,
+                                            contentDescription = null,
+                                        )
+                                    },
+                                    onClick = {
+                                        showOptionsMenu = false
+                                        onEditMetadata(track)
+                                    },
                                 )
                                 DropdownMenuItem(
                                     text = { Text("Cambiar carátula") },
@@ -570,11 +617,16 @@ fun PlayerScreen(
                         style = MaterialTheme.typography.labelMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
-                    if (kotlin.math.abs(playbackTuning.playbackSpeed - 1.0f) > 0.01f ||
-                        playbackTuning.crossfadeEnabled
-                    ) {
+                    val hasSpeedOrCrossfade =
+                        (!audioEffects.slowedEnabled && kotlin.math.abs(playbackTuning.playbackSpeed - 1.0f) > 0.01f) ||
+                            playbackTuning.crossfadeEnabled
+                    val effectsText = PlaybackTuningHelper.formatEffectsSummary(audioEffects)
+                    if (hasSpeedOrCrossfade || effectsText != null) {
                         val activeSummary = buildList {
-                            if (kotlin.math.abs(playbackTuning.playbackSpeed - 1.0f) > 0.01f) {
+                            if (effectsText != null) {
+                                add(effectsText)
+                            }
+                            if (!audioEffects.slowedEnabled && kotlin.math.abs(playbackTuning.playbackSpeed - 1.0f) > 0.01f) {
                                 add(PlaybackTuningHelper.formatSpeedLabel(playbackTuning.playbackSpeed))
                             }
                             if (playbackTuning.crossfadeEnabled) {
@@ -586,7 +638,18 @@ fun PlayerScreen(
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.primary,
                             fontWeight = FontWeight.SemiBold,
-                            modifier = Modifier.clickable { showTuningSheet = true },
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier
+                                .weight(1f, fill = false)
+                                .padding(horizontal = 8.dp)
+                                .clickable {
+                                    if (effectsText != null && !hasSpeedOrCrossfade) {
+                                        onOpenAudioEffects()
+                                    } else {
+                                        showTuningSheet = true
+                                    }
+                                },
                         )
                     }
                     Text(
@@ -677,7 +740,13 @@ fun PlayerScreen(
         if (showTuningSheet) {
             PlaybackTuningBottomSheet(
                 playbackTuning = playbackTuning,
+                slowedActive = audioEffects.slowedEnabled,
+                slowedSpeed = audioEffects.slowedSpeed,
                 onDismiss = { showTuningSheet = false },
+                onOpenAudioEffects = {
+                    showTuningSheet = false
+                    onOpenAudioEffects()
+                },
                 onSetPlaybackSpeed = onSetPlaybackSpeed,
                 onSetCrossfadeEnabled = onSetCrossfadeEnabled,
                 onSetCrossfadeSeconds = onSetCrossfadeSeconds,
@@ -690,7 +759,10 @@ fun PlayerScreen(
 @Composable
 private fun PlaybackTuningBottomSheet(
     playbackTuning: PlaybackTuning,
+    slowedActive: Boolean,
+    slowedSpeed: Float,
     onDismiss: () -> Unit,
+    onOpenAudioEffects: () -> Unit,
     onSetPlaybackSpeed: (Float) -> Unit,
     onSetCrossfadeEnabled: (Boolean) -> Unit,
     onSetCrossfadeSeconds: (Int) -> Unit,
@@ -728,6 +800,31 @@ private fun PlaybackTuningBottomSheet(
                     onClick = { onSetPlaybackSpeed(PlaybackTuning.DEFAULT_PLAYBACK_SPEED) },
                 ) {
                     Text("Normal 1.0x")
+                }
+            }
+
+            if (slowedActive) {
+                Surface(
+                    shape = RoundedCornerShape(14.dp),
+                    color = MaterialTheme.colorScheme.primaryContainer,
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 14.dp, vertical = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                    ) {
+                        Text(
+                            text = "Modo Slowed activo (${PlaybackTuningHelper.formatSpeedLabel(slowedSpeed)}). Cambiar la velocidad aquí volverá al modo normal.",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onPrimaryContainer,
+                            modifier = Modifier.weight(1f),
+                        )
+                        TextButton(onClick = onOpenAudioEffects) {
+                            Text("Efectos")
+                        }
+                    }
                 }
             }
 

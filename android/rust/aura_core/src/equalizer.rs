@@ -5,11 +5,13 @@
 //! y limitación suave asintótica para evitar distorsión digital al realzar frecuencias.
 //! Se conecta en tiempo real con Media3 ExoPlayer vía JNI sobre buffers directos PCM.
 
+use crate::reverb::AudioEffectsProcessor;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Mutex, OnceLock};
 
 /// Número fijo de bandas del ecualizador gráfico.
 pub const BAND_COUNT: usize = 10;
+const MAX_CHANNELS: usize = 8;
 
 /// Frecuencias centrales ISO estándar (Hz) de las 10 bandas.
 pub const BAND_FREQUENCIES_HZ: [f64; BAND_COUNT] = [
@@ -107,7 +109,8 @@ impl BiquadState {
     }
 }
 
-/// Procesador DSP de 10 bandas que mantiene los coeficientes y líneas de retardo en memoria nativa.
+/// Procesador DSP maestro que encadena en `f64` el ecualizador de 10 bandas
+/// junto con la calidez analógica Slowed y la reverberación estéreo Freeverb.
 #[derive(Debug)]
 pub struct EqualizerProcessor {
     sample_rate: u32,
@@ -118,6 +121,7 @@ pub struct EqualizerProcessor {
     coeffs: [BiquadCoeffs; BAND_COUNT],
     // Dimensionado como `channel_count * BAND_COUNT`.
     states: Vec<BiquadState>,
+    effects: AudioEffectsProcessor,
 }
 
 impl EqualizerProcessor {
@@ -130,6 +134,7 @@ impl EqualizerProcessor {
             applied_version: 0,
             coeffs: [BiquadCoeffs::UNITY; BAND_COUNT],
             states: vec![BiquadState::default(); 2 * BAND_COUNT],
+            effects: AudioEffectsProcessor::new(),
         };
         processor.sync_config_if_needed();
         processor
@@ -138,7 +143,7 @@ impl EqualizerProcessor {
     /// Reconfigura frecuencia de muestreo y canales cuando ExoPlayer abre una pista nueva.
     pub fn configure(&mut self, sample_rate: u32, channel_count: usize) {
         let safe_rate = sample_rate.max(8_000);
-        let safe_channels = channel_count.clamp(1, 8);
+        let safe_channels = channel_count.clamp(1, MAX_CHANNELS);
         let format_changed = self.sample_rate != safe_rate || self.channel_count != safe_channels;
 
         self.sample_rate = safe_rate;
@@ -150,71 +155,85 @@ impl EqualizerProcessor {
             self.reset_states();
             self.applied_version = 0; // Fuerza recalcular coeficientes para el nuevo sample_rate.
         }
+        self.effects.configure(safe_rate, safe_channels);
         self.sync_config_if_needed();
     }
 
-    /// Limpia las líneas de retardo al hacer seek o reiniciar la reproducción.
+    /// Limpia las líneas de retardo del ecualizador y la cola del reverb al hacer seek o flush.
     pub fn reset_states(&mut self) {
         for s in &mut self.states {
             *s = BiquadState::default();
         }
+        self.effects.reset_states();
     }
 
     fn sync_config_if_needed(&mut self) {
         let current_version = CONFIG_VERSION.load(Ordering::Acquire);
-        if self.applied_version == current_version {
-            return;
-        }
+        if self.applied_version != current_version {
+            let cfg = shared_config()
+                .lock()
+                .map(|guard| guard.clone())
+                .unwrap_or_default();
 
-        let cfg = shared_config()
-            .lock()
-            .map(|guard| guard.clone())
-            .unwrap_or_default();
-
-        self.enabled = cfg.enabled;
-        let mut any_active = false;
-        let sr = self.sample_rate as f64;
-        for (i, freq) in BAND_FREQUENCIES_HZ.iter().enumerate() {
-            let coeff = BiquadCoeffs::peaking(*freq, sr, cfg.gains_db[i] as f64);
-            if coeff.active {
-                any_active = true;
+            self.enabled = cfg.enabled;
+            let mut any_active = false;
+            let sr = self.sample_rate as f64;
+            for (i, freq) in BAND_FREQUENCIES_HZ.iter().enumerate() {
+                let coeff = BiquadCoeffs::peaking(*freq, sr, cfg.gains_db[i] as f64);
+                if coeff.active {
+                    any_active = true;
+                }
+                self.coeffs[i] = coeff;
             }
-            self.coeffs[i] = coeff;
+            self.has_active_band = any_active;
+            self.applied_version = current_version;
         }
-        self.has_active_band = any_active;
-        self.applied_version = current_version;
+        self.effects.sync_config_if_needed();
     }
 
     /// Procesa un buffer PCM de 16 bits con signo little-endian in-place.
-    /// Devuelve `true` si aplicó ecualización y `false` si operó en bypass directo.
+    /// Devuelve `true` si aplicó ecualización o efectos (Reverb/Slowed) y `false` en bypass directo.
     pub fn process_pcm16_le(&mut self, bytes: &mut [u8]) -> bool {
         self.sync_config_if_needed();
-        if !self.enabled || !self.has_active_band || self.channel_count == 0 {
+        let eq_active = self.enabled && self.has_active_band;
+        let fx_active = self.effects.is_active();
+        if (!eq_active && !fx_active) || self.channel_count == 0 {
             return false;
         }
 
-        let ch_count = self.channel_count;
+        let ch_count = self.channel_count.min(MAX_CHANNELS);
         let frame_bytes = ch_count * 2;
         let usable_bytes = (bytes.len() / frame_bytes) * frame_bytes;
         if usable_bytes == 0 {
             return false;
         }
 
+        let mut frame_samples = [0.0_f64; MAX_CHANNELS];
         for frame in bytes[..usable_bytes].chunks_exact_mut(frame_bytes) {
             for ch in 0..ch_count {
                 let offset = ch * 2;
                 let raw = i16::from_le_bytes([frame[offset], frame[offset + 1]]);
                 let mut sample = (raw as f64) / 32768.0;
 
-                let state_base = ch * BAND_COUNT;
-                for band in 0..BAND_COUNT {
-                    let c = &self.coeffs[band];
-                    if c.active {
-                        sample = self.states[state_base + band].process(sample, c);
+                if eq_active {
+                    let state_base = ch * BAND_COUNT;
+                    for band in 0..BAND_COUNT {
+                        let c = &self.coeffs[band];
+                        if c.active {
+                            sample = self.states[state_base + band].process(sample, c);
+                        }
                     }
                 }
+                frame_samples[ch] = sample;
+            }
 
-                let limited = soft_limit(sample);
+            if fx_active {
+                self.effects.process_frame(&mut frame_samples[..ch_count]);
+            }
+
+            for ch in 0..ch_count {
+                let offset = ch * 2;
+                let limited = soft_limit(frame_samples[ch]);
                 let out_i16 = (limited * 32767.0).round().clamp(-32768.0, 32767.0) as i16;
                 let out_bytes = out_i16.to_le_bytes();
                 frame[offset] = out_bytes[0];
@@ -226,20 +245,23 @@ impl EqualizerProcessor {
     }
 
     /// Procesa un buffer PCM flotante de 32 bits little-endian in-place.
-    /// Devuelve `true` si aplicó ecualización y `false` si operó en bypass directo.
+    /// Devuelve `true` si aplicó ecualización o efectos (Reverb/Slowed) y `false` en bypass directo.
     pub fn process_pcm_f32_le(&mut self, bytes: &mut [u8]) -> bool {
         self.sync_config_if_needed();
-        if !self.enabled || !self.has_active_band || self.channel_count == 0 {
+        let eq_active = self.enabled && self.has_active_band;
+        let fx_active = self.effects.is_active();
+        if (!eq_active && !fx_active) || self.channel_count == 0 {
             return false;
         }
 
-        let ch_count = self.channel_count;
+        let ch_count = self.channel_count.min(MAX_CHANNELS);
         let frame_bytes = ch_count * 4;
         let usable_bytes = (bytes.len() / frame_bytes) * frame_bytes;
         if usable_bytes == 0 {
             return false;
         }
 
+        let mut frame_samples = [0.0_f64; MAX_CHANNELS];
         for frame in bytes[..usable_bytes].chunks_exact_mut(frame_bytes) {
             for ch in 0..ch_count {
                 let offset = ch * 4;
@@ -251,15 +273,25 @@ impl EqualizerProcessor {
                 ]);
                 let mut sample = if raw.is_finite() { raw as f64 } else { 0.0 };
 
-                let state_base = ch * BAND_COUNT;
-                for band in 0..BAND_COUNT {
-                    let c = &self.coeffs[band];
-                    if c.active {
-                        sample = self.states[state_base + band].process(sample, c);
+                if eq_active {
+                    let state_base = ch * BAND_COUNT;
+                    for band in 0..BAND_COUNT {
+                        let c = &self.coeffs[band];
+                        if c.active {
+                            sample = self.states[state_base + band].process(sample, c);
+                        }
                     }
                 }
+                frame_samples[ch] = sample;
+            }
 
-                let out_f32 = soft_limit(sample) as f32;
+            if fx_active {
+                self.effects.process_frame(&mut frame_samples[..ch_count]);
+            }
+
+            for ch in 0..ch_count {
+                let offset = ch * 4;
+                let out_f32 = soft_limit(frame_samples[ch]) as f32;
                 let out_bytes = out_f32.to_le_bytes();
                 frame[offset..offset + 4].copy_from_slice(&out_bytes);
             }
@@ -449,5 +481,52 @@ mod tests {
         }
 
         set_equalizer_config(false, &[0.0; BAND_COUNT]);
+    }
+
+    #[test]
+    fn combined_eq_reverb_and_warmth_process_cleanly_without_nans_or_overflow() {
+        let mut proc = EqualizerProcessor::new();
+        proc.configure(48_000, 2);
+
+        let mut boost = [0.0_f32; BAND_COUNT];
+        boost[1] = 6.0;
+        boost[8] = -4.0;
+        set_equalizer_config(true, &boost);
+        crate::reverb::set_audio_effects_config(crate::reverb::AudioEffectsConfig {
+            reverb_enabled: true,
+            reverb_room_size: 0.82,
+            reverb_damping: 0.45,
+            reverb_wet_mix: 0.55,
+            reverb_width: 0.90,
+            slowed_warmth_enabled: true,
+            slowed_warmth_amount: 0.70,
+            spatial_8d_enabled: true,
+            spatial_8d_speed: 0.50,
+            spatial_8d_depth: 0.85,
+        });
+
+        let mut pcm16 = generate_sine_pcm16(440.0, 48_000, 1024, 0.5);
+        assert!(proc.process_pcm16_le(&mut pcm16));
+        for chunk in pcm16.chunks_exact(2) {
+            let s = i16::from_le_bytes([chunk[0], chunk[1]]);
+            assert!(s >= i16::MIN && s <= i16::MAX);
+        }
+
+        let mut pcm_f32 = Vec::with_capacity(512 * 8);
+        for i in 0..512 {
+            let v = ((i as f32) * 0.08).sin() * 0.7;
+            pcm_f32.extend_from_slice(&v.to_le_bytes());
+            pcm_f32.extend_from_slice(&v.to_le_bytes());
+        }
+        assert!(proc.process_pcm_f32_le(&mut pcm_f32));
+        for chunk in pcm_f32.chunks_exact(4) {
+            let sample = f32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]);
+            assert!(sample.is_finite());
+            assert!(sample.abs() <= 1.0);
+        }
+
+        proc.reset_states();
+        set_equalizer_config(false, &[0.0; BAND_COUNT]);
+        crate::reverb::set_audio_effects_config(crate::reverb::AudioEffectsConfig::default());
     }
 }

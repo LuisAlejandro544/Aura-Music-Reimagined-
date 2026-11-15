@@ -3,6 +3,7 @@ package com.auramusic.app
 import android.app.Application
 import android.content.Context
 import android.content.Intent
+import com.auramusic.core.database.AudioEffectsPreferencesRepository
 import com.auramusic.core.database.DownloaderPreferencesRepository
 import com.auramusic.core.database.EqualizerPreferencesRepository
 import com.auramusic.core.database.MusicRepository
@@ -11,6 +12,7 @@ import com.auramusic.core.database.ThemePreferencesRepository
 import com.auramusic.core.downloader.AuraDownloadHost
 import com.auramusic.core.downloader.YtDlpAudioDownloader
 import com.auramusic.core.importer.AudioImporter
+import com.auramusic.core.model.AudioEffectsState
 import com.auramusic.core.model.PlaybackTuning
 import com.auramusic.core.player.AuraPlaybackTuningProvider
 import com.auramusic.core.player.AuraPlayerController
@@ -55,6 +57,10 @@ class AuraAppContainer(context: Context) {
         PlaybackPreferencesRepository(appContext)
     }
 
+    val audioEffectsPreferencesRepository: AudioEffectsPreferencesRepository by lazy {
+        AudioEffectsPreferencesRepository(appContext)
+    }
+
     val audioImporter: AudioImporter by lazy {
         AudioImporter(
             context = appContext,
@@ -97,6 +103,19 @@ class AuraApplication : Application(), AuraDownloadHost, AuraPlaybackTuningProvi
             runCatching {
                 val eq = container.equalizerPreferencesRepository.equalizerState.first()
                 AuraRustBridge.setEqualizerConfig(eq.isEnabled, eq.bandGainsDb)
+                val fx = container.audioEffectsPreferencesRepository.audioEffectsState.first()
+                AuraRustBridge.setAudioEffectsConfig(
+                    reverbEnabled = fx.reverbEnabled,
+                    reverbRoomSize = fx.reverbRoomSize,
+                    reverbDamping = fx.reverbDamping,
+                    reverbWetMix = fx.reverbWetMix,
+                    reverbWidth = fx.reverbWidth,
+                    slowedWarmthEnabled = fx.isSlowedWarmthActive,
+                    slowedWarmthAmount = fx.slowedWarmth,
+                    spatial8dEnabled = fx.spatial8dEnabled,
+                    spatial8dSpeed = fx.spatial8dSpeed,
+                    spatial8dDepth = fx.spatial8dDepth,
+                )
             }
         }
     }
@@ -110,6 +129,9 @@ class AuraApplication : Application(), AuraDownloadHost, AuraPlaybackTuningProvi
 
     override fun observePlaybackTuning(): Flow<PlaybackTuning> =
         container.playbackPreferencesRepository.playbackTuning
+
+    override fun observeAudioEffects(): Flow<AudioEffectsState> =
+        container.audioEffectsPreferencesRepository.audioEffectsState
 
     override fun createOpenPlayerIntent(): Intent =
         Intent(this, MainActivity::class.java).apply {

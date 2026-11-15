@@ -15,6 +15,8 @@ mod equalizer;
 pub mod js_runtime;
 mod metadata;
 mod palette;
+mod reverb;
+mod spatial_8d;
 
 /// Inicializa el logger nativo de Android la primera vez que se invoca el puente.
 fn init_android_logger() {
@@ -206,6 +208,37 @@ pub extern "system" fn Java_com_auramusic_core_rust_AuraRustBridge_nativeSetEqua
     }
 
     equalizer::set_equalizer_config(enabled != JNI_FALSE, &bands);
+}
+
+/// Actualiza en Rust los parámetros de Reverberación estéreo, calidez analógica Slowed y Audio 8D.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_com_auramusic_core_rust_AuraRustBridge_nativeSetAudioEffectsConfig(
+    _env: JNIEnv,
+    _class: JClass,
+    reverb_enabled: jboolean,
+    reverb_room_size: jfloat,
+    reverb_damping: jfloat,
+    reverb_wet_mix: jfloat,
+    reverb_width: jfloat,
+    slowed_warmth_enabled: jboolean,
+    slowed_warmth_amount: jfloat,
+    spatial_8d_enabled: jboolean,
+    spatial_8d_speed: jfloat,
+    spatial_8d_depth: jfloat,
+) {
+    init_android_logger();
+    reverb::set_audio_effects_config(reverb::AudioEffectsConfig {
+        reverb_enabled: reverb_enabled != JNI_FALSE,
+        reverb_room_size,
+        reverb_damping,
+        reverb_wet_mix,
+        reverb_width,
+        slowed_warmth_enabled: slowed_warmth_enabled != JNI_FALSE,
+        slowed_warmth_amount,
+        spatial_8d_enabled: spatial_8d_enabled != JNI_FALSE,
+        spatial_8d_speed,
+        spatial_8d_depth,
+    });
 }
 
 /// Configura frecuencia de muestreo y número de canales en el procesador DSP del ecualizador.

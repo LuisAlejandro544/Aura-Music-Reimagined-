@@ -57,6 +57,19 @@ object AuraRustBridge {
 
     private external fun nativeSetEqualizerConfig(enabled: Boolean, gainsDb: FloatArray)
 
+    private external fun nativeSetAudioEffectsConfig(
+        reverbEnabled: Boolean,
+        reverbRoomSize: Float,
+        reverbDamping: Float,
+        reverbWetMix: Float,
+        reverbWidth: Float,
+        slowedWarmthEnabled: Boolean,
+        slowedWarmthAmount: Float,
+        spatial8dEnabled: Boolean,
+        spatial8dSpeed: Float,
+        spatial8dDepth: Float,
+    )
+
     private external fun nativeConfigureEqualizer(sampleRate: Int, channelCount: Int)
 
     private external fun nativeResetEqualizerState()
@@ -173,6 +186,35 @@ object AuraRustBridge {
             val array = FloatArray(10) { idx -> gainsDb.getOrElse(idx) { 0f } }
             nativeSetEqualizerConfig(enabled, array)
         }
+
+    /**
+     * Actualiza la configuración de Reverberación estéreo, Calidez Slowed y Audio 8D en el motor nativo Rust.
+     */
+    suspend fun setAudioEffectsConfig(
+        reverbEnabled: Boolean,
+        reverbRoomSize: Float,
+        reverbDamping: Float,
+        reverbWetMix: Float,
+        reverbWidth: Float,
+        slowedWarmthEnabled: Boolean,
+        slowedWarmthAmount: Float,
+        spatial8dEnabled: Boolean,
+        spatial8dSpeed: Float,
+        spatial8dDepth: Float,
+    ) = withContext(Dispatchers.Default) {
+        nativeSetAudioEffectsConfig(
+            reverbEnabled = reverbEnabled,
+            reverbRoomSize = reverbRoomSize,
+            reverbDamping = reverbDamping,
+            reverbWetMix = reverbWetMix,
+            reverbWidth = reverbWidth,
+            slowedWarmthEnabled = slowedWarmthEnabled,
+            slowedWarmthAmount = slowedWarmthAmount,
+            spatial8dEnabled = spatial8dEnabled,
+            spatial8dSpeed = spatial8dSpeed,
+            spatial8dDepth = spatial8dDepth,
+        )
+    }
 
     /**
      * Configura el formato de audio en el procesador DSP de Rust (llamado desde ExoPlayer).

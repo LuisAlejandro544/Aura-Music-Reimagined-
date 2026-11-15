@@ -191,6 +191,136 @@ class AuraModelsTest {
             ),
         )
     }
+
+    @Test
+    fun `track metadata helper normalizes title and artist and rejects blank title`() {
+        val normalized = TrackMetadataHelper.normalizeOrNull(
+            rawTitle = "   Mi   Canción   Favorita  ",
+            rawArtist = "  Danny   Ocean ",
+        )
+        assertEquals("Mi Canción Favorita", normalized?.title)
+        assertEquals("Danny Ocean", normalized?.artist)
+
+        val fallbackArtist = TrackMetadataHelper.normalizeOrNull(
+            rawTitle = "Solo Título",
+            rawArtist = "   ",
+        )
+        assertEquals("Solo Título", fallbackArtist?.title)
+        assertEquals(TrackMetadataHelper.DEFAULT_ARTIST, fallbackArtist?.artist)
+
+        assertEquals(null, TrackMetadataHelper.normalizeOrNull("   ", "Artista"))
+    }
+
+    @Test
+    fun `download format helper selects quality presets and applies format choice`() {
+        val options = listOf(
+            DownloadAudioFormatOption(
+                formatId = "251",
+                extension = "webm",
+                codec = "Opus",
+                bitrateKbps = 160,
+                estimatedSizeBytes = 4_200_000L,
+                label = "WEBM (Opus) • 160 kbps",
+            ),
+            DownloadAudioFormatOption(
+                formatId = "140",
+                extension = "m4a",
+                codec = "AAC",
+                bitrateKbps = 128,
+                estimatedSizeBytes = 3_400_000L,
+                label = "M4A (AAC) • 128 kbps",
+            ),
+            DownloadAudioFormatOption(
+                formatId = "249",
+                extension = "webm",
+                codec = "Opus",
+                bitrateKbps = 52,
+                estimatedSizeBytes = 1_400_000L,
+                label = "WEBM (Opus) • 52 kbps",
+            ),
+        )
+
+        assertEquals(AudioDownloadQuality.BALANCED, AudioDownloadQuality.fromKey("balanced"))
+        assertEquals(AudioDownloadQuality.MAX, AudioDownloadQuality.fromKey("unknown"))
+
+        assertEquals("251", DownloadFormatHelper.pickDefaultOption(options, AudioDownloadQuality.MAX)?.formatId)
+        assertEquals("251", DownloadFormatHelper.pickDefaultOption(options, AudioDownloadQuality.BALANCED)?.formatId)
+        assertEquals("249", DownloadFormatHelper.pickDefaultOption(options, AudioDownloadQuality.DATA_SAVER)?.formatId)
+
+        val preview = DownloadPreview(
+            sourceUrl = "https://youtube.com/watch?v=demo",
+            title = "Demo",
+            channelOrArtist = "Aura",
+            estimatedSizeBytes = 4_200_000L,
+            audioFormatLabel = "WEBM (Opus) • 160 kbps",
+            availableFormats = options,
+            selectedFormatId = "251",
+        )
+        val switched = DownloadFormatHelper.selectOption(preview, "140")
+        assertEquals("140", switched.selectedFormatId)
+        assertEquals("M4A (AAC) • 128 kbps", switched.audioFormatLabel)
+        assertEquals(3_400_000L, switched.estimatedSizeBytes)
+    }
+
+    @Test
+    fun `audio effects state normalizes bounds and resolves slowed varispeed parameters`() {
+        val raw = AudioEffectsState(
+            reverbEnabled = true,
+            reverbRoomSize = 2.5f,
+            reverbDamping = -0.3f,
+            reverbWetMix = Float.NaN,
+            reverbWidth = 1.5f,
+            slowedEnabled = true,
+            slowedSpeed = 0.40f,
+            slowedPreservePitch = false,
+            slowedWarmth = 1.8f,
+            spatial8dEnabled = true,
+            spatial8dSpeed = 2.2f,
+            spatial8dDepth = -0.4f,
+            activePresetId = "",
+        ).normalized()
+
+        assertEquals(1.0f, raw.reverbRoomSize, 0.001f)
+        assertEquals(0.0f, raw.reverbDamping, 0.001f)
+        assertEquals(AudioEffectsState.DEFAULT_WET_MIX, raw.reverbWetMix, 0.001f)
+        assertEquals(1.0f, raw.reverbWidth, 0.001f)
+        assertEquals(AudioEffectsState.MIN_SLOWED_SPEED, raw.slowedSpeed, 0.001f)
+        assertEquals(1.0f, raw.slowedWarmth, 0.001f)
+        assertEquals(1.0f, raw.spatial8dSpeed, 0.001f)
+        assertEquals(0.0f, raw.spatial8dDepth, 0.001f)
+        assertEquals(AudioEffectsState.PRESET_CUSTOM_ID, raw.activePresetId)
+
+        val spatialPreset = AudioEffectsState.fromPreset(
+            AudioEffectsState.findPresetById("spatial_8d_slowed")!!,
+        )
+        assertTrue(spatialPreset.spatial8dEnabled)
+        assertTrue(spatialPreset.slowedEnabled)
+        assertTrue(spatialPreset.reverbEnabled)
+        assertEquals("8D • Slowed 0.85x • Reverb 34%", PlaybackTuningHelper.formatEffectsSummary(spatialPreset))
+
+        val slowedReverb = AudioEffectsState.fromPreset(
+            AudioEffectsState.findPresetById("slowed_reverb")!!,
+        )
+        val tuning = PlaybackTuning(playbackSpeed = 1.25f)
+        val resolvedSlowed = PlaybackTuningHelper.resolvePlaybackParameters(tuning, slowedReverb)
+        assertEquals(0.85f, resolvedSlowed.speed, 0.001f)
+        assertEquals(0.85f, resolvedSlowed.pitch, 0.001f)
+
+        val resolvedPreservePitch = PlaybackTuningHelper.resolvePlaybackParameters(
+            tuning,
+            slowedReverb.copy(slowedPreservePitch = true),
+        )
+        assertEquals(0.85f, resolvedPreservePitch.speed, 0.001f)
+        assertEquals(1.0f, resolvedPreservePitch.pitch, 0.001f)
+
+        val resolvedOff = PlaybackTuningHelper.resolvePlaybackParameters(
+            tuning,
+            AudioEffectsState(),
+        )
+        assertEquals(1.25f, resolvedOff.speed, 0.001f)
+        assertEquals(1.0f, resolvedOff.pitch, 0.001f)
+    }
 }
+
 
 

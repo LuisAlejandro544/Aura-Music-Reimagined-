@@ -5,18 +5,18 @@ Reglas operativas para cualquier agente que modifique o amplíe **Aura Music**.
 ## Reglas de oro antes de editar
 1. **No romper lo existente**: No cambiar el diseño, iconos o lógica de pantallas que ya funcionan a menos que el usuario lo solicite expresamente.
 2. **Modularidad estricta**:
-   - Nuevas entidades, modelos o helpers puros compartidos -> `:core:model` (ej. `ArtistPlaylistBuilder`, `PlaybackQueueHelper`, `PlaybackTuningHelper`).
-   - Nuevos algoritmos DSP / gráficos / hashing / JS runtime -> `android/rust/aura_core/src/` + puente JNI en `:core:rust`.
-   - Persistencia y migraciones -> `:core:database` (`AuraDatabase`, `AuraMigrations` sin `fallbackToDestructiveMigration`, `PlaybackPreferencesRepository`).
+   - Nuevas entidades, modelos o helpers puros compartidos -> `:core:model` (ej. `ArtistPlaylistBuilder`, `PlaybackQueueHelper`, `PlaybackTuningHelper`, `TrackMetadataHelper`, `AudioEffectsState`).
+   - Nuevos algoritmos DSP / gráficos / hashing / JS runtime -> `android/rust/aura_core/src/` (incluyendo `equalizer.rs`, `reverb.rs` y `spatial_8d.rs`) + puente JNI en `:core:rust`.
+   - Persistencia y migraciones -> `:core:database` (`AuraDatabase`, `AuraMigrations` sin `fallbackToDestructiveMigration`, `PlaybackPreferencesRepository`, `AudioEffectsPreferencesRepository`).
    - Lógica de descargas Python/`yt-dlp` y servicio `dataSync` -> `:core:downloader` (`YtDlpAudioDownloader`, `AuraDownloadForegroundService` vía `AuraDownloadHost` + `aura_ytdlp.py`), manteniendo Chaquopy encapsulado en este único módulo Gradle.
-   - Reproducción, Crossfade y Velocidad -> `:core:player` (`AuraPlaybackService` vía `AuraPlaybackTuningProvider`, `AuraPlayerController`), manteniendo el ecualizador Rust DSP exclusivamente en el reproductor principal para no corromper las líneas de retardo IIR durante el crossfade.
+   - Reproducción, Crossfade, Velocidad y Slowed -> `:core:player` (`AuraPlaybackService` vía `AuraPlaybackTuningProvider`, `AuraPlayerController`), manteniendo el ecualizador, el espacializador 8D y la reverberación Rust DSP (`RustEqualizerAudioProcessor`) exclusivamente en el reproductor principal para no corromper las líneas de retardo IIR/ITD/Freeverb durante el crossfade, mientras `outgoingFadePlayer` replica `speed` y `pitch`.
    - Nuevas vistas -> módulo `:feature:*` dedicado dependiendo solo de `:core:model` (sin meter toda la app en un solo archivo ni una sola pantalla).
 3. **Sincronía JNI Kotlin ↔ Rust**:
    - Cada método `private external fun nombre(...)` en `com.auramusic.core.rust.AuraRustBridge` debe corresponder exactamente a `#[unsafe(no_mangle)] pub extern "system" fn Java_com_auramusic_core_rust_AuraRustBridge_nombre` en `android/rust/aura_core/src/lib.rs`.
    - El binario CLI `aura_qjs` (`android/rust/aura_core/src/bin/aura_qjs.rs`) debe seguir copiándose como `jniLibs/<abi>/libaura_qjs.so` en `:core:rust` con `useLegacyPackaging = true` en `:app`.
 4. **Uso de hilos y motor nativo Rust/Python**:
-   - Prohibido ejecutar `ParcelFileDescriptor`, `DocumentFile`, Room, compresión WebP, Chaquopy (`Python.start` / `yt-dlp`), red PyPI o llamadas JNI (`extractAudioMetadata`, carátulas, hashing, configuración EQ, `renderDeleteEffectFrame`, `evalQuickJs`) en `Dispatchers.Main`.
-   - No reintroducir `MediaMetadataRetriever` ni `android.media.audiofx.Equalizer` en Kotlin ni simular en Kotlin los efectos de eliminación; la lectura de metadatos, el DSP del ecualizador y los efectos de eliminación pertenecen a Rust (`aura_core::metadata`, `aura_core::equalizer` y `aura_core::delete_fx`).
+   - Prohibido ejecutar `ParcelFileDescriptor`, `DocumentFile`, Room, compresión WebP, Chaquopy (`Python.start` / `yt-dlp`), red PyPI o llamadas JNI (`extractAudioMetadata`, carátulas, hashing, configuración EQ, `setAudioEffectsConfig`, `renderDeleteEffectFrame`, `evalQuickJs`) en `Dispatchers.Main`.
+   - No reintroducir `MediaMetadataRetriever`, `android.media.audiofx.Equalizer`, `PresetReverb` ni `EnvironmentalReverb` en Kotlin ni simular en Kotlin el Audio 8D o los efectos de eliminación; la lectura de metadatos, el DSP del ecualizador/8D/reverb/calidez Slowed y los efectos de eliminación pertenecen a Rust (`aura_core::metadata`, `aura_core::equalizer`, `aura_core::spatial_8d`, `aura_core::reverb` y `aura_core::delete_fx`).
    - No añadir `WebView` en descargas ni wrappers copyleft (`youtubedl-android`, `NewPipeExtractor`, `FFmpeg`).
 5. **Documentación en código**:
    - Incluir comentarios explicativos claros en español en archivos nuevos o modificados.

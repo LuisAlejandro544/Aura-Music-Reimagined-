@@ -1,5 +1,6 @@
 package com.auramusic.feature.downloader
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -41,6 +42,7 @@ import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledTonalButton
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -48,6 +50,7 @@ import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
@@ -70,6 +73,8 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import coil3.compose.AsyncImage
+import com.auramusic.core.model.AudioDownloadQuality
+import com.auramusic.core.model.DownloadAudioFormatOption
 import com.auramusic.core.model.DownloadPreview
 import com.auramusic.core.model.DownloadState
 import com.auramusic.core.model.DownloadStatus
@@ -99,6 +104,8 @@ fun DownloaderScreen(
     onPlayDownloadedTrack: (Track) -> Unit,
     onCheckUpdates: () -> Unit,
     onToggleAutoUpdate: (Boolean) -> Unit,
+    onSelectQualityPreset: (AudioDownloadQuality) -> Unit = {},
+    onSelectPreviewFormat: (String) -> Unit = {},
     onDismissDownloadStatus: () -> Unit,
     onDismissUpdateMessage: () -> Unit,
     modifier: Modifier = Modifier,
@@ -251,6 +258,40 @@ fun DownloaderScreen(
                             shape = RoundedCornerShape(14.dp),
                         )
 
+                        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                            Text(
+                                text = "Calidad de audio preferida",
+                                style = MaterialTheme.typography.labelLarge,
+                                fontWeight = FontWeight.SemiBold,
+                            )
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            ) {
+                                AudioDownloadQuality.entries.forEach { quality ->
+                                    val selected = engineStatus.preferredQuality == quality
+                                    FilterChip(
+                                        selected = selected,
+                                        onClick = { onSelectQualityPreset(quality) },
+                                        enabled = !downloadState.isBusy,
+                                        modifier = Modifier.weight(1f),
+                                        label = {
+                                            Text(
+                                                text = quality.shortLabel,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis,
+                                            )
+                                        },
+                                    )
+                                }
+                            }
+                            Text(
+                                text = engineStatus.preferredQuality.description,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.spacedBy(10.dp),
@@ -302,6 +343,7 @@ fun DownloaderScreen(
                 item {
                     DownloadPreviewCard(
                         preview = preview,
+                        onSelectFormat = onSelectPreviewFormat,
                         onConfirmDownload = onConfirmDownload,
                         onCancel = onCancelPreview,
                     )
@@ -333,6 +375,7 @@ fun DownloaderScreen(
 @Composable
 private fun DownloadPreviewCard(
     preview: DownloadPreview,
+    onSelectFormat: (String) -> Unit,
     onConfirmDownload: () -> Unit,
     onCancel: () -> Unit,
 ) {
@@ -432,6 +475,25 @@ private fun DownloadPreviewCard(
                 )
             }
 
+            if (preview.availableFormats.isNotEmpty()) {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(
+                        text = "Elige calidad del formato",
+                        style = MaterialTheme.typography.labelLarge,
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.onSurface,
+                    )
+                    preview.availableFormats.forEach { option ->
+                        val isSelected = preview.selectedFormatId == option.formatId
+                        FormatOptionSelectorRow(
+                            option = option,
+                            selected = isSelected,
+                            onClick = { onSelectFormat(option.formatId) },
+                        )
+                    }
+                }
+            }
+
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(10.dp),
@@ -458,6 +520,77 @@ private fun DownloadPreviewCard(
                     Text("Confirmar descarga")
                 }
             }
+        }
+    }
+}
+
+@Composable
+private fun FormatOptionSelectorRow(
+    option: DownloadAudioFormatOption,
+    selected: Boolean,
+    onClick: () -> Unit,
+) {
+    val displayLabel = option.label.ifBlank {
+        buildString {
+            append(option.extension.uppercase())
+            if (option.codec.isNotBlank()) append(" (${option.codec})")
+            if (option.bitrateKbps > 0) append(" • ${option.bitrateKbps} kbps")
+        }
+    }
+    val sizeText = if (option.estimatedSizeBytes > 0L) {
+        formatByteSize(option.estimatedSizeBytes)
+    } else {
+        "Variable"
+    }
+
+    Surface(
+        onClick = onClick,
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(12.dp),
+        color = if (selected) {
+            MaterialTheme.colorScheme.primaryContainer
+        } else {
+            MaterialTheme.colorScheme.surfaceContainerLow
+        },
+        border = if (selected) {
+            BorderStroke(1.dp, MaterialTheme.colorScheme.primary)
+        } else {
+            null
+        },
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            RadioButton(
+                selected = selected,
+                onClick = null,
+            )
+            Spacer(modifier = Modifier.width(6.dp))
+            Text(
+                text = displayLabel,
+                modifier = Modifier.weight(1f),
+                style = MaterialTheme.typography.bodyMedium,
+                fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
+                color = if (selected) {
+                    MaterialTheme.colorScheme.onPrimaryContainer
+                } else {
+                    MaterialTheme.colorScheme.onSurface
+                },
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Spacer(modifier = Modifier.width(8.dp))
+            Text(
+                text = sizeText,
+                style = MaterialTheme.typography.labelMedium,
+                fontWeight = FontWeight.SemiBold,
+                color = if (selected) {
+                    MaterialTheme.colorScheme.primary
+                } else {
+                    MaterialTheme.colorScheme.onSurfaceVariant
+                },
+            )
         }
     }
 }

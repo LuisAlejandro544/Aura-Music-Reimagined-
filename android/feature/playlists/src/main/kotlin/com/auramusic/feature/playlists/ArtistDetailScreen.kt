@@ -22,6 +22,7 @@ import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.automirrored.rounded.PlaylistAdd
 import androidx.compose.material.icons.automirrored.rounded.PlaylistPlay
 import androidx.compose.material.icons.automirrored.rounded.QueueMusic
+import androidx.compose.material.icons.rounded.Edit
 import androidx.compose.material.icons.rounded.Favorite
 import androidx.compose.material.icons.rounded.FavoriteBorder
 import androidx.compose.material.icons.rounded.GraphicEq
@@ -80,6 +81,7 @@ fun ArtistDetailScreen(
     onPlayNext: (Track) -> Unit,
     onAddToQueue: (Track) -> Unit,
     onAddToPlaylist: (Track) -> Unit,
+    onEditMetadata: (Track) -> Unit = {},
 ) {
     val title = artistPlaylist?.artistName ?: "Artista"
     val tracks = artistPlaylist?.tracks.orEmpty()
@@ -254,6 +256,7 @@ fun ArtistDetailScreen(
                         onPlayNext = { onPlayNext(track) },
                         onAddToQueue = { onAddToQueue(track) },
                         onAddToPlaylist = { onAddToPlaylist(track) },
+                        onEditMetadata = { onEditMetadata(track) },
                     )
                 }
             }
@@ -270,6 +273,7 @@ private fun ArtistTrackRow(
     onPlayNext: () -> Unit,
     onAddToQueue: () -> Unit,
     onAddToPlaylist: () -> Unit,
+    onEditMetadata: () -> Unit,
 ) {
     var menuExpanded by remember { mutableStateOf(false) }
 
@@ -386,6 +390,14 @@ private fun ArtistTrackRow(
                         onClick = {
                             menuExpanded = false
                             onAddToPlaylist()
+                        },
+                    )
+                    DropdownMenuItem(
+                        text = { Text("Editar metadatos") },
+                        leadingIcon = { Icon(Icons.Rounded.Edit, contentDescription = null) },
+                        onClick = {
+                            menuExpanded = false
+                            onEditMetadata()
                         },
                     )
                 }

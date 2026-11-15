@@ -49,6 +49,9 @@ interface TrackDao {
     @Query("UPDATE tracks SET is_liked = NOT is_liked WHERE id = :trackId")
     suspend fun toggleLike(trackId: Long)
 
+    @Query("UPDATE tracks SET title = :title, artist = :artist WHERE id = :trackId")
+    suspend fun updateMetadata(trackId: Long, title: String, artist: String)
+
     @Query("UPDATE tracks SET cover_file_path = :coverPath, is_procedural_cover = :isProcedural WHERE id = :trackId")
     suspend fun updateCoverPath(trackId: Long, coverPath: String, isProcedural: Boolean)
 

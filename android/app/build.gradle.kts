@@ -86,6 +86,7 @@ dependencies {
     implementation(project(":feature:player"))
     implementation(project(":feature:settings"))
     implementation(project(":feature:equalizer"))
+    implementation(project(":feature:effects"))
     implementation(project(":feature:downloader"))
 
     implementation(libs.androidx.core.ktx)

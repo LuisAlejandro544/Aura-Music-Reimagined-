@@ -443,6 +443,19 @@ class AuraPlayerController(
     }
 
     /**
+     * Ajusta velocidad y tono en tiempo real (usado por el modo Slowed con estilo cinta/vinilo).
+     */
+    fun setPlaybackParameters(speed: Float, pitch: Float) {
+        val safeSpeed = if (speed.isFinite()) speed.coerceIn(0.5f, 2.0f) else 1.0f
+        val safePitch = if (pitch.isFinite()) pitch.coerceIn(0.5f, 2.0f) else 1.0f
+        _playbackState.update { it.copy(playbackSpeed = safeSpeed) }
+        withConnectedPlayer { player ->
+            player.playbackParameters = PlaybackParameters(safeSpeed, safePitch)
+            syncStateFromPlayer()
+        }
+    }
+
+    /**
      * Mantiene sincronizados cambios de metadata en caliente (por ejemplo, marcar Me gusta)
      * y permite reconstruir pistas si el servicio siguió sonando tras reiniciar la UI.
      */
@@ -454,7 +467,36 @@ class AuraPlayerController(
         }
         val byId = updatedTracks.associateBy { it.id }
         activeQueue = activeQueue.map { track -> byId[track.id] ?: track }
+        syncMediaItemsMetadata(activeQueue)
         syncStateFromPlayer()
+    }
+
+    /**
+     * Sincroniza cambios de título, artista o carátula en los [MediaItem] ya cargados
+     * dentro de ExoPlayer usando `replaceMediaItem` sin interrumpir el audio actual,
+     * reflejando los cambios al instante en la notificación del sistema y pantalla de bloqueo.
+     */
+    private fun syncMediaItemsMetadata(tracks: List<Track>) {
+        val player = controller?.takeIf { it.isConnected } ?: return
+        val count = minOf(player.mediaItemCount, tracks.size)
+        for (idx in 0 until count) {
+            val track = tracks[idx]
+            val existing = player.getMediaItemAt(idx)
+            if (existing.mediaId != track.id.toString()) continue
+
+            val targetMetadata = track.toMediaMetadata()
+            val currentMeta = existing.mediaMetadata
+            if (currentMeta.title?.toString() != targetMetadata.title?.toString() ||
+                currentMeta.artist?.toString() != targetMetadata.artist?.toString() ||
+                currentMeta.albumTitle?.toString() != targetMetadata.albumTitle?.toString() ||
+                currentMeta.artworkUri != targetMetadata.artworkUri
+            ) {
+                val updatedItem = existing.buildUpon()
+                    .setMediaMetadata(targetMetadata)
+                    .build()
+                player.replaceMediaItem(idx, updatedItem)
+            }
+        }
     }
 
     private fun syncStateFromPlayer() {
@@ -571,13 +613,13 @@ class AuraPlayerController(
         controller = null
     }
 
-    private fun Track.toMediaItem(): MediaItem {
+    private fun Track.toMediaMetadata(): MediaMetadata {
         val artworkUri: Uri? = coverFilePath?.let { path ->
             val file = File(path)
             if (file.exists()) Uri.fromFile(file) else null
         }
 
-        val metadata = MediaMetadata.Builder()
+        return MediaMetadata.Builder()
             .setTitle(title)
             .setArtist(artist)
             .setAlbumTitle(album)
@@ -585,11 +627,13 @@ class AuraPlayerController(
                 if (artworkUri != null) setArtworkUri(artworkUri)
             }
             .build()
+    }
 
+    private fun Track.toMediaItem(): MediaItem {
         return MediaItem.Builder()
             .setMediaId(id.toString())
             .setUri(contentUri.toUri())
-            .setMediaMetadata(metadata)
+            .setMediaMetadata(toMediaMetadata())
             .build()
     }
 }

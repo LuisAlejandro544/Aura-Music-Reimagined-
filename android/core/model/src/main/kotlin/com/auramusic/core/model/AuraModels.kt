@@ -495,6 +495,53 @@ enum class DownloadStatus {
 }
 
 /**
+ * Niveles de calidad preferidos para descargar solo audio mediante `yt-dlp` sin FFmpeg.
+ */
+enum class AudioDownloadQuality(
+    val key: String,
+    val shortLabel: String,
+    val label: String,
+    val description: String,
+) {
+    MAX(
+        key = "max",
+        shortLabel = "Máxima",
+        label = "Máxima calidad",
+        description = "Mayor bitrate disponible (M4A / Opus)",
+    ),
+    BALANCED(
+        key = "balanced",
+        shortLabel = "Equilibrada",
+        label = "Equilibrada (~128 kbps)",
+        description = "Buen sonido con peso moderado",
+    ),
+    DATA_SAVER(
+        key = "data_saver",
+        shortLabel = "Ligera",
+        label = "Ahorro de datos",
+        description = "Menor peso posible para datos móviles",
+    );
+
+    companion object {
+        fun fromKey(key: String?): AudioDownloadQuality =
+            entries.firstOrNull { it.key == key } ?: MAX
+    }
+}
+
+/**
+ * Flujo de audio real extraído por `yt-dlp` durante la vista previa para que el usuario
+ * pueda elegir exactamente el formato, códec, bitrate y peso aproximado antes de descargar.
+ */
+data class DownloadAudioFormatOption(
+    val formatId: String,
+    val extension: String,
+    val codec: String = "",
+    val bitrateKbps: Int = 0,
+    val estimatedSizeBytes: Long = 0L,
+    val label: String = "",
+)
+
+/**
  * Vista previa de una pista o vídeo antes de confirmar la descarga de audio.
  */
 data class DownloadPreview(
@@ -506,7 +553,60 @@ data class DownloadPreview(
     val estimatedSizeBytes: Long = 0L,
     val audioFormatLabel: String = "",
     val localThumbnailPath: String? = null,
+    val availableFormats: List<DownloadAudioFormatOption> = emptyList(),
+    val selectedFormatId: String? = null,
 )
+
+/**
+ * Reglas puras para seleccionar la calidad/formato de audio en la vista previa de descarga.
+ */
+object DownloadFormatHelper {
+
+    fun pickDefaultOption(
+        options: List<DownloadAudioFormatOption>,
+        quality: AudioDownloadQuality,
+    ): DownloadAudioFormatOption? {
+        if (options.isEmpty()) return null
+        val sortedDesc = options.sortedWith(
+            compareByDescending<DownloadAudioFormatOption> { it.bitrateKbps }
+                .thenByDescending { it.extension.equals("m4a", ignoreCase = true) }
+                .thenByDescending { it.estimatedSizeBytes },
+        )
+        return when (quality) {
+            AudioDownloadQuality.MAX -> sortedDesc.first()
+            AudioDownloadQuality.BALANCED -> {
+                sortedDesc.firstOrNull { it.bitrateKbps in 1..160 }
+                    ?: sortedDesc.lastOrNull { it.bitrateKbps > 0 }
+                    ?: sortedDesc.first()
+            }
+            AudioDownloadQuality.DATA_SAVER -> {
+                sortedDesc.lastOrNull { it.bitrateKbps >= 48 }
+                    ?: sortedDesc.lastOrNull { it.bitrateKbps > 0 }
+                    ?: sortedDesc.last()
+            }
+        }
+    }
+
+    fun selectOption(preview: DownloadPreview, formatId: String): DownloadPreview {
+        val chosen = preview.availableFormats.firstOrNull { it.formatId == formatId } ?: return preview
+        val resolvedLabel = chosen.label.ifBlank {
+            buildString {
+                append(chosen.extension.uppercase())
+                if (chosen.codec.isNotBlank()) append(" (${chosen.codec})")
+                if (chosen.bitrateKbps > 0) append(" • ${chosen.bitrateKbps} kbps")
+            }
+        }
+        return preview.copy(
+            selectedFormatId = chosen.formatId,
+            audioFormatLabel = resolvedLabel.ifBlank { preview.audioFormatLabel },
+            estimatedSizeBytes = if (chosen.estimatedSizeBytes > 0L) {
+                chosen.estimatedSizeBytes
+            } else {
+                preview.estimatedSizeBytes
+            },
+        )
+    }
+}
 
 /**
  * Estado reactivo de la descarga de audio en curso expuesto a la interfaz de Descargas.
@@ -551,6 +651,7 @@ data class DownloaderEngineStatus(
     val ytDlpUpdatedAt: String? = null,
     val ytDlpEjsUpdatedAt: String? = null,
     val autoUpdateEnabled: Boolean = true,
+    val preferredQuality: AudioDownloadQuality = AudioDownloadQuality.MAX,
     val isUpdating: Boolean = false,
     val updateMessage: String? = null,
 )
@@ -686,7 +787,330 @@ object PlaybackTuningHelper {
         val wallRemainingMs = remainingWallClockMs(durationMs, positionMs, safeSpeed)
         return wallRemainingMs in 250L..crossfadeWallMs
     }
+
+    /**
+     * Parámetros finales de velocidad y tono enviados a Media3 ExoPlayer combinando
+     * la velocidad libre y el modo Slowed (que por defecto reduce tono y tempo juntos).
+     */
+    data class ResolvedPlaybackParams(
+        val speed: Float,
+        val pitch: Float,
+    )
+
+    fun resolvePlaybackParameters(
+        tuning: PlaybackTuning,
+        effects: AudioEffectsState,
+    ): ResolvedPlaybackParams {
+        val safeEffects = effects.normalized()
+        if (safeEffects.slowedEnabled) {
+            val speed = safeEffects.slowedSpeed
+            val pitch = if (safeEffects.slowedPreservePitch) 1.0f else speed
+            return ResolvedPlaybackParams(speed = speed, pitch = pitch)
+        }
+        return ResolvedPlaybackParams(
+            speed = clampPlaybackSpeed(tuning.playbackSpeed),
+            pitch = 1.0f,
+        )
+    }
+
+    fun clampSlowedSpeed(speed: Float): Float {
+        if (!speed.isFinite()) return AudioEffectsState.DEFAULT_SLOWED_SPEED
+        val clamped = speed.coerceIn(
+            AudioEffectsState.MIN_SLOWED_SPEED,
+            AudioEffectsState.MAX_SLOWED_SPEED,
+        )
+        return kotlin.math.round(clamped * 100f) / 100f
+    }
+
+    fun clampUnit(value: Float, fallback: Float): Float {
+        if (!value.isFinite()) return fallback
+        return value.coerceIn(0f, 1f)
+    }
+
+    fun formatEffectsSummary(effects: AudioEffectsState): String? {
+        val safe = effects.normalized()
+        if (!safe.isAnyEffectEnabled) return null
+        val parts = buildList {
+            if (safe.spatial8dEnabled) {
+                add("8D")
+            }
+            if (safe.slowedEnabled) {
+                add("Slowed ${formatSpeedLabel(safe.slowedSpeed)}")
+            }
+            if (safe.reverbEnabled) {
+                add("Reverb ${(safe.reverbWetMix * 100f).toInt()}%")
+            }
+        }
+        return parts.joinToString(" • ").ifEmpty { null }
+    }
+
+    /**
+     * Calcula la duración aproximada en segundos de una órbita completa 360° en el motor 8D.
+     */
+    fun spatial8dOrbitPeriodSeconds(speed: Float): Float {
+        val safe = clampUnit(speed, AudioEffectsState.DEFAULT_SPATIAL_8D_SPEED)
+        val hz = 0.05f + safe * 0.30f
+        return 1f / hz
+    }
 }
+
+/**
+ * Resultado validado y normalizado al editar el título y el artista de una canción.
+ */
+data class EditedTrackMetadata(
+    val title: String,
+    val artist: String,
+)
+
+/**
+ * Reglas puras de validación y limpieza de espacios para edición local de metadatos.
+ */
+object TrackMetadataHelper {
+    const val DEFAULT_ARTIST = "Artista desconocido"
+    const val MAX_TITLE_LENGTH = 160
+    const val MAX_ARTIST_LENGTH = 120
+    private val whitespaceRegex = Regex("\\s+")
+
+    /**
+     * Limpia espacios sobrantes y valida que el título no quede vacío.
+     * Si el artista se deja en blanco, asigna [DEFAULT_ARTIST] para mantener
+     * consistencia con la agrupación automática por artista.
+     */
+    fun normalizeOrNull(rawTitle: String, rawArtist: String): EditedTrackMetadata? {
+        val cleanTitle = rawTitle.trim().replace(whitespaceRegex, " ").take(MAX_TITLE_LENGTH)
+        if (cleanTitle.isEmpty()) return null
+
+        val cleanArtist = rawArtist.trim().replace(whitespaceRegex, " ")
+            .take(MAX_ARTIST_LENGTH)
+            .ifEmpty { DEFAULT_ARTIST }
+
+        return EditedTrackMetadata(
+            title = cleanTitle,
+            artist = cleanArtist,
+        )
+    }
+}
+
+/**
+ * Preset predefinido de efectos espaciales (Reverb / Audio 8D en Rust) y modo Slowed.
+ */
+data class AudioEffectPreset(
+    val id: String,
+    val displayName: String,
+    val subtitle: String,
+    val reverbEnabled: Boolean,
+    val reverbRoomSize: Float,
+    val reverbDamping: Float,
+    val reverbWetMix: Float,
+    val reverbWidth: Float,
+    val slowedEnabled: Boolean,
+    val slowedSpeed: Float,
+    val slowedPreservePitch: Boolean,
+    val slowedWarmth: Float,
+    val spatial8dEnabled: Boolean = false,
+    val spatial8dSpeed: Float = AudioEffectsState.DEFAULT_SPATIAL_8D_SPEED,
+    val spatial8dDepth: Float = AudioEffectsState.DEFAULT_SPATIAL_8D_DEPTH,
+)
+
+/**
+ * Estado inmutable de efectos de audio en tiempo real (Reverberación estéreo Freeverb,
+ * Audio Espacial 8D psicoacústico y Calidez analógica en Rust + Slowed varispeed en ExoPlayer).
+ */
+data class AudioEffectsState(
+    val reverbEnabled: Boolean = false,
+    val reverbRoomSize: Float = DEFAULT_ROOM_SIZE,
+    val reverbDamping: Float = DEFAULT_DAMPING,
+    val reverbWetMix: Float = DEFAULT_WET_MIX,
+    val reverbWidth: Float = DEFAULT_WIDTH,
+    val slowedEnabled: Boolean = false,
+    val slowedSpeed: Float = DEFAULT_SLOWED_SPEED,
+    val slowedPreservePitch: Boolean = false,
+    val slowedWarmth: Float = DEFAULT_SLOWED_WARMTH,
+    val spatial8dEnabled: Boolean = false,
+    val spatial8dSpeed: Float = DEFAULT_SPATIAL_8D_SPEED,
+    val spatial8dDepth: Float = DEFAULT_SPATIAL_8D_DEPTH,
+    val activePresetId: String = PRESET_OFF_ID,
+) {
+    val isAnyEffectEnabled: Boolean
+        get() = reverbEnabled || slowedEnabled || spatial8dEnabled
+
+    val isSlowedWarmthActive: Boolean
+        get() = slowedEnabled && slowedWarmth > 0.01f
+
+    fun normalized(): AudioEffectsState = copy(
+        reverbRoomSize = PlaybackTuningHelper.clampUnit(reverbRoomSize, DEFAULT_ROOM_SIZE),
+        reverbDamping = PlaybackTuningHelper.clampUnit(reverbDamping, DEFAULT_DAMPING),
+        reverbWetMix = PlaybackTuningHelper.clampUnit(reverbWetMix, DEFAULT_WET_MIX),
+        reverbWidth = PlaybackTuningHelper.clampUnit(reverbWidth, DEFAULT_WIDTH),
+        slowedSpeed = PlaybackTuningHelper.clampSlowedSpeed(slowedSpeed),
+        slowedWarmth = PlaybackTuningHelper.clampUnit(slowedWarmth, DEFAULT_SLOWED_WARMTH),
+        spatial8dSpeed = PlaybackTuningHelper.clampUnit(spatial8dSpeed, DEFAULT_SPATIAL_8D_SPEED),
+        spatial8dDepth = PlaybackTuningHelper.clampUnit(spatial8dDepth, DEFAULT_SPATIAL_8D_DEPTH),
+        activePresetId = activePresetId.ifBlank { PRESET_CUSTOM_ID },
+    )
+
+    companion object {
+        const val MIN_SLOWED_SPEED = 0.70f
+        const val MAX_SLOWED_SPEED = 0.95f
+        const val DEFAULT_SLOWED_SPEED = 0.85f
+        const val DEFAULT_SLOWED_WARMTH = 0.35f
+        const val DEFAULT_ROOM_SIZE = 0.65f
+        const val DEFAULT_DAMPING = 0.45f
+        const val DEFAULT_WET_MIX = 0.32f
+        const val DEFAULT_WIDTH = 0.85f
+        const val DEFAULT_SPATIAL_8D_SPEED = 0.38f
+        const val DEFAULT_SPATIAL_8D_DEPTH = 0.80f
+
+        const val PRESET_OFF_ID = "off"
+        const val PRESET_CUSTOM_ID = "custom"
+
+        val SLOWED_SPEED_PRESETS = listOf(0.75f, 0.80f, 0.85f, 0.90f)
+
+        val PRESETS = listOf(
+            AudioEffectPreset(
+                id = PRESET_OFF_ID,
+                displayName = "Original",
+                subtitle = "Sin efectos activos (Bypass)",
+                reverbEnabled = false,
+                reverbRoomSize = DEFAULT_ROOM_SIZE,
+                reverbDamping = DEFAULT_DAMPING,
+                reverbWetMix = DEFAULT_WET_MIX,
+                reverbWidth = DEFAULT_WIDTH,
+                slowedEnabled = false,
+                slowedSpeed = DEFAULT_SLOWED_SPEED,
+                slowedPreservePitch = false,
+                slowedWarmth = DEFAULT_SLOWED_WARMTH,
+                spatial8dEnabled = false,
+                spatial8dSpeed = DEFAULT_SPATIAL_8D_SPEED,
+                spatial8dDepth = DEFAULT_SPATIAL_8D_DEPTH,
+            ),
+            AudioEffectPreset(
+                id = "spatial_8d",
+                displayName = "Audio 8D",
+                subtitle = "Órbita 360° alrededor de la cabeza con sala suave",
+                reverbEnabled = true,
+                reverbRoomSize = 0.56f,
+                reverbDamping = 0.48f,
+                reverbWetMix = 0.22f,
+                reverbWidth = 0.90f,
+                slowedEnabled = false,
+                slowedSpeed = DEFAULT_SLOWED_SPEED,
+                slowedPreservePitch = false,
+                slowedWarmth = 0.15f,
+                spatial8dEnabled = true,
+                spatial8dSpeed = 0.38f,
+                spatial8dDepth = 0.85f,
+            ),
+            AudioEffectPreset(
+                id = "spatial_8d_slowed",
+                displayName = "8D + Slowed",
+                subtitle = "Rotación 360°, tono grave de vinilo y eco profundo",
+                reverbEnabled = true,
+                reverbRoomSize = 0.74f,
+                reverbDamping = 0.45f,
+                reverbWetMix = 0.34f,
+                reverbWidth = 0.92f,
+                slowedEnabled = true,
+                slowedSpeed = 0.85f,
+                slowedPreservePitch = false,
+                slowedWarmth = 0.38f,
+                spatial8dEnabled = true,
+                spatial8dSpeed = 0.30f,
+                spatial8dDepth = 0.82f,
+            ),
+            AudioEffectPreset(
+                id = "slowed_reverb",
+                displayName = "Slowed + Reverb",
+                subtitle = "Ritmo lento, tono grave y eco atmosférico",
+                reverbEnabled = true,
+                reverbRoomSize = 0.74f,
+                reverbDamping = 0.46f,
+                reverbWetMix = 0.38f,
+                reverbWidth = 0.92f,
+                slowedEnabled = true,
+                slowedSpeed = 0.85f,
+                slowedPreservePitch = false,
+                slowedWarmth = 0.42f,
+            ),
+            AudioEffectPreset(
+                id = "slowed_only",
+                displayName = "Solo Slowed",
+                subtitle = "Efecto vinilo lento y cálido sin eco",
+                reverbEnabled = false,
+                reverbRoomSize = DEFAULT_ROOM_SIZE,
+                reverbDamping = DEFAULT_DAMPING,
+                reverbWetMix = DEFAULT_WET_MIX,
+                reverbWidth = DEFAULT_WIDTH,
+                slowedEnabled = true,
+                slowedSpeed = 0.85f,
+                slowedPreservePitch = false,
+                slowedWarmth = 0.35f,
+            ),
+            AudioEffectPreset(
+                id = "room",
+                displayName = "Sala íntima",
+                subtitle = "Reverberación corta y natural de estudio",
+                reverbEnabled = true,
+                reverbRoomSize = 0.42f,
+                reverbDamping = 0.56f,
+                reverbWetMix = 0.22f,
+                reverbWidth = 0.75f,
+                slowedEnabled = false,
+                slowedSpeed = DEFAULT_SLOWED_SPEED,
+                slowedPreservePitch = false,
+                slowedWarmth = 0.20f,
+            ),
+            AudioEffectPreset(
+                id = "hall",
+                displayName = "Hall",
+                subtitle = "Espacio amplio tipo auditorio",
+                reverbEnabled = true,
+                reverbRoomSize = 0.76f,
+                reverbDamping = 0.40f,
+                reverbWetMix = 0.34f,
+                reverbWidth = 0.90f,
+                slowedEnabled = false,
+                slowedSpeed = DEFAULT_SLOWED_SPEED,
+                slowedPreservePitch = false,
+                slowedWarmth = 0.20f,
+            ),
+            AudioEffectPreset(
+                id = "dreamy",
+                displayName = "Catedral Etérea",
+                subtitle = "Cola larga envolvente y cálida",
+                reverbEnabled = true,
+                reverbRoomSize = 0.92f,
+                reverbDamping = 0.30f,
+                reverbWetMix = 0.48f,
+                reverbWidth = 1.0f,
+                slowedEnabled = false,
+                slowedSpeed = DEFAULT_SLOWED_SPEED,
+                slowedPreservePitch = false,
+                slowedWarmth = 0.25f,
+            ),
+        )
+
+        fun fromPreset(preset: AudioEffectPreset): AudioEffectsState = AudioEffectsState(
+            reverbEnabled = preset.reverbEnabled,
+            reverbRoomSize = preset.reverbRoomSize,
+            reverbDamping = preset.reverbDamping,
+            reverbWetMix = preset.reverbWetMix,
+            reverbWidth = preset.reverbWidth,
+            slowedEnabled = preset.slowedEnabled,
+            slowedSpeed = preset.slowedSpeed,
+            slowedPreservePitch = preset.slowedPreservePitch,
+            slowedWarmth = preset.slowedWarmth,
+            spatial8dEnabled = preset.spatial8dEnabled,
+            spatial8dSpeed = preset.spatial8dSpeed,
+            spatial8dDepth = preset.spatial8dDepth,
+            activePresetId = preset.id,
+        ).normalized()
+
+        fun findPresetById(id: String?): AudioEffectPreset? =
+            PRESETS.firstOrNull { it.id == id }
+    }
+}
+
 
 
 

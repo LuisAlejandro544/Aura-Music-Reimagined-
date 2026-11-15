@@ -264,6 +264,137 @@ def update_packages(updates_dir: str) -> str:
     return json.dumps(payload)
 
 
+_EXOPLAYER_AUDIO_EXTS = {"m4a", "mp4", "webm", "opus", "ogg", "mp3", "aac", "flac", "wav"}
+
+
+def _humanize_codec(acodec: Optional[str]) -> str:
+    raw = str(acodec or "").strip().lower()
+    if not raw or raw == "none":
+        return ""
+    if raw.startswith("mp4a"):
+        return "AAC"
+    if "opus" in raw:
+        return "Opus"
+    if "vorbis" in raw:
+        return "Vorbis"
+    if "flac" in raw:
+        return "FLAC"
+    if "mp3" in raw or raw == "mpga":
+        return "MP3"
+    return raw.split(".")[0].upper()
+
+
+def _build_format_selector(quality_key: Optional[str], format_id: Optional[str] = None) -> str:
+    """Construye el selector de formato compatible con Media3 ExoPlayer sin depender de FFmpeg."""
+    fallback = "bestaudio[ext=m4a]/bestaudio[ext=webm]/bestaudio/best"
+    clean_id = str(format_id or "").strip()
+    if clean_id and all(ch.isalnum() or ch in ("-", "_", ".", "+") for ch in clean_id):
+        return f"{clean_id}/{fallback}"
+
+    key = str(quality_key or "max").strip().lower()
+    if key == "data_saver":
+        return f"worstaudio[abr>=48]/bestaudio[abr<=96]/worstaudio/{fallback}"
+    if key == "balanced":
+        return f"bestaudio[abr<=160][ext=m4a]/bestaudio[abr<=160][ext=webm]/bestaudio[abr<=160]/{fallback}"
+    return fallback
+
+
+def _extract_available_audio_formats(info: dict) -> list[dict]:
+    """Extrae y ordena los flujos de solo audio disponibles en el enlace (M4A/Opus/etc.)."""
+    formats = info.get("formats") or []
+    audio_only = [
+        f
+        for f in formats
+        if f.get("format_id")
+        and f.get("acodec") not in (None, "none")
+        and f.get("vcodec") in (None, "none")
+        and str(f.get("protocol") or "").lower() != "mhtml"
+    ]
+
+    if not audio_only:
+        requested = info.get("requested_formats") or []
+        if requested and isinstance(requested, list):
+            audio_only = [f for f in requested if f.get("format_id") and f.get("acodec") not in (None, "none")]
+        elif info.get("format_id") and info.get("acodec") not in (None, "none"):
+            audio_only = [info]
+
+    candidates_by_signature: dict[tuple[str, str, int], tuple[tuple[int, int, int, int], dict]] = {}
+    for fmt in audio_only:
+        ext_raw = str(fmt.get("ext") or info.get("ext") or "audio").strip().lower()
+        if ext_raw not in _EXOPLAYER_AUDIO_EXTS and len(audio_only) > 1:
+            continue
+
+        ext_upper = ext_raw.upper()
+        codec_label = _humanize_codec(fmt.get("acodec") or info.get("acodec"))
+        raw_abr = fmt.get("abr") or fmt.get("tbr") or 0
+        try:
+            abr_kbps = max(0, int(round(float(raw_abr))))
+        except Exception:
+            abr_kbps = 0
+
+        try:
+            size_bytes = max(0, int(fmt.get("filesize") or fmt.get("filesize_approx") or 0))
+        except Exception:
+            size_bytes = 0
+
+        format_note = str(fmt.get("format_note") or "").lower()
+        is_drc = "drc" in format_note or "-drc" in str(fmt.get("format_id") or "").lower()
+        lang_pref = int(fmt.get("language_preference") or 0) if str(fmt.get("language_preference") or "").lstrip("-").isdigit() else 0
+
+        label = f"{ext_upper} ({codec_label})" if codec_label else ext_upper
+        if abr_kbps > 0:
+            label = f"{label} • {abr_kbps} kbps"
+
+        option = {
+            "format_id": str(fmt.get("format_id")),
+            "extension": ext_raw,
+            "codec": codec_label,
+            "bitrate_kbps": abr_kbps,
+            "estimated_size_bytes": size_bytes,
+            "label": label,
+        }
+        rank = (
+            1 if not is_drc else 0,
+            lang_pref,
+            1 if size_bytes > 0 else 0,
+            size_bytes,
+        )
+        sig = (ext_upper, codec_label, abr_kbps)
+        existing = candidates_by_signature.get(sig)
+        if existing is None or rank > existing[0]:
+            candidates_by_signature[sig] = (rank, option)
+
+    options = [pair[1] for pair in candidates_by_signature.values()]
+    options.sort(
+        key=lambda o: (
+            o["bitrate_kbps"],
+            1 if o["extension"] == "m4a" else 0,
+            o["estimated_size_bytes"],
+        ),
+        reverse=True,
+    )
+    return options[:8]
+
+
+def _pick_default_format_option(options: list[dict], quality_key: Optional[str]) -> Optional[dict]:
+    if not options:
+        return None
+    key = str(quality_key or "max").strip().lower()
+    if key == "data_saver":
+        eligible = [o for o in options if o["bitrate_kbps"] >= 48]
+        if eligible:
+            return eligible[-1]
+        positive = [o for o in options if o["bitrate_kbps"] > 0]
+        return positive[-1] if positive else options[-1]
+    if key == "balanced":
+        eligible = [o for o in options if 0 < o["bitrate_kbps"] <= 160]
+        if eligible:
+            return eligible[0]
+        positive = [o for o in options if o["bitrate_kbps"] > 0]
+        return positive[-1] if positive else options[0]
+    return options[0]
+
+
 def _resolve_audio_size_and_format(info: dict) -> tuple[int, str]:
     """Calcula peso estimado en bytes y etiqueta legible de formato/bitrate para la vista previa."""
     selected = None
@@ -291,14 +422,16 @@ def _resolve_audio_size_and_format(info: dict) -> tuple[int, str]:
         or 0
     )
     ext = str(selected.get("ext") or info.get("ext") or "audio").upper()
+    codec = _humanize_codec(selected.get("acodec") or info.get("acodec"))
     abr = selected.get("abr") or info.get("abr")
+    base = f"{ext} ({codec})" if codec else ext
     if abr:
         try:
-            format_label = f"{ext} • {int(round(float(abr)))} kbps"
+            format_label = f"{base} • {int(round(float(abr)))} kbps"
         except Exception:
-            format_label = ext
+            format_label = base
     else:
-        format_label = ext
+        format_label = base
     return max(0, size_bytes), format_label
 
 
@@ -341,13 +474,14 @@ def inspect_audio_preview(
     cache_dir: str,
     updates_dir: str,
     qjs_binary_path: Optional[str],
+    quality_key: str = "max",
 ) -> str:
-    """Obtiene metadatos, duración, peso estimado y miniatura sin descargar el audio aún."""
+    """Obtiene metadatos, duración, formatos de audio disponibles, peso estimado y miniatura."""
     ensure_updates_in_sys_path(updates_dir)
     import yt_dlp
 
     ydl_opts: dict = {
-        "format": "bestaudio[ext=m4a]/bestaudio[ext=webm]/bestaudio/best",
+        "format": _build_format_selector(quality_key),
         "noplaylist": True,
         "quiet": True,
         "no_warnings": False,
@@ -375,7 +509,16 @@ def inspect_audio_preview(
         artist = info.get("artist") or info.get("creator") or info.get("uploader") or info.get("channel") or "YouTube"
         duration_sec = info.get("duration") or 0
         duration_ms = int(float(duration_sec) * 1000) if duration_sec else 0
-        estimated_size_bytes, format_label = _resolve_audio_size_and_format(info)
+
+        available_formats = _extract_available_audio_formats(info)
+        default_option = _pick_default_format_option(available_formats, quality_key)
+        if default_option is not None:
+            selected_format_id = default_option["format_id"]
+            estimated_size_bytes = default_option["estimated_size_bytes"]
+            format_label = default_option["label"]
+        else:
+            selected_format_id = None
+            estimated_size_bytes, format_label = _resolve_audio_size_and_format(info)
 
         thumb_url = info.get("thumbnail")
         if not thumb_url:
@@ -392,6 +535,8 @@ def inspect_audio_preview(
                 "duration_ms": duration_ms,
                 "estimated_size_bytes": estimated_size_bytes,
                 "audio_format_label": format_label,
+                "selected_format_id": selected_format_id,
+                "available_formats": available_formats,
                 "thumbnail_path": local_thumb_path,
                 "webpage_url": str(info.get("webpage_url") or url),
             }
@@ -409,6 +554,8 @@ def download_audio(
     qjs_binary_path: Optional[str],
     progress_callback: Optional[Callable[[str], None]] = None,
     cancel_check: Optional[Callable[[], bool]] = None,
+    quality_key: str = "max",
+    format_id: Optional[str] = None,
 ) -> str:
     """Descarga solo el flujo de audio compatible con ExoPlayer usando yt-dlp + yt-dlp-ejs + QuickJS-NG."""
     ensure_updates_in_sys_path(updates_dir)
@@ -503,8 +650,8 @@ def download_audio(
             emit("importing", percent=100.0, downloaded=total, total=total, speed_bps=0, title=title)
 
     ydl_opts: dict = {
-        # Prioriza audio puro nativo para Media3 ExoPlayer sin depender de FFmpeg (evita LGPL/GPL).
-        "format": "bestaudio[ext=m4a]/bestaudio[ext=webm]/bestaudio/best",
+        # Prioriza el formato/calidad elegido compatible con Media3 ExoPlayer sin depender de FFmpeg.
+        "format": _build_format_selector(quality_key, format_id),
         "noplaylist": True,
         "outtmpl": os.path.join(output_dir, "%(id)s.%(ext)s"),
         "writethumbnail": True,

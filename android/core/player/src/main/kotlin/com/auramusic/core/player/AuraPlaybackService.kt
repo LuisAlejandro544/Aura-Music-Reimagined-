@@ -18,6 +18,7 @@ import androidx.media3.exoplayer.audio.DefaultAudioSink
 import androidx.media3.session.DefaultMediaNotificationProvider
 import androidx.media3.session.MediaSession
 import androidx.media3.session.MediaSessionService
+import com.auramusic.core.model.AudioEffectsState
 import com.auramusic.core.model.PlaybackTuning
 import com.auramusic.core.model.PlaybackTuningHelper
 import kotlinx.coroutines.CancellationException
@@ -28,17 +29,23 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.emptyFlow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import java.lang.reflect.InvocationHandler
+import java.lang.reflect.InvocationTargetException
+import java.lang.reflect.Method
+import java.lang.reflect.Proxy
 import java.util.IdentityHashMap
 
 /**
  * Contrato desacoplado para que `:app` suministre al servicio Media3 el flujo reactivo
- * de configuración de Crossfade y velocidad guardado en DataStore y el Intent de apertura
- * del reproductor sin acoplar `:core:player` con `:core:database` ni `:app`.
+ * de configuración de Crossfade, velocidad y efectos Reverb/Slowed guardado en DataStore
+ * y el Intent de apertura del reproductor sin acoplar `:core:player` con `:core:database` ni `:app`.
  */
 interface AuraPlaybackTuningProvider {
     fun observePlaybackTuning(): Flow<PlaybackTuning>
+    fun observeAudioEffects(): Flow<AudioEffectsState> = emptyFlow()
     fun createOpenPlayerIntent(): Intent? = null
 }
 
@@ -58,6 +65,7 @@ class AuraPlaybackService : MediaSessionService() {
 
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private var currentTuning = PlaybackTuning()
+    private var currentEffects = AudioEffectsState()
     private var crossfadeMonitorJob: Job? = null
     private var activeCrossfadeJob: Job? = null
     private var preloadedMediaId: String? = null
@@ -91,7 +99,10 @@ class AuraPlaybackService : MediaSessionService() {
 
         override fun onPlaybackParametersChanged(playbackParameters: PlaybackParameters) {
             if (activeCrossfadeJob?.isActive == true) {
-                outgoingFadePlayer?.playbackParameters = PlaybackParameters(playbackParameters.speed, 1.0f)
+                outgoingFadePlayer?.playbackParameters = PlaybackParameters(
+                    playbackParameters.speed,
+                    playbackParameters.pitch,
+                )
             }
         }
     }
@@ -158,22 +169,28 @@ class AuraPlaybackService : MediaSessionService() {
         return mediaSession
     }
 
+    private fun applyResolvedPlaybackParameters() {
+        val resolved = PlaybackTuningHelper.resolvePlaybackParameters(currentTuning, currentEffects)
+        primaryPlayer?.let { player ->
+            val current = player.playbackParameters
+            if (kotlin.math.abs(current.speed - resolved.speed) > 0.005f ||
+                kotlin.math.abs(current.pitch - resolved.pitch) > 0.005f
+            ) {
+                player.playbackParameters = PlaybackParameters(resolved.speed, resolved.pitch)
+            }
+        }
+        if (activeCrossfadeJob?.isActive == true) {
+            outgoingFadePlayer?.playbackParameters = PlaybackParameters(resolved.speed, resolved.pitch)
+        }
+    }
+
     private fun observeTuningPreferences() {
         val provider = applicationContext as? AuraPlaybackTuningProvider ?: return
         serviceScope.launch {
             provider.observePlaybackTuning().collect { tuning ->
                 val normalized = tuning.normalized()
                 currentTuning = normalized
-
-                val safeSpeed = normalized.playbackSpeed
-                primaryPlayer?.let { player ->
-                    if (kotlin.math.abs(player.playbackParameters.speed - safeSpeed) > 0.005f) {
-                        player.playbackParameters = PlaybackParameters(safeSpeed, 1.0f)
-                    }
-                }
-                if (activeCrossfadeJob?.isActive == true) {
-                    outgoingFadePlayer?.playbackParameters = PlaybackParameters(safeSpeed, 1.0f)
-                }
+                applyResolvedPlaybackParameters()
 
                 if (normalized.crossfadeEnabled) {
                     startCrossfadeMonitorIfNeeded()
@@ -181,6 +198,12 @@ class AuraPlaybackService : MediaSessionService() {
                     stopCrossfadeMonitor()
                     cancelActiveCrossfade("disabled")
                 }
+            }
+        }
+        serviceScope.launch {
+            provider.observeAudioEffects().collect { effects ->
+                currentEffects = effects.normalized()
+                applyResolvedPlaybackParameters()
             }
         }
     }
@@ -313,7 +336,10 @@ class AuraPlaybackService : MediaSessionService() {
                     outPlayer.setMediaItem(outgoingItem)
                     outPlayer.prepare()
                 }
-                outPlayer.playbackParameters = PlaybackParameters(speed, 1.0f)
+                val pitch = primary.playbackParameters.pitch
+                    .takeIf { it.isFinite() && it >= 0.5f }
+                    ?: 1.0f
+                outPlayer.playbackParameters = PlaybackParameters(speed, pitch)
                 outPlayer.volume = 1f
                 outPlayer.seekTo(outgoingPositionMs.coerceAtLeast(0L))
                 outPlayer.play()
@@ -430,7 +456,7 @@ class AuraPlaybackService : MediaSessionService() {
         override fun addListener(listener: Player.Listener) {
             val wrapper = synchronized(listenerWrappers) {
                 listenerWrappers.getOrPut(listener) {
-                    ExtendedCommandsListener(listener, ::extendCommands)
+                    ExtendedCommandsListener.createProxy(listener, ::extendCommands)
                 }
             }
             super.addListener(wrapper)
@@ -483,25 +509,75 @@ class AuraPlaybackService : MediaSessionService() {
     }
 
     /**
-     * Delegado de [Player.Listener] para que MediaSession reciba siempre los comandos
-     * completos de pista anterior/siguiente también en el evento `onAvailableCommandsChanged`.
+     * Proxy dinámico de [Player.Listener] para que MediaSession reciba TODOS los callbacks
+     * del reproductor (`onPlaybackStateChanged`, `onIsPlayingChanged`, `onEvents`, etc.) además
+     * de extender `onAvailableCommandsChanged` con los botones Anterior/Siguiente.
+     *
+     * Nota técnica: se usa [Proxy] en lugar de la delegación de interfaz de Kotlin (`by`)
+     * sobre `Player.Listener` porque Kotlin no delega los métodos `default` de Java (KT-18324),
+     * lo que provocaba que MediaSession y el MiniPlayer quedaran congelados en `STATE_BUFFERING`.
      */
     private class ExtendedCommandsListener(
         private val delegate: Player.Listener,
         private val extend: (Player.Commands) -> Player.Commands,
-    ) : Player.Listener by delegate {
+    ) : InvocationHandler {
 
-        override fun onAvailableCommandsChanged(availableCommands: Player.Commands) {
-            delegate.onAvailableCommandsChanged(extend(availableCommands))
+        override fun invoke(proxy: Any, method: Method, args: Array<out Any?>?): Any? {
+            if (method.declaringClass == Any::class.java) {
+                return when (method.name) {
+                    "equals" -> {
+                        val other = args?.firstOrNull()
+                        if (other === proxy) {
+                            true
+                        } else if (other != null && Proxy.isProxyClass(other.javaClass)) {
+                            val otherHandler = Proxy.getInvocationHandler(other) as? ExtendedCommandsListener
+                            otherHandler?.delegate == delegate
+                        } else {
+                            delegate == other
+                        }
+                    }
+                    "hashCode" -> delegate.hashCode()
+                    "toString" -> delegate.toString()
+                    else -> if (args == null) method.invoke(delegate) else method.invoke(delegate, *args)
+                }
+            }
+
+            // Intercepta `onAvailableCommandsChanged` (único callback con parámetro `Player.Commands`)
+            // de forma segura tanto en Debug como en Release con R8.
+            val paramTypes = method.parameterTypes
+            if (method.name == "onAvailableCommandsChanged" ||
+                (paramTypes.size == 1 && paramTypes[0] == Player.Commands::class.java)
+            ) {
+                val commands = args?.firstOrNull() as? Player.Commands
+                if (commands != null) {
+                    delegate.onAvailableCommandsChanged(extend(commands))
+                    return null
+                }
+            }
+
+            return try {
+                if (args == null) {
+                    method.invoke(delegate)
+                } else {
+                    method.invoke(delegate, *args)
+                }
+            } catch (error: InvocationTargetException) {
+                throw error.cause ?: error
+            }
         }
 
-        override fun equals(other: Any?): Boolean {
-            if (this === other) return true
-            val target = (other as? ExtendedCommandsListener)?.delegate ?: other
-            return delegate == target
+        companion object {
+            fun createProxy(
+                delegate: Player.Listener,
+                extend: (Player.Commands) -> Player.Commands,
+            ): Player.Listener {
+                return Proxy.newProxyInstance(
+                    Player.Listener::class.java.classLoader,
+                    arrayOf(Player.Listener::class.java),
+                    ExtendedCommandsListener(delegate, extend),
+                ) as Player.Listener
+            }
         }
-
-        override fun hashCode(): Int = delegate.hashCode()
     }
 }
 

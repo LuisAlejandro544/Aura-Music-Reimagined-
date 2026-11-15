@@ -11,11 +11,14 @@ import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import androidx.room.Room
 import com.auramusic.core.model.AppAccentColor
+import com.auramusic.core.model.AudioEffectsState
+import com.auramusic.core.model.EditedTrackMetadata
 import com.auramusic.core.model.EqualizerState
 import com.auramusic.core.model.PlaybackTuning
 import com.auramusic.core.model.PlaybackTuningHelper
 import com.auramusic.core.model.Playlist
 import com.auramusic.core.model.Track
+import com.auramusic.core.model.TrackMetadataHelper
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
@@ -135,6 +138,23 @@ class MusicRepository(
 
     suspend fun getAllReferencedCoverPaths(): List<String> = withContext(Dispatchers.IO) {
         trackDao.getAllReferencedCoverPaths()
+    }
+
+    /**
+     * Actualiza en Room el nombre de la canción y el artista tras normalizar ambos campos.
+     */
+    suspend fun updateTrackMetadata(
+        trackId: Long,
+        title: String,
+        artist: String,
+    ): EditedTrackMetadata? = withContext(Dispatchers.IO) {
+        val normalized = TrackMetadataHelper.normalizeOrNull(title, artist) ?: return@withContext null
+        trackDao.updateMetadata(
+            trackId = trackId,
+            title = normalized.title,
+            artist = normalized.artist,
+        )
+        normalized
     }
 
     /**
@@ -303,13 +323,14 @@ class EqualizerPreferencesRepository(
 }
 
 /**
- * Repositorio de preferencias de auto-actualización para `yt-dlp` y `yt-dlp-ejs` en DataStore.
+ * Repositorio de preferencias de auto-actualización y calidad de audio para `yt-dlp` en DataStore.
  */
 class DownloaderPreferencesRepository(
     private val context: Context,
 ) {
     private val autoUpdateKey = booleanPreferencesKey("ytdlp_auto_update")
     private val lastCheckKey = androidx.datastore.preferences.core.longPreferencesKey("ytdlp_last_check_ms")
+    private val audioQualityKey = stringPreferencesKey("ytdlp_audio_quality")
 
     val autoUpdateEnabled: Flow<Boolean> = context.auraSettingsDataStore.data.map { prefs ->
         prefs[autoUpdateKey] ?: true
@@ -318,6 +339,11 @@ class DownloaderPreferencesRepository(
     val lastUpdateCheckEpochMs: Flow<Long> = context.auraSettingsDataStore.data.map { prefs ->
         prefs[lastCheckKey] ?: 0L
     }
+
+    val audioDownloadQuality: Flow<com.auramusic.core.model.AudioDownloadQuality> =
+        context.auraSettingsDataStore.data.map { prefs ->
+            com.auramusic.core.model.AudioDownloadQuality.fromKey(prefs[audioQualityKey])
+        }
 
     suspend fun setAutoUpdateEnabled(enabled: Boolean) {
         withContext(Dispatchers.IO) {
@@ -331,6 +357,14 @@ class DownloaderPreferencesRepository(
         withContext(Dispatchers.IO) {
             context.auraSettingsDataStore.edit { prefs ->
                 prefs[lastCheckKey] = epochMs
+            }
+        }
+    }
+
+    suspend fun setAudioDownloadQuality(quality: com.auramusic.core.model.AudioDownloadQuality) {
+        withContext(Dispatchers.IO) {
+            context.auraSettingsDataStore.edit { prefs ->
+                prefs[audioQualityKey] = quality.key
             }
         }
     }
@@ -380,4 +414,65 @@ class PlaybackPreferencesRepository(
         }
     }
 }
+
+/**
+ * Repositorio de preferencias de efectos de audio en Rust (Reverb estéreo, Audio 8D y modo Slowed) en DataStore.
+ */
+class AudioEffectsPreferencesRepository(
+    private val context: Context,
+) {
+    private val reverbEnabledKey = booleanPreferencesKey("fx_reverb_enabled")
+    private val reverbRoomSizeKey = floatPreferencesKey("fx_reverb_room_size")
+    private val reverbDampingKey = floatPreferencesKey("fx_reverb_damping")
+    private val reverbWetMixKey = floatPreferencesKey("fx_reverb_wet_mix")
+    private val reverbWidthKey = floatPreferencesKey("fx_reverb_width")
+    private val slowedEnabledKey = booleanPreferencesKey("fx_slowed_enabled")
+    private val slowedSpeedKey = floatPreferencesKey("fx_slowed_speed")
+    private val slowedPreservePitchKey = booleanPreferencesKey("fx_slowed_preserve_pitch")
+    private val slowedWarmthKey = floatPreferencesKey("fx_slowed_warmth")
+    private val spatial8dEnabledKey = booleanPreferencesKey("fx_spatial_8d_enabled")
+    private val spatial8dSpeedKey = floatPreferencesKey("fx_spatial_8d_speed")
+    private val spatial8dDepthKey = floatPreferencesKey("fx_spatial_8d_depth")
+    private val presetIdKey = stringPreferencesKey("fx_preset_id")
+
+    val audioEffectsState: Flow<AudioEffectsState> = context.auraSettingsDataStore.data.map { prefs ->
+        AudioEffectsState(
+            reverbEnabled = prefs[reverbEnabledKey] ?: false,
+            reverbRoomSize = prefs[reverbRoomSizeKey] ?: AudioEffectsState.DEFAULT_ROOM_SIZE,
+            reverbDamping = prefs[reverbDampingKey] ?: AudioEffectsState.DEFAULT_DAMPING,
+            reverbWetMix = prefs[reverbWetMixKey] ?: AudioEffectsState.DEFAULT_WET_MIX,
+            reverbWidth = prefs[reverbWidthKey] ?: AudioEffectsState.DEFAULT_WIDTH,
+            slowedEnabled = prefs[slowedEnabledKey] ?: false,
+            slowedSpeed = prefs[slowedSpeedKey] ?: AudioEffectsState.DEFAULT_SLOWED_SPEED,
+            slowedPreservePitch = prefs[slowedPreservePitchKey] ?: false,
+            slowedWarmth = prefs[slowedWarmthKey] ?: AudioEffectsState.DEFAULT_SLOWED_WARMTH,
+            spatial8dEnabled = prefs[spatial8dEnabledKey] ?: false,
+            spatial8dSpeed = prefs[spatial8dSpeedKey] ?: AudioEffectsState.DEFAULT_SPATIAL_8D_SPEED,
+            spatial8dDepth = prefs[spatial8dDepthKey] ?: AudioEffectsState.DEFAULT_SPATIAL_8D_DEPTH,
+            activePresetId = prefs[presetIdKey] ?: AudioEffectsState.PRESET_OFF_ID,
+        ).normalized()
+    }
+
+    suspend fun saveAudioEffectsState(state: AudioEffectsState) {
+        val normalized = state.normalized()
+        withContext(Dispatchers.IO) {
+            context.auraSettingsDataStore.edit { prefs ->
+                prefs[reverbEnabledKey] = normalized.reverbEnabled
+                prefs[reverbRoomSizeKey] = normalized.reverbRoomSize
+                prefs[reverbDampingKey] = normalized.reverbDamping
+                prefs[reverbWetMixKey] = normalized.reverbWetMix
+                prefs[reverbWidthKey] = normalized.reverbWidth
+                prefs[slowedEnabledKey] = normalized.slowedEnabled
+                prefs[slowedSpeedKey] = normalized.slowedSpeed
+                prefs[slowedPreservePitchKey] = normalized.slowedPreservePitch
+                prefs[slowedWarmthKey] = normalized.slowedWarmth
+                prefs[spatial8dEnabledKey] = normalized.spatial8dEnabled
+                prefs[spatial8dSpeedKey] = normalized.spatial8dSpeed
+                prefs[spatial8dDepthKey] = normalized.spatial8dDepth
+                prefs[presetIdKey] = normalized.activePresetId
+            }
+        }
+    }
+}
+
 

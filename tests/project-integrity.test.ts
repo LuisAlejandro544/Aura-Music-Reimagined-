@@ -23,8 +23,9 @@ test('all Gradle modules declared in settings.gradle.kts exist with build script
   const settings = fs.readFileSync(path.join(rootDir, 'android/settings.gradle.kts'), 'utf8');
   const includes = [...settings.matchAll(/include\("([^"]+)"\)/g)].map((m) => m[1]);
 
-  assert.ok(includes.length >= 11, 'Expected full multi-module Gradle structure including :feature:equalizer');
+  assert.ok(includes.length >= 14, 'Expected full multi-module Gradle structure including :feature:equalizer and :feature:effects');
   assert.ok(includes.includes(':feature:equalizer'), 'Expected dedicated :feature:equalizer module');
+  assert.ok(includes.includes(':feature:effects'), 'Expected dedicated :feature:effects module');
 
   for (const mod of includes) {
     const relPath = mod.replace(/^:/, '').replace(/:/g, '/');
@@ -819,6 +820,8 @@ test('Android system media notification keeps symmetric transport controls, smal
   assert.match(serviceKt, /setSmallIcon\(R\.drawable\.ic_aura_notification\)/);
   assert.match(serviceKt, /class SessionControlForwardingPlayer/);
   assert.match(serviceKt, /class ExtendedCommandsListener/);
+  assert.doesNotMatch(serviceKt, /\)\s*:\s*Player\.Listener\s+by\s+/);
+  assert.match(serviceKt, /Proxy\.newProxyInstance/);
   assert.match(serviceKt, /COMMAND_SEEK_TO_NEXT_MEDIA_ITEM/);
   assert.match(serviceKt, /COMMAND_SEEK_TO_PREVIOUS_MEDIA_ITEM/);
   assert.match(serviceKt, /setSessionActivity\(pendingIntent\)/);
@@ -887,4 +890,242 @@ test('Disco Local con Aura SVG logo and adaptive/notification drawables are wire
   assert.match(dlServiceKt, /R\.drawable\.ic_aura_download_notification/);
   assert.match(rootKt, /R\.drawable\.ic_aura_brand_logo/);
 });
+
+test('local track metadata editing updates Room, syncs MediaController items, and is exposed across library, playlists, artists, and player', () => {
+  const modelsKt = fs.readFileSync(
+    path.join(rootDir, 'android/core/model/src/main/kotlin/com/auramusic/core/model/AuraModels.kt'),
+    'utf8',
+  );
+  const modelsTestKt = fs.readFileSync(
+    path.join(rootDir, 'android/core/model/src/test/kotlin/com/auramusic/core/model/AuraModelsTest.kt'),
+    'utf8',
+  );
+  const dbKt = fs.readFileSync(
+    path.join(rootDir, 'android/core/database/src/main/kotlin/com/auramusic/core/database/AuraDatabase.kt'),
+    'utf8',
+  );
+  const repoKt = fs.readFileSync(
+    path.join(rootDir, 'android/core/database/src/main/kotlin/com/auramusic/core/database/AuraRepositories.kt'),
+    'utf8',
+  );
+  const controllerKt = fs.readFileSync(
+    path.join(rootDir, 'android/core/player/src/main/kotlin/com/auramusic/core/player/AuraPlayerController.kt'),
+    'utf8',
+  );
+  const vmKt = fs.readFileSync(
+    path.join(rootDir, 'android/app/src/main/kotlin/com/auramusic/app/AuraViewModel.kt'),
+    'utf8',
+  );
+  const rootKt = fs.readFileSync(
+    path.join(rootDir, 'android/app/src/main/kotlin/com/auramusic/app/AuraAppRoot.kt'),
+    'utf8',
+  );
+  const libraryKt = fs.readFileSync(
+    path.join(rootDir, 'android/feature/library/src/main/kotlin/com/auramusic/feature/library/LibraryScreen.kt'),
+    'utf8',
+  );
+  const playlistsKt = fs.readFileSync(
+    path.join(rootDir, 'android/feature/playlists/src/main/kotlin/com/auramusic/feature/playlists/PlaylistsScreen.kt'),
+    'utf8',
+  );
+  const artistDetailKt = fs.readFileSync(
+    path.join(rootDir, 'android/feature/playlists/src/main/kotlin/com/auramusic/feature/playlists/ArtistDetailScreen.kt'),
+    'utf8',
+  );
+  const playerKt = fs.readFileSync(
+    path.join(rootDir, 'android/feature/player/src/main/kotlin/com/auramusic/feature/player/PlayerScreen.kt'),
+    'utf8',
+  );
+
+  assert.match(modelsKt, /data class EditedTrackMetadata/);
+  assert.match(modelsKt, /object TrackMetadataHelper/);
+  assert.match(modelsKt, /fun normalizeOrNull/);
+  assert.match(modelsTestKt, /TrackMetadataHelper\.normalizeOrNull/);
+
+  assert.match(dbKt, /suspend fun updateMetadata\(/);
+  assert.match(repoKt, /suspend fun updateTrackMetadata\(/);
+  assert.match(controllerKt, /private fun syncMediaItemsMetadata\(/);
+  assert.match(controllerKt, /player\.replaceMediaItem\(/);
+
+  assert.match(vmKt, /fun updateTrackMetadata\(/);
+  assert.match(rootKt, /private fun EditTrackMetadataDialog\(/);
+  assert.match(rootKt, /trackPendingMetadataEdit/);
+
+  for (const screenCode of [libraryKt, playlistsKt, artistDetailKt, playerKt]) {
+    assert.match(screenCode, /onEditMetadata/);
+    assert.match(screenCode, /Editar metadatos/);
+  }
+});
+
+test('audio downloader supports preferred quality presets and real format/bitrate selection in preview', () => {
+  const modelsKt = fs.readFileSync(
+    path.join(rootDir, 'android/core/model/src/main/kotlin/com/auramusic/core/model/AuraModels.kt'),
+    'utf8',
+  );
+  const modelsTestKt = fs.readFileSync(
+    path.join(rootDir, 'android/core/model/src/test/kotlin/com/auramusic/core/model/AuraModelsTest.kt'),
+    'utf8',
+  );
+  const reposKt = fs.readFileSync(
+    path.join(rootDir, 'android/core/database/src/main/kotlin/com/auramusic/core/database/AuraRepositories.kt'),
+    'utf8',
+  );
+  const pyScript = fs.readFileSync(
+    path.join(rootDir, 'android/core/downloader/src/main/python/aura_ytdlp.py'),
+    'utf8',
+  );
+  const downloaderKt = fs.readFileSync(
+    path.join(rootDir, 'android/core/downloader/src/main/kotlin/com/auramusic/core/downloader/YtDlpAudioDownloader.kt'),
+    'utf8',
+  );
+  const downloaderScreenKt = fs.readFileSync(
+    path.join(rootDir, 'android/feature/downloader/src/main/kotlin/com/auramusic/feature/downloader/DownloaderScreen.kt'),
+    'utf8',
+  );
+  const vmKt = fs.readFileSync(
+    path.join(rootDir, 'android/app/src/main/kotlin/com/auramusic/app/AuraViewModel.kt'),
+    'utf8',
+  );
+  const rootKt = fs.readFileSync(
+    path.join(rootDir, 'android/app/src/main/kotlin/com/auramusic/app/AuraAppRoot.kt'),
+    'utf8',
+  );
+
+  assert.match(modelsKt, /enum class AudioDownloadQuality/);
+  assert.match(modelsKt, /data class DownloadAudioFormatOption/);
+  assert.match(modelsKt, /object DownloadFormatHelper/);
+  assert.match(modelsTestKt, /DownloadFormatHelper\.pickDefaultOption/);
+
+  assert.match(reposKt, /ytdlp_audio_quality/);
+  assert.match(reposKt, /setAudioDownloadQuality/);
+
+  assert.match(pyScript, /def _build_format_selector/);
+  assert.match(pyScript, /def _extract_available_audio_formats/);
+  assert.match(pyScript, /"available_formats":\s*available_formats/);
+  assert.match(pyScript, /format_id:\s*Optional\[str\]\s*=\s*None/);
+
+  assert.match(downloaderKt, /suspend fun setPreferredAudioQuality/);
+  assert.match(downloaderKt, /fun selectPreviewAudioFormat/);
+  assert.match(downloaderKt, /parseAvailableFormats/);
+
+  assert.match(downloaderScreenKt, /Calidad de audio preferida/);
+  assert.match(downloaderScreenKt, /Elige calidad del formato/);
+  assert.match(downloaderScreenKt, /FormatOptionSelectorRow/);
+
+  assert.match(vmKt, /fun setDownloaderAudioQuality/);
+  assert.match(vmKt, /fun selectDownloaderPreviewFormat/);
+  assert.match(rootKt, /onSelectQualityPreset\s*=\s*viewModel::setDownloaderAudioQuality/);
+  assert.match(rootKt, /onSelectPreviewFormat\s*=\s*viewModel::selectDownloaderPreviewFormat/);
+});
+
+test('Rust stereo Reverb (Freeverb), Slowed, and Spatial 8D integrate modularly via :feature:effects', () => {
+  const reverbRs = path.join(rootDir, 'android/rust/aura_core/src/reverb.rs');
+  const spatial8dRs = path.join(rootDir, 'android/rust/aura_core/src/spatial_8d.rs');
+  const eqRs = fs.readFileSync(path.join(rootDir, 'android/rust/aura_core/src/equalizer.rs'), 'utf8');
+  const rustLib = fs.readFileSync(path.join(rootDir, 'android/rust/aura_core/src/lib.rs'), 'utf8');
+  const bridgeKt = fs.readFileSync(
+    path.join(rootDir, 'android/core/rust/src/main/kotlin/com/auramusic/core/rust/AuraRustBridge.kt'),
+    'utf8',
+  );
+  const modelsKt = fs.readFileSync(
+    path.join(rootDir, 'android/core/model/src/main/kotlin/com/auramusic/core/model/AuraModels.kt'),
+    'utf8',
+  );
+  const modelsTestKt = fs.readFileSync(
+    path.join(rootDir, 'android/core/model/src/test/kotlin/com/auramusic/core/model/AuraModelsTest.kt'),
+    'utf8',
+  );
+  const reposKt = fs.readFileSync(
+    path.join(rootDir, 'android/core/database/src/main/kotlin/com/auramusic/core/database/AuraRepositories.kt'),
+    'utf8',
+  );
+  const serviceKt = fs.readFileSync(
+    path.join(rootDir, 'android/core/player/src/main/kotlin/com/auramusic/core/player/AuraPlaybackService.kt'),
+    'utf8',
+  );
+  const effectsGradle = fs.readFileSync(path.join(rootDir, 'android/feature/effects/build.gradle.kts'), 'utf8');
+  const effectsScreenKt = fs.readFileSync(
+    path.join(rootDir, 'android/feature/effects/src/main/kotlin/com/auramusic/feature/effects/AudioEffectsScreen.kt'),
+    'utf8',
+  );
+  const playerScreenKt = fs.readFileSync(
+    path.join(rootDir, 'android/feature/player/src/main/kotlin/com/auramusic/feature/player/PlayerScreen.kt'),
+    'utf8',
+  );
+  const settingsScreenKt = fs.readFileSync(
+    path.join(rootDir, 'android/feature/settings/src/main/kotlin/com/auramusic/feature/settings/SettingsScreen.kt'),
+    'utf8',
+  );
+  const appKt = fs.readFileSync(
+    path.join(rootDir, 'android/app/src/main/kotlin/com/auramusic/app/AuraApplication.kt'),
+    'utf8',
+  );
+  const vmKt = fs.readFileSync(
+    path.join(rootDir, 'android/app/src/main/kotlin/com/auramusic/app/AuraViewModel.kt'),
+    'utf8',
+  );
+  const rootKt = fs.readFileSync(
+    path.join(rootDir, 'android/app/src/main/kotlin/com/auramusic/app/AuraAppRoot.kt'),
+    'utf8',
+  );
+
+  // Motor DSP en Rust (Freeverb estéreo + calidez analógica LPF + Audio Espacial 8D) sin fallbacks en Kotlin
+  assert.ok(fs.existsSync(reverbRs), 'Missing android/rust/aura_core/src/reverb.rs');
+  assert.ok(fs.existsSync(spatial8dRs), 'Missing android/rust/aura_core/src/spatial_8d.rs');
+  const reverbCode = fs.readFileSync(reverbRs, 'utf8');
+  const spatial8dCode = fs.readFileSync(spatial8dRs, 'utf8');
+  assert.match(reverbCode, /struct AudioEffectsProcessor/);
+  assert.match(reverbCode, /struct CombFilter/);
+  assert.match(reverbCode, /struct AllpassFilter/);
+  assert.match(reverbCode, /warmth_active/);
+  assert.match(reverbCode, /spatial_8d:\s*Spatial8dProcessor/);
+  assert.match(spatial8dCode, /struct Spatial8dProcessor/);
+  assert.match(spatial8dCode, /struct FractionalDelayLine/);
+  assert.match(eqRs, /effects:\s*AudioEffectsProcessor/);
+  assert.match(rustLib, /mod reverb;/);
+  assert.match(rustLib, /mod spatial_8d;/);
+  assert.match(rustLib, /Java_com_auramusic_core_rust_AuraRustBridge_nativeSetAudioEffectsConfig/);
+  assert.match(bridgeKt, /suspend fun setAudioEffectsConfig\(/);
+
+  // Modelos, presets, DataStore y Media3 service
+  assert.match(modelsKt, /data class AudioEffectsState/);
+  assert.match(modelsKt, /val spatial8dEnabled:\s*Boolean/);
+  assert.match(modelsKt, /data class AudioEffectPreset/);
+  assert.match(modelsKt, /fun resolvePlaybackParameters\(/);
+  assert.match(modelsKt, /fun spatial8dOrbitPeriodSeconds\(/);
+  assert.match(modelsTestKt, /PlaybackTuningHelper\.resolvePlaybackParameters/);
+  assert.match(modelsTestKt, /spatial_8d_slowed/);
+
+  assert.match(reposKt, /class AudioEffectsPreferencesRepository/);
+  assert.match(reposKt, /fx_reverb_enabled/);
+  assert.match(reposKt, /fx_slowed_enabled/);
+  assert.match(reposKt, /fx_spatial_8d_enabled/);
+
+  assert.match(serviceKt, /fun observeAudioEffects\(/);
+  assert.match(serviceKt, /resolvePlaybackParameters\(currentTuning,\s*currentEffects\)/);
+  assert.doesNotMatch(serviceKt, /android\.media\.audiofx\.PresetReverb|android\.media\.audiofx\.EnvironmentalReverb/);
+
+  // Módulo :feature:effects desacoplado (solo depende de :core:model)
+  assert.match(effectsGradle, /project\(":core:model"\)/);
+  assert.doesNotMatch(effectsGradle, /project\(":core:(rust|player|database|importer|downloader)"\)/);
+  assert.match(effectsScreenKt, /fun AudioEffectsScreen\(/);
+  assert.match(effectsScreenKt, /Audio 8D \(Rust\)/);
+  assert.match(effectsScreenKt, /Efecto Slowed/);
+  assert.match(effectsScreenKt, /Reverb Estéreo \(Rust\)/);
+
+  // Accesible desde menú de 3 puntos del reproductor y oculto en Ajustes
+  assert.match(playerScreenKt, /onOpenAudioEffects/);
+  assert.match(playerScreenKt, /8D, Reverb y Slowed/);
+  assert.doesNotMatch(settingsScreenKt, /Reverb y Slowed|Audio 8D|onOpenAudioEffects/);
+
+  // Conexión en :app
+  assert.match(appKt, /audioEffectsPreferencesRepository/);
+  assert.match(vmKt, /val audioEffects:\s*StateFlow<AudioEffectsState>/);
+  assert.match(vmKt, /fun setSpatial8dEnabled/);
+  assert.match(rootKt, /AuraRoutes\.AUDIO_EFFECTS/);
+  assert.match(rootKt, /AudioEffectsScreen\(/);
+});
+
+
+
 

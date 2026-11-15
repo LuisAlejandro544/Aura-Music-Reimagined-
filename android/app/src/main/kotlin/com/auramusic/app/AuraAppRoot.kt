@@ -13,25 +13,33 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.Close
+import androidx.compose.material.icons.rounded.Edit
 import androidx.compose.material.icons.rounded.LibraryMusic
 import androidx.compose.material.icons.rounded.QueueMusic
 import androidx.compose.material.icons.rounded.Settings
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -44,6 +52,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavGraph.Companion.findStartDestination
@@ -55,8 +64,10 @@ import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import com.auramusic.core.model.DeleteEffectFrameRenderer
 import com.auramusic.core.model.Track
+import com.auramusic.core.model.TrackMetadataHelper
 import com.auramusic.core.rust.AuraRustBridge
 import com.auramusic.feature.downloader.DownloaderScreen
+import com.auramusic.feature.effects.AudioEffectsScreen
 import com.auramusic.feature.equalizer.EqualizerScreen
 import com.auramusic.feature.library.LibraryScreen
 import com.auramusic.feature.player.MiniPlayerBar
@@ -75,6 +86,7 @@ private object AuraRoutes {
     const val PLAYLISTS = "playlists"
     const val SETTINGS = "settings"
     const val EQUALIZER = "equalizer"
+    const val AUDIO_EFFECTS = "audio_effects"
     const val DOWNLOADER = "downloader"
     const val LIKED = "liked"
     const val PLAYER = "player"
@@ -110,6 +122,7 @@ fun AuraAppRoot(viewModel: AuraViewModel) {
     val dynamicCoverColorsEnabled by viewModel.dynamicCoverColorsEnabled.collectAsStateWithLifecycle()
     val deleteAnimationsEnabled by viewModel.deleteAnimationsEnabled.collectAsStateWithLifecycle()
     val equalizerState by viewModel.equalizerState.collectAsStateWithLifecycle()
+    val audioEffects by viewModel.audioEffects.collectAsStateWithLifecycle()
     val playbackTuning by viewModel.playbackTuning.collectAsStateWithLifecycle()
     val rustEngineInfo by viewModel.rustEngineInfo.collectAsStateWithLifecycle()
 
@@ -154,6 +167,7 @@ fun AuraAppRoot(viewModel: AuraViewModel) {
     }
 
     var trackForPlaylistSheet by remember { mutableStateOf<Track?>(null) }
+    var trackPendingMetadataEdit by remember { mutableStateOf<Track?>(null) }
     var pendingCoverTrackId by remember { mutableStateOf<Long?>(null) }
 
     // Launchers del Storage Access Framework (SAF) para los 3 modos de importación manual.
@@ -187,6 +201,7 @@ fun AuraAppRoot(viewModel: AuraViewModel) {
 
     val showBottomChrome = currentRoute != AuraRoutes.PLAYER &&
         currentRoute != AuraRoutes.EQUALIZER &&
+        currentRoute != AuraRoutes.AUDIO_EFFECTS &&
         currentRoute != AuraRoutes.DOWNLOADER &&
         currentRoute != AuraRoutes.QUEUE
 
@@ -298,6 +313,7 @@ fun AuraAppRoot(viewModel: AuraViewModel) {
                             showQueueFeedback("Añadida a la cola: ${track.title}")
                         },
                         onAddToPlaylist = { track -> trackForPlaylistSheet = track },
+                        onEditMetadata = { track -> trackPendingMetadataEdit = track },
                         onChangeCover = { track ->
                             pendingCoverTrackId = track.id
                             galleryCoverLauncher.launch("image/*")
@@ -352,6 +368,7 @@ fun AuraAppRoot(viewModel: AuraViewModel) {
                             showQueueFeedback("Añadida a la cola: ${track.title}")
                         },
                         onAddToPlaylist = { track -> trackForPlaylistSheet = track },
+                        onEditMetadata = { track -> trackPendingMetadataEdit = track },
                     )
                 }
 
@@ -383,6 +400,7 @@ fun AuraAppRoot(viewModel: AuraViewModel) {
                             viewModel.addToQueue(track)
                             showQueueFeedback("Añadida a la cola: ${track.title}")
                         },
+                        onEditMetadata = { track -> trackPendingMetadataEdit = track },
                         deleteAnimationsEnabled = deleteAnimationsEnabled,
                         accentArgb = accentColor.primaryArgb.toInt(),
                         deleteEffectRenderer = deleteEffectRenderer,
@@ -414,6 +432,7 @@ fun AuraAppRoot(viewModel: AuraViewModel) {
                             showQueueFeedback("Añadida a la cola: ${track.title}")
                         },
                         onAddToPlaylist = { track -> trackForPlaylistSheet = track },
+                        onEditMetadata = { track -> trackPendingMetadataEdit = track },
                     )
                 }
 
@@ -454,6 +473,8 @@ fun AuraAppRoot(viewModel: AuraViewModel) {
                         },
                         onCheckUpdates = viewModel::checkDownloaderUpdates,
                         onToggleAutoUpdate = viewModel::setDownloaderAutoUpdate,
+                        onSelectQualityPreset = viewModel::setDownloaderAudioQuality,
+                        onSelectPreviewFormat = viewModel::selectDownloaderPreviewFormat,
                         onDismissDownloadStatus = viewModel::dismissDownloadStatus,
                         onDismissUpdateMessage = viewModel::dismissDownloaderUpdateMessage,
                     )
@@ -470,10 +491,32 @@ fun AuraAppRoot(viewModel: AuraViewModel) {
                     )
                 }
 
+                composable(AuraRoutes.AUDIO_EFFECTS) {
+                    AudioEffectsScreen(
+                        effectsState = audioEffects,
+                        onBack = { navController.popBackStack() },
+                        onSelectPreset = viewModel::selectAudioEffectPreset,
+                        onSetReverbEnabled = viewModel::setReverbEnabled,
+                        onSetReverbRoomSize = viewModel::setReverbRoomSize,
+                        onSetReverbDamping = viewModel::setReverbDamping,
+                        onSetReverbWetMix = viewModel::setReverbWetMix,
+                        onSetReverbWidth = viewModel::setReverbWidth,
+                        onSetSlowedEnabled = viewModel::setSlowedEnabled,
+                        onSetSlowedSpeed = viewModel::setSlowedSpeed,
+                        onSetSlowedPreservePitch = viewModel::setSlowedPreservePitch,
+                        onSetSlowedWarmth = viewModel::setSlowedWarmth,
+                        onSetSpatial8dEnabled = viewModel::setSpatial8dEnabled,
+                        onSetSpatial8dSpeed = viewModel::setSpatial8dSpeed,
+                        onSetSpatial8dDepth = viewModel::setSpatial8dDepth,
+                        onReset = viewModel::resetAudioEffects,
+                    )
+                }
+
                 composable(AuraRoutes.PLAYER) {
                     PlayerScreen(
                         playbackState = playbackState,
                         playbackTuning = playbackTuning,
+                        audioEffects = audioEffects,
                         dynamicCoverColorsEnabled = dynamicCoverColorsEnabled,
                         onCollapse = { navController.popBackStack() },
                         onTogglePlayPause = viewModel::togglePlayPause,
@@ -484,12 +527,18 @@ fun AuraAppRoot(viewModel: AuraViewModel) {
                         onCycleRepeat = viewModel::cycleRepeat,
                         onToggleLike = viewModel::toggleLike,
                         onOpenAddToPlaylist = { track -> trackForPlaylistSheet = track },
+                        onEditMetadata = { track -> trackPendingMetadataEdit = track },
                         onChangeCover = { track ->
                             pendingCoverTrackId = track.id
                             galleryCoverLauncher.launch("image/*")
                         },
                         onOpenEqualizer = {
                             navController.navigate(AuraRoutes.EQUALIZER) {
+                                launchSingleTop = true
+                            }
+                        },
+                        onOpenAudioEffects = {
+                            navController.navigate(AuraRoutes.AUDIO_EFFECTS) {
                                 launchSingleTop = true
                             }
                         },
@@ -535,6 +584,131 @@ fun AuraAppRoot(viewModel: AuraViewModel) {
             },
         )
     }
+
+    val editingTrack = trackPendingMetadataEdit
+    if (editingTrack != null) {
+        EditTrackMetadataDialog(
+            track = editingTrack,
+            onDismiss = { trackPendingMetadataEdit = null },
+            onSave = { newTitle, newArtist ->
+                viewModel.updateTrackMetadata(
+                    trackId = editingTrack.id,
+                    title = newTitle,
+                    artist = newArtist,
+                )
+                trackPendingMetadataEdit = null
+            },
+        )
+    }
+}
+
+/**
+ * Popup modal para editar localmente el nombre de la canción y el nombre del artista.
+ * Solo modifica los registros de Room sin reescribir el archivo de audio original.
+ */
+@Composable
+private fun EditTrackMetadataDialog(
+    track: Track,
+    onDismiss: () -> Unit,
+    onSave: (title: String, artist: String) -> Unit,
+) {
+    var titleInput by remember(track.id) { mutableStateOf(track.title) }
+    var artistInput by remember(track.id) { mutableStateOf(track.artist) }
+    val normalizedPreview = TrackMetadataHelper.normalizeOrNull(titleInput, artistInput)
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        icon = {
+            Icon(
+                imageVector = Icons.Rounded.Edit,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.primary,
+            )
+        },
+        title = {
+            Text(
+                text = "Editar metadatos",
+                fontWeight = FontWeight.Bold,
+            )
+        },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                OutlinedTextField(
+                    value = titleInput,
+                    onValueChange = { next ->
+                        if (next.length <= TrackMetadataHelper.MAX_TITLE_LENGTH) {
+                            titleInput = next
+                        }
+                    },
+                    label = { Text("Nombre de la canción") },
+                    placeholder = { Text("Ej. Me Rehúso") },
+                    singleLine = true,
+                    isError = titleInput.trim().isEmpty(),
+                    supportingText = if (titleInput.trim().isEmpty()) {
+                        { Text("El nombre de la canción no puede estar vacío") }
+                    } else {
+                        null
+                    },
+                    trailingIcon = {
+                        if (titleInput.isNotEmpty()) {
+                            IconButton(onClick = { titleInput = "" }) {
+                                Icon(
+                                    imageVector = Icons.Rounded.Close,
+                                    contentDescription = "Limpiar nombre de la canción",
+                                )
+                            }
+                        }
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                )
+
+                OutlinedTextField(
+                    value = artistInput,
+                    onValueChange = { next ->
+                        if (next.length <= TrackMetadataHelper.MAX_ARTIST_LENGTH) {
+                            artistInput = next
+                        }
+                    },
+                    label = { Text("Nombre del artista") },
+                    placeholder = { Text(TrackMetadataHelper.DEFAULT_ARTIST) },
+                    singleLine = true,
+                    trailingIcon = {
+                        if (artistInput.isNotEmpty()) {
+                            IconButton(onClick = { artistInput = "" }) {
+                                Icon(
+                                    imageVector = Icons.Rounded.Close,
+                                    contentDescription = "Limpiar artista",
+                                )
+                            }
+                        }
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                )
+
+                Text(
+                    text = "Si dejas el artista vacío se guardará como «${TrackMetadataHelper.DEFAULT_ARTIST}». Los cambios actualizan al instante la biblioteca, artistas y notificación.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = {
+                    val clean = normalizedPreview ?: return@Button
+                    onSave(clean.title, clean.artist)
+                },
+                enabled = normalizedPreview != null,
+            ) {
+                Text("Guardar")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Cancelar")
+            }
+        },
+    )
 }
 
 /**

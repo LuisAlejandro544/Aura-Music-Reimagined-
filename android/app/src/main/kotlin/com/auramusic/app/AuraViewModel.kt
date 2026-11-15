@@ -7,6 +7,9 @@ import androidx.lifecycle.viewModelScope
 import com.auramusic.core.model.AppAccentColor
 import com.auramusic.core.model.ArtistPlaylist
 import com.auramusic.core.model.ArtistPlaylistBuilder
+import com.auramusic.core.model.AudioDownloadQuality
+import com.auramusic.core.model.AudioEffectPreset
+import com.auramusic.core.model.AudioEffectsState
 import com.auramusic.core.model.DownloadState
 import com.auramusic.core.model.DownloaderEngineStatus
 import com.auramusic.core.model.EqualizerPreset
@@ -81,6 +84,13 @@ class AuraViewModel(
             initialValue = PlaybackTuning(),
         )
 
+    val audioEffects: StateFlow<AudioEffectsState> = container.audioEffectsPreferencesRepository.audioEffectsState
+        .stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.Eagerly,
+            initialValue = AudioEffectsState(),
+        )
+
     val tracks: StateFlow<List<Track>> = container.musicRepository.observeAllTracks()
         .onEach { updated -> container.playerController.refreshTrackSnapshots(updated) }
         .stateIn(
@@ -152,6 +162,7 @@ class AuraViewModel(
             val deleteFxJob = async { container.themePreferencesRepository.deleteAnimationsEnabled.first() }
             val eqJob = async { container.equalizerPreferencesRepository.equalizerState.first() }
             val tuningJob = async { container.playbackPreferencesRepository.playbackTuning.first() }
+            val fxJob = async { container.audioEffectsPreferencesRepository.audioEffectsState.first() }
             val tracksJob = async { container.musicRepository.observeAllTracks().first() }
             val playlistsJob = async { container.musicRepository.observePlaylists().first() }
             val rustJob = async {
@@ -166,7 +177,10 @@ class AuraViewModel(
             val savedEq = eqJob.await()
             AuraRustBridge.setEqualizerConfig(savedEq.isEnabled, savedEq.bandGainsDb)
             val savedTuning = tuningJob.await()
-            container.playerController.setPlaybackSpeed(savedTuning.playbackSpeed)
+            val savedFx = fxJob.await()
+            syncEffectsToRust(savedFx)
+            val resolvedParams = PlaybackTuningHelper.resolvePlaybackParameters(savedTuning, savedFx)
+            container.playerController.setPlaybackParameters(resolvedParams.speed, resolvedParams.pitch)
             tracksJob.await()
             playlistsJob.await()
             _rustEngineInfo.value = rustJob.await()
@@ -249,6 +263,16 @@ class AuraViewModel(
         }
     }
 
+    fun setDownloaderAudioQuality(quality: AudioDownloadQuality) {
+        viewModelScope.launch {
+            container.ytDlpAudioDownloader.setPreferredAudioQuality(quality)
+        }
+    }
+
+    fun selectDownloaderPreviewFormat(formatId: String) {
+        container.ytDlpAudioDownloader.selectPreviewAudioFormat(formatId)
+    }
+
     fun dismissDownloadStatus() {
         container.ytDlpAudioDownloader.clearDownloadStatus()
     }
@@ -316,7 +340,19 @@ class AuraViewModel(
 
     fun setPlaybackSpeed(speed: Float) {
         val clamped = PlaybackTuningHelper.clampPlaybackSpeed(speed)
-        container.playerController.setPlaybackSpeed(clamped)
+        if (audioEffects.value.slowedEnabled) {
+            updateAudioEffectsState(
+                audioEffects.value.copy(
+                    slowedEnabled = false,
+                    activePresetId = if (audioEffects.value.reverbEnabled) {
+                        AudioEffectsState.PRESET_CUSTOM_ID
+                    } else {
+                        AudioEffectsState.PRESET_OFF_ID
+                    },
+                ),
+            )
+        }
+        container.playerController.setPlaybackParameters(clamped, 1.0f)
         viewModelScope.launch {
             container.playbackPreferencesRepository.setPlaybackSpeed(clamped)
         }
@@ -423,6 +459,24 @@ class AuraViewModel(
     }
 
     /**
+     * Actualiza el nombre de la canción y el nombre del artista en Room.
+     * Al emitirse en `tracks`, actualiza automáticamente Biblioteca, playlists de Artistas,
+     * cola de reproducción activa y notificación del sistema.
+     */
+    fun updateTrackMetadata(trackId: Long, title: String, artist: String) {
+        viewModelScope.launch {
+            val updated = container.musicRepository.updateTrackMetadata(
+                trackId = trackId,
+                title = title,
+                artist = artist,
+            )
+            if (updated != null) {
+                _uiMessagesChannel.trySend("Metadatos actualizados: ${updated.title}")
+            }
+        }
+    }
+
+    /**
      * Convierte una imagen de galería a WebP sin pérdida en segundo plano y la asigna a la pista.
      */
     fun setCustomTrackCover(trackId: Long, imageUri: Uri) {
@@ -486,6 +540,162 @@ class AuraViewModel(
             AuraRustBridge.setEqualizerConfig(normalized.isEnabled, normalized.bandGainsDb)
             container.equalizerPreferencesRepository.saveEqualizerState(normalized)
         }
+    }
+
+    fun selectAudioEffectPreset(preset: AudioEffectPreset) {
+        updateAudioEffectsState(AudioEffectsState.fromPreset(preset))
+    }
+
+    fun setReverbEnabled(enabled: Boolean) {
+        val current = audioEffects.value
+        val nextPresetId = if (!enabled && !current.slowedEnabled && !current.spatial8dEnabled) {
+            AudioEffectsState.PRESET_OFF_ID
+        } else {
+            AudioEffectsState.PRESET_CUSTOM_ID
+        }
+        updateAudioEffectsState(current.copy(reverbEnabled = enabled, activePresetId = nextPresetId))
+    }
+
+    fun setReverbRoomSize(roomSize: Float) {
+        updateAudioEffectsState(
+            audioEffects.value.copy(
+                reverbEnabled = true,
+                reverbRoomSize = roomSize,
+                activePresetId = AudioEffectsState.PRESET_CUSTOM_ID,
+            ),
+        )
+    }
+
+    fun setReverbDamping(damping: Float) {
+        updateAudioEffectsState(
+            audioEffects.value.copy(
+                reverbEnabled = true,
+                reverbDamping = damping,
+                activePresetId = AudioEffectsState.PRESET_CUSTOM_ID,
+            ),
+        )
+    }
+
+    fun setReverbWetMix(wetMix: Float) {
+        updateAudioEffectsState(
+            audioEffects.value.copy(
+                reverbEnabled = true,
+                reverbWetMix = wetMix,
+                activePresetId = AudioEffectsState.PRESET_CUSTOM_ID,
+            ),
+        )
+    }
+
+    fun setReverbWidth(width: Float) {
+        updateAudioEffectsState(
+            audioEffects.value.copy(
+                reverbEnabled = true,
+                reverbWidth = width,
+                activePresetId = AudioEffectsState.PRESET_CUSTOM_ID,
+            ),
+        )
+    }
+
+    fun setSlowedEnabled(enabled: Boolean) {
+        val current = audioEffects.value
+        val nextPresetId = if (!enabled && !current.reverbEnabled && !current.spatial8dEnabled) {
+            AudioEffectsState.PRESET_OFF_ID
+        } else {
+            AudioEffectsState.PRESET_CUSTOM_ID
+        }
+        updateAudioEffectsState(current.copy(slowedEnabled = enabled, activePresetId = nextPresetId))
+    }
+
+    fun setSlowedSpeed(speed: Float) {
+        updateAudioEffectsState(
+            audioEffects.value.copy(
+                slowedEnabled = true,
+                slowedSpeed = speed,
+                activePresetId = AudioEffectsState.PRESET_CUSTOM_ID,
+            ),
+        )
+    }
+
+    fun setSlowedPreservePitch(preservePitch: Boolean) {
+        updateAudioEffectsState(
+            audioEffects.value.copy(
+                slowedEnabled = true,
+                slowedPreservePitch = preservePitch,
+                activePresetId = AudioEffectsState.PRESET_CUSTOM_ID,
+            ),
+        )
+    }
+
+    fun setSlowedWarmth(warmth: Float) {
+        updateAudioEffectsState(
+            audioEffects.value.copy(
+                slowedEnabled = true,
+                slowedWarmth = warmth,
+                activePresetId = AudioEffectsState.PRESET_CUSTOM_ID,
+            ),
+        )
+    }
+
+    fun setSpatial8dEnabled(enabled: Boolean) {
+        val current = audioEffects.value
+        val nextPresetId = if (!enabled && !current.reverbEnabled && !current.slowedEnabled) {
+            AudioEffectsState.PRESET_OFF_ID
+        } else {
+            AudioEffectsState.PRESET_CUSTOM_ID
+        }
+        updateAudioEffectsState(current.copy(spatial8dEnabled = enabled, activePresetId = nextPresetId))
+    }
+
+    fun setSpatial8dSpeed(speed: Float) {
+        updateAudioEffectsState(
+            audioEffects.value.copy(
+                spatial8dEnabled = true,
+                spatial8dSpeed = speed,
+                activePresetId = AudioEffectsState.PRESET_CUSTOM_ID,
+            ),
+        )
+    }
+
+    fun setSpatial8dDepth(depth: Float) {
+        updateAudioEffectsState(
+            audioEffects.value.copy(
+                spatial8dEnabled = true,
+                spatial8dDepth = depth,
+                activePresetId = AudioEffectsState.PRESET_CUSTOM_ID,
+            ),
+        )
+    }
+
+    fun resetAudioEffects() {
+        updateAudioEffectsState(AudioEffectsState())
+    }
+
+    private fun updateAudioEffectsState(nextState: AudioEffectsState) {
+        val normalized = nextState.normalized()
+        val resolvedParams = PlaybackTuningHelper.resolvePlaybackParameters(
+            tuning = playbackTuning.value,
+            effects = normalized,
+        )
+        container.playerController.setPlaybackParameters(resolvedParams.speed, resolvedParams.pitch)
+        viewModelScope.launch {
+            syncEffectsToRust(normalized)
+            container.audioEffectsPreferencesRepository.saveAudioEffectsState(normalized)
+        }
+    }
+
+    private suspend fun syncEffectsToRust(state: AudioEffectsState) {
+        AuraRustBridge.setAudioEffectsConfig(
+            reverbEnabled = state.reverbEnabled,
+            reverbRoomSize = state.reverbRoomSize,
+            reverbDamping = state.reverbDamping,
+            reverbWetMix = state.reverbWetMix,
+            reverbWidth = state.reverbWidth,
+            slowedWarmthEnabled = state.isSlowedWarmthActive,
+            slowedWarmthAmount = state.slowedWarmth,
+            spatial8dEnabled = state.spatial8dEnabled,
+            spatial8dSpeed = state.spatial8dSpeed,
+            spatial8dDepth = state.spatial8dDepth,
+        )
     }
 
     override fun onCleared() {

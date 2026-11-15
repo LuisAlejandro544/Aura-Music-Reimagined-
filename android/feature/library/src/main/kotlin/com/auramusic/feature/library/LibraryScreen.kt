@@ -29,6 +29,7 @@ import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.CloudDownload
 import androidx.compose.material.icons.rounded.CreateNewFolder
 import androidx.compose.material.icons.rounded.DeleteOutline
+import androidx.compose.material.icons.rounded.Edit
 import androidx.compose.material.icons.rounded.Favorite
 import androidx.compose.material.icons.rounded.FavoriteBorder
 import androidx.compose.material.icons.rounded.GraphicEq
@@ -119,6 +120,7 @@ fun LibraryScreen(
     onPlayNext: (Track) -> Unit = {},
     onAddToQueue: (Track) -> Unit = {},
     onAddToPlaylist: (Track) -> Unit,
+    onEditMetadata: (Track) -> Unit = {},
     onChangeCover: (Track) -> Unit,
     onDeleteTrack: (Long) -> Unit,
     onOpenLikedSongs: () -> Unit,
@@ -267,6 +269,7 @@ fun LibraryScreen(
                                 onPlayNext = { onPlayNext(track) },
                                 onAddToQueue = { onAddToQueue(track) },
                                 onAddToPlaylist = { onAddToPlaylist(track) },
+                                onEditMetadata = { onEditMetadata(track) },
                                 onChangeCover = { onChangeCover(track) },
                                 onDelete = { trackPendingDelete = track },
                             )
@@ -424,6 +427,7 @@ private fun TrackRowCard(
     onPlayNext: () -> Unit,
     onAddToQueue: () -> Unit,
     onAddToPlaylist: () -> Unit,
+    onEditMetadata: () -> Unit,
     onChangeCover: () -> Unit,
     onDelete: () -> Unit,
 ) {
@@ -545,6 +549,14 @@ private fun TrackRowCard(
                         onClick = {
                             menuExpanded = false
                             onAddToPlaylist()
+                        },
+                    )
+                    DropdownMenuItem(
+                        text = { Text("Editar metadatos") },
+                        leadingIcon = { Icon(Icons.Rounded.Edit, contentDescription = null) },
+                        onClick = {
+                            menuExpanded = false
+                            onEditMetadata()
                         },
                     )
                     DropdownMenuItem(

@@ -3,6 +3,9 @@ package com.auramusic.core.downloader
 import android.content.Context
 import com.auramusic.core.database.DownloaderPreferencesRepository
 import com.auramusic.core.importer.AudioImporter
+import com.auramusic.core.model.AudioDownloadQuality
+import com.auramusic.core.model.DownloadAudioFormatOption
+import com.auramusic.core.model.DownloadFormatHelper
 import com.auramusic.core.model.DownloadPreview
 import com.auramusic.core.model.DownloadState
 import com.auramusic.core.model.DownloadStatus
@@ -62,6 +65,7 @@ class YtDlpAudioDownloader(
      */
     suspend fun refreshEngineStatus() = withContext(Dispatchers.IO) {
         val autoUpdate = preferencesRepository.autoUpdateEnabled.first()
+        val quality = preferencesRepository.audioDownloadQuality.first()
         val quickJsVer = withContext(Dispatchers.Default) {
             AuraRustBridge.getQuickJsVersion()
         }
@@ -86,6 +90,43 @@ class YtDlpAudioDownloader(
             ytDlpUpdatedAt = pyInfo?.optString("yt_dlp_updated_at")?.takeIf { it.isNotBlank() },
             ytDlpEjsUpdatedAt = pyInfo?.optString("yt_dlp_ejs_updated_at")?.takeIf { it.isNotBlank() },
             autoUpdateEnabled = autoUpdate,
+            preferredQuality = quality,
+        )
+    }
+
+    /**
+     * Cambia la calidad de audio preferida para nuevas vistas previas y descargas.
+     * Si hay una vista previa abierta, ajusta automáticamente el formato preseleccionado.
+     */
+    suspend fun setPreferredAudioQuality(quality: AudioDownloadQuality) {
+        preferencesRepository.setAudioDownloadQuality(quality)
+        _engineStatus.value = _engineStatus.value.copy(preferredQuality = quality)
+
+        val current = _downloadState.value
+        val preview = current.preview
+        if (current.status == DownloadStatus.PREVIEW_READY && preview != null && preview.availableFormats.isNotEmpty()) {
+            val matched = DownloadFormatHelper.pickDefaultOption(preview.availableFormats, quality)
+            if (matched != null) {
+                val updatedPreview = DownloadFormatHelper.selectOption(preview, matched.formatId)
+                _downloadState.value = current.copy(
+                    preview = updatedPreview,
+                    totalBytes = updatedPreview.estimatedSizeBytes,
+                )
+            }
+        }
+    }
+
+    /**
+     * Selecciona manualmente un formato/bitrate específico dentro de la vista previa actual.
+     */
+    fun selectPreviewAudioFormat(formatId: String) {
+        val current = _downloadState.value
+        val preview = current.preview ?: return
+        if (current.status != DownloadStatus.PREVIEW_READY) return
+        val updatedPreview = DownloadFormatHelper.selectOption(preview, formatId)
+        _downloadState.value = current.copy(
+            preview = updatedPreview,
+            totalBytes = updatedPreview.estimatedSizeBytes,
         )
     }
 
@@ -177,6 +218,8 @@ class YtDlpAudioDownloader(
             statusMessage = "Obteniendo información del enlace con QuickJS-NG...",
         )
 
+        val preferredQuality = preferencesRepository.audioDownloadQuality.first()
+        _engineStatus.value = _engineStatus.value.copy(preferredQuality = preferredQuality)
         val qjsPath = AuraRustBridge.resolveQuickJsBinaryPath(context)
 
         val inspectResult = runCatching {
@@ -189,6 +232,7 @@ class YtDlpAudioDownloader(
                     previewCacheDir.absolutePath,
                     updatesDir.absolutePath,
                     qjsPath,
+                    preferredQuality.key,
                 ).toString()
                 JSONObject(rawJson)
             }
@@ -203,7 +247,13 @@ class YtDlpAudioDownloader(
             return@withContext
         }
 
-        val preview = DownloadPreview(
+        val availableFormats = parseAvailableFormats(info)
+        val rawSelectedId = info.optString("selected_format_id").takeIf { it.isNotBlank() }
+        val defaultOption = DownloadFormatHelper.pickDefaultOption(availableFormats, preferredQuality)
+        val initialSelectedId = availableFormats.firstOrNull { it.formatId == rawSelectedId }?.formatId
+            ?: defaultOption?.formatId
+
+        val basePreview = DownloadPreview(
             sourceUrl = info.optString("webpage_url").takeIf { it.isNotBlank() } ?: cleanUrl,
             videoId = info.optString("video_id"),
             title = info.optString("title", "Audio sin título"),
@@ -212,7 +262,14 @@ class YtDlpAudioDownloader(
             estimatedSizeBytes = info.optLong("estimated_size_bytes", 0L),
             audioFormatLabel = info.optString("audio_format_label"),
             localThumbnailPath = info.optString("thumbnail_path").takeIf { it.isNotBlank() },
+            availableFormats = availableFormats,
+            selectedFormatId = initialSelectedId,
         )
+        val preview = if (initialSelectedId != null) {
+            DownloadFormatHelper.selectOption(basePreview, initialSelectedId)
+        } else {
+            basePreview
+        }
 
         _downloadState.value = DownloadState(
             status = DownloadStatus.PREVIEW_READY,
@@ -222,6 +279,27 @@ class YtDlpAudioDownloader(
             preview = preview,
             statusMessage = "Confirma los datos antes de iniciar la descarga.",
         )
+    }
+
+    private fun parseAvailableFormats(info: JSONObject): List<DownloadAudioFormatOption> {
+        val array = info.optJSONArray("available_formats") ?: return emptyList()
+        return buildList(array.length()) {
+            for (idx in 0 until array.length()) {
+                val item = array.optJSONObject(idx) ?: continue
+                val formatId = item.optString("format_id").trim()
+                if (formatId.isEmpty()) continue
+                add(
+                    DownloadAudioFormatOption(
+                        formatId = formatId,
+                        extension = item.optString("extension", "audio"),
+                        codec = item.optString("codec", ""),
+                        bitrateKbps = item.optInt("bitrate_kbps", 0),
+                        estimatedSizeBytes = item.optLong("estimated_size_bytes", 0L),
+                        label = item.optString("label", ""),
+                    ),
+                )
+            }
+        }
     }
 
     /**
@@ -327,6 +405,7 @@ class YtDlpAudioDownloader(
             statusMessage = "Resolviendo flujo de audio con QuickJS-NG...",
         )
 
+        val preferredQuality = preferencesRepository.audioDownloadQuality.first()
         val qjsPath = AuraRustBridge.resolveQuickJsBinaryPath(context)
 
         val downloadResult = runCatching {
@@ -345,6 +424,8 @@ class YtDlpAudioDownloader(
                     qjsPath,
                     callback,
                     cancelBridge,
+                    preferredQuality.key,
+                    preview?.selectedFormatId,
                 ).toString()
                 JSONObject(resultJson)
             }
