@@ -1637,6 +1637,9 @@ test('optional system folder (Aura Music) is disabled by default, migrates track
   assert.match(systemManagerKt, /suspend fun syncJsonSnapshotsIfEnabled\(/);
   assert.match(systemManagerKt, /\.nomedia/);
   assert.match(systemManagerKt, /extractTrackFromLocalFile/);
+  assert.match(systemManagerKt, /PLAYER_CONFIG_JSON_FILE_NAME/);
+  assert.match(systemManagerKt, /ENGINE_VERSIONS_JSON_FILE_NAME/);
+  assert.doesNotMatch(systemManagerKt, /PLAYER_CONFIG_JSON_NAME|ENGINE_VERSIONS_JSON_NAME/);
   assert.match(importerKt, /suspend fun extractTrackFromLocalFile\(/);
   assert.match(importerKt, /AuraSystemStorageManager\.getMusicDir\(\)/);
   assert.match(importerKt, /AuraSystemStorageManager\.getCoversDir\(\)/);
@@ -1645,6 +1648,8 @@ test('optional system folder (Aura Music) is disabled by default, migrates track
   assert.match(settingsKt, /Carpeta del sistema \(Aura Music\)/);
   assert.match(settingsKt, /onOpenSystemFolder:\s*\(\) -> Unit/);
   assert.match(settingsKt, /fun SettingsSystemFolderScreen\(/);
+  assert.match(settingsKt, /PLAYER_CONFIG_JSON_FILE_NAME/);
+  assert.doesNotMatch(settingsKt, /PLAYER_CONFIG_JSON_NAME/);
   assert.match(settingsKt, /Crear y usar carpeta Aura Music/);
 
   // 6. Conexión completa en :app (onStart/arranque, launcher de permisos y navegación)

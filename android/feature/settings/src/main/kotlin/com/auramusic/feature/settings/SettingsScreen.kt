@@ -894,7 +894,7 @@ fun SettingsSystemFolderScreen(
                         FolderStructureRow(
                             icon = Icons.Rounded.Description,
                             title = "${SystemFolderHelper.ROOT_FOLDER_NAME}/*.json",
-                            description = "Respaldo legible de tu biblioteca (${SystemFolderHelper.LIBRARY_JSON_FILE_NAME}) y configuración de audio (${SystemFolderHelper.PLAYER_CONFIG_JSON_NAME}).",
+                            description = "Respaldo legible de tu biblioteca (${SystemFolderHelper.LIBRARY_JSON_FILE_NAME}) y configuración de audio (${SystemFolderHelper.PLAYER_CONFIG_JSON_FILE_NAME}).",
                         )
                     }
                 }

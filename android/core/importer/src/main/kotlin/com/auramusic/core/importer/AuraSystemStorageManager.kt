@@ -417,20 +417,20 @@ class AuraSystemStorageManager(
         val rootDir = getRootDir()
 
         // 1. Espejo de configuración de reproducción/ecualizador/efectos (`aura_player_config.json`).
-        val internalPlayerConfig = File(context.filesDir, SystemFolderHelper.PLAYER_CONFIG_JSON_NAME)
+        val internalPlayerConfig = File(context.filesDir, SystemFolderHelper.PLAYER_CONFIG_JSON_FILE_NAME)
         if (internalPlayerConfig.exists() && internalPlayerConfig.length() > 0L) {
             copyFileAtomically(
                 src = internalPlayerConfig,
-                dst = File(rootDir, SystemFolderHelper.PLAYER_CONFIG_JSON_NAME),
+                dst = File(rootDir, SystemFolderHelper.PLAYER_CONFIG_JSON_FILE_NAME),
             )
         }
 
         // 2. Espejo de versiones del motor de descargas si existe (`engine_versions.json`).
-        val internalVersionsJson = File(context.filesDir, SystemFolderHelper.ENGINE_VERSIONS_JSON_NAME)
+        val internalVersionsJson = File(context.filesDir, SystemFolderHelper.ENGINE_VERSIONS_JSON_FILE_NAME)
         if (internalVersionsJson.exists() && internalVersionsJson.length() > 0L) {
             copyFileAtomically(
                 src = internalVersionsJson,
-                dst = File(rootDir, SystemFolderHelper.ENGINE_VERSIONS_JSON_NAME),
+                dst = File(rootDir, SystemFolderHelper.ENGINE_VERSIONS_JSON_FILE_NAME),
             )
         }
 
