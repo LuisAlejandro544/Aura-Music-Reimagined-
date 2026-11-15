@@ -16,6 +16,7 @@ import androidx.media3.common.PlaybackParameters
 import androidx.media3.common.Player
 import androidx.media3.common.Timeline
 import androidx.media3.common.util.UnstableApi
+import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.exoplayer.DefaultRenderersFactory
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.audio.AudioSink
@@ -27,6 +28,7 @@ import androidx.media3.session.SessionCommand
 import androidx.media3.session.SessionResult
 import com.auramusic.core.model.AudioEffectsState
 import com.auramusic.core.model.AudioOutputRouteState
+import com.auramusic.core.model.EqualizerState
 import com.auramusic.core.model.HeadphonePreferences
 import com.auramusic.core.model.HeadphoneRoutingHelper
 import com.auramusic.core.model.MediaHookTapAction
@@ -66,6 +68,10 @@ interface AuraPlaybackTuningProvider {
     fun observeHeadphonePreferences(): Flow<HeadphonePreferences> = emptyFlow()
     fun observeAudioOutputRoute(): Flow<AudioOutputRouteState> = emptyFlow()
     fun createOpenPlayerIntent(): Intent? = null
+    fun onSyncEqualizer(state: EqualizerState) {}
+    fun onSyncAudioEffects(state: AudioEffectsState) {}
+    fun onSyncPlaybackTuning(tuning: PlaybackTuning) {}
+    fun onSyncHeadphonePreferences(prefs: HeadphonePreferences) {}
 }
 
 /**
@@ -201,7 +207,15 @@ class AuraPlaybackService : MediaSessionService() {
             }
         }
 
+        // Buffer acotado optimizado para pistas de audio locales (evita reservar ~15 MB de vídeo).
+        val primaryLoadControl = DefaultLoadControl.Builder()
+            .setBufferDurationsMs(10_000, 20_000, 500, 1_500)
+            .setTargetBufferBytes(4 * 1024 * 1024)
+            .setPrioritizeTimeOverSizeThresholds(false)
+            .build()
+
         val player = ExoPlayer.Builder(this, renderersFactory)
+            .setLoadControl(primaryLoadControl)
             .setAudioAttributes(audioAttributes, true)
             .setHandleAudioBecomingNoisy(true)
             .build()
@@ -340,6 +354,7 @@ class AuraPlaybackService : MediaSessionService() {
                 } else {
                     stopCrossfadeMonitor()
                     cancelActiveCrossfade("disabled")
+                    releaseOutgoingFadePlayerIfIdle()
                 }
             }
         }
@@ -365,6 +380,7 @@ class AuraPlaybackService : MediaSessionService() {
         }
     }
 
+    @OptIn(UnstableApi::class)
     private fun getOrCreateOutgoingFadePlayer(): ExoPlayer {
         outgoingFadePlayer?.let { return it }
         // El reproductor auxiliar saliente NO adjunta `RustEqualizerAudioProcessor` ni reclama
@@ -374,12 +390,30 @@ class AuraPlaybackService : MediaSessionService() {
             .setContentType(C.AUDIO_CONTENT_TYPE_MUSIC)
             .build()
 
+        val fadeLoadControl = DefaultLoadControl.Builder()
+            .setBufferDurationsMs(5_000, 15_000, 350, 1_000)
+            .setTargetBufferBytes(2 * 1024 * 1024)
+            .setPrioritizeTimeOverSizeThresholds(false)
+            .build()
+
         return ExoPlayer.Builder(this)
+            .setLoadControl(fadeLoadControl)
             .setAudioAttributes(fadeAudioAttributes, false)
             .build()
             .also { created ->
                 outgoingFadePlayer = created
             }
+    }
+
+    private fun releaseOutgoingFadePlayerIfIdle() {
+        if (activeCrossfadeJob?.isActive == true) return
+        outgoingFadePlayer?.let { out ->
+            out.stop()
+            out.clearMediaItems()
+            out.release()
+        }
+        outgoingFadePlayer = null
+        preloadedMediaId = null
     }
 
     private fun startCrossfadeMonitorIfNeeded() {
@@ -544,6 +578,12 @@ class AuraPlaybackService : MediaSessionService() {
                 outPlayer.clearMediaItems()
                 outPlayer.volume = 1f
                 preloadedMediaId = null
+                if (!currentTuning.crossfadeEnabled) {
+                    outPlayer.release()
+                    if (outgoingFadePlayer === outPlayer) {
+                        outgoingFadePlayer = null
+                    }
+                }
             }
         }
     }
@@ -556,13 +596,21 @@ class AuraPlaybackService : MediaSessionService() {
             out.stop()
             out.clearMediaItems()
             out.volume = 1f
+            if (!currentTuning.crossfadeEnabled) {
+                out.release()
+                outgoingFadePlayer = null
+            }
         }
         preloadedMediaId = null
     }
 
-    private fun publishSleepTimer(state: SleepTimerState) {
+    @OptIn(UnstableApi::class)
+    private fun publishSleepTimer(state: SleepTimerState, pushSessionExtras: Boolean = true) {
         sleepTimerState = state
         AuraSleepTimerBridge.publishState(state)
+        if (pushSessionExtras) {
+            mediaSession?.setSessionExtras(AuraPlayerIpcContract.sleepTimerToBundle(state))
+        }
     }
 
     private fun startSleepTimerDuration(minutes: Int, fadeOutOnFinish: Boolean) {
@@ -580,7 +628,9 @@ class AuraPlaybackService : MediaSessionService() {
                 totalDurationMs = totalMs,
                 remainingMs = totalMs,
                 fadeOutOnFinish = fadeOutOnFinish,
+                endElapsedMs = sleepTimerEndElapsedMs,
             ),
+            pushSessionExtras = true,
         )
         launchSleepTimerTicker()
     }
@@ -603,7 +653,15 @@ class AuraPlaybackService : MediaSessionService() {
                     primaryPlayer?.volume = (remainingMs.toFloat() / 3_000f).coerceIn(0.05f, 1f)
                 }
 
-                publishSleepTimer(sleepTimerState.copy(remainingMs = remainingMs))
+                // Actualiza solo el estado local del servicio sin saturar Binder cada 250 ms;
+                // el cliente UI calcula la cuenta atrás desde `endElapsedMs`.
+                publishSleepTimer(
+                    sleepTimerState.copy(
+                        remainingMs = remainingMs,
+                        endElapsedMs = sleepTimerEndElapsedMs,
+                    ),
+                    pushSessionExtras = false,
+                )
                 delay(250L)
             }
         }
@@ -631,7 +689,9 @@ class AuraPlaybackService : MediaSessionService() {
                 configuredMinutes = nextMinutes,
                 totalDurationMs = nextTotal,
                 remainingMs = updatedRemaining,
+                endElapsedMs = sleepTimerEndElapsedMs,
             ),
+            pushSessionExtras = true,
         )
     }
 
@@ -648,6 +708,7 @@ class AuraPlaybackService : MediaSessionService() {
                 mode = mode,
                 fadeOutOnFinish = fadeOutOnFinish,
             ),
+            pushSessionExtras = true,
         )
     }
 
@@ -658,7 +719,7 @@ class AuraPlaybackService : MediaSessionService() {
         if (activeCrossfadeJob?.isActive != true) {
             primaryPlayer?.volume = 1f
         }
-        publishSleepTimer(SleepTimerState())
+        publishSleepTimer(SleepTimerState(), pushSessionExtras = true)
     }
 
     private fun completeSleepTimerAndPause(seekBackToStartOfNewItem: Boolean) {
@@ -678,7 +739,14 @@ class AuraPlaybackService : MediaSessionService() {
         } finally {
             internalSleepTimerStopping = false
         }
-        publishSleepTimer(SleepTimerState())
+        publishSleepTimer(SleepTimerState(), pushSessionExtras = true)
+    }
+
+    override fun onTrimMemory(level: Int) {
+        super.onTrimMemory(level)
+        if (level >= TRIM_MEMORY_BACKGROUND) {
+            releaseOutgoingFadePlayerIfIdle()
+        }
     }
 
     override fun onDestroy() {
@@ -769,9 +837,13 @@ class AuraPlaybackService : MediaSessionService() {
             AuraSleepTimerContract.supportedActions.forEach { action ->
                 commandsBuilder.add(SessionCommand(action, Bundle.EMPTY))
             }
+            AuraPlayerIpcContract.supportedActions.forEach { action ->
+                commandsBuilder.add(SessionCommand(action, Bundle.EMPTY))
+            }
             return MediaSession.ConnectionResult.AcceptedResultBuilder(session)
                 .setAvailableSessionCommands(commandsBuilder.build())
                 .setAvailablePlayerCommands(baseResult.availablePlayerCommands)
+                .setSessionExtras(AuraPlayerIpcContract.sleepTimerToBundle(sleepTimerState))
                 .build()
         }
 
@@ -781,6 +853,7 @@ class AuraPlaybackService : MediaSessionService() {
             customCommand: SessionCommand,
             args: Bundle,
         ): ListenableFuture<SessionResult> {
+            val provider = applicationContext as? AuraPlaybackTuningProvider
             when (customCommand.customAction) {
                 AuraSleepTimerContract.ACTION_START_MINUTES -> {
                     val minutes = args.getInt(AuraSleepTimerContract.EXTRA_MINUTES, 15)
@@ -800,6 +873,40 @@ class AuraPlaybackService : MediaSessionService() {
                     addSleepTimerMinutes(delta)
                 }
                 AuraSleepTimerContract.ACTION_CANCEL -> cancelSleepTimer()
+                AuraPlayerIpcContract.ACTION_SYNC_EQUALIZER -> {
+                    val eq = AuraPlayerIpcContract.equalizerFromBundle(args)
+                    serviceScope.launch(Dispatchers.Default) {
+                        AuraRustBridge.setEqualizerConfig(eq.isEnabled, eq.bandGainsDb.toFloatArray())
+                    }
+                    provider?.onSyncEqualizer(eq)
+                }
+                AuraPlayerIpcContract.ACTION_SYNC_AUDIO_EFFECTS -> {
+                    val fx = AuraPlayerIpcContract.audioEffectsFromBundle(args)
+                    currentEffects = fx
+                    applyResolvedPlaybackParameters()
+                    syncEffectiveAudioEffectsToRust()
+                    provider?.onSyncAudioEffects(fx)
+                }
+                AuraPlayerIpcContract.ACTION_SYNC_PLAYBACK_TUNING -> {
+                    val tuning = AuraPlayerIpcContract.playbackTuningFromBundle(args)
+                    currentTuning = tuning
+                    applyResolvedPlaybackParameters()
+                    if (tuning.crossfadeEnabled) {
+                        startCrossfadeMonitorIfNeeded()
+                    } else {
+                        stopCrossfadeMonitor()
+                        cancelActiveCrossfade("disabled")
+                        releaseOutgoingFadePlayerIfIdle()
+                    }
+                    provider?.onSyncPlaybackTuning(tuning)
+                }
+                AuraPlayerIpcContract.ACTION_SYNC_HEADPHONE_PREFS -> {
+                    val prefs = AuraPlayerIpcContract.headphonePrefsFromBundle(args)
+                    currentHeadphonePrefs = prefs
+                    primaryPlayer?.setHandleAudioBecomingNoisy(prefs.autoPauseOnDisconnect)
+                    syncEffectiveAudioEffectsToRust()
+                    provider?.onSyncHeadphonePreferences(prefs)
+                }
                 else -> return super.onCustomCommand(session, controller, customCommand, args)
             }
             return Futures.immediateFuture(SessionResult(SessionResult.RESULT_SUCCESS))

@@ -1344,6 +1344,7 @@ data class SleepTimerState(
     val totalDurationMs: Long = 0L,
     val remainingMs: Long = 0L,
     val fadeOutOnFinish: Boolean = true,
+    val endElapsedMs: Long = 0L,
 ) {
     val isActive: Boolean
         get() = mode != SleepTimerMode.OFF
@@ -1405,6 +1406,15 @@ object SleepTimerHelper {
     }
 
     /**
+     * Calcula los milisegundos restantes en tiempo real a partir de un timestamp monotónico
+     * (`SystemClock.elapsedRealtime()`) recibido desde el proceso `:player`.
+     */
+    fun computeRemainingMs(endElapsedMs: Long, nowElapsedMs: Long): Long {
+        if (endElapsedMs <= 0L) return 0L
+        return (endElapsedMs - nowElapsedMs).coerceAtLeast(0L)
+    }
+
+    /**
      * Evita que el Crossfade avance automáticamente a la siguiente canción cuando el usuario
      * programó detener la reproducción al terminar la pista actual o la última de la cola.
      */
@@ -1438,6 +1448,177 @@ object SleepTimerHelper {
         SleepTimerMode.DURATION -> false
     }
 }
+
+/**
+ * Rol del proceso Linux en el que se ejecuta una instancia de AuraApplication.
+ * Permite aislar la memoria de ExoPlayer/Rust DSP (`:player`) y Python/yt-dlp (`:downloader`)
+ * respecto a la interfaz Compose/Coil/Room (`MAIN`).
+ */
+enum class AuraProcessRole {
+    MAIN,
+    PLAYER,
+    DOWNLOADER,
+}
+
+/**
+ * Resolución pura del rol de proceso a partir del nombre reportado por Android o `/proc/self/cmdline`.
+ */
+object AuraProcessRoleResolver {
+    fun resolve(rawProcessName: String?): AuraProcessRole {
+        val clean = rawProcessName
+            ?.trim { it <= ' ' || it == '\u0000' }
+            .orEmpty()
+        return when {
+            clean.endsWith(":player") -> AuraProcessRole.PLAYER
+            clean.endsWith(":downloader") -> AuraProcessRole.DOWNLOADER
+            else -> AuraProcessRole.MAIN
+        }
+    }
+}
+
+/**
+ * Acciones de liberación de RAM que la aplicación ejecuta cuando Android reporta presión
+ * de memoria o salida a segundo plano (por ejemplo, cuando el usuario abre un juego).
+ */
+data class MemoryTrimAction(
+    val clearImageMemoryCache: Boolean,
+    val clearDynamicColorCache: Boolean,
+    val clearTransientControllerCaches: Boolean,
+)
+
+/**
+ * Política pura para decidir qué cachés purgar según el nivel de `ComponentCallbacks2.onTrimMemory`.
+ */
+object MemoryTrimPolicy {
+    // Valores oficiales de ComponentCallbacks2 en Android SDK.
+    const val LEVEL_RUNNING_MODERATE = 5
+    const val LEVEL_RUNNING_LOW = 10
+    const val LEVEL_RUNNING_CRITICAL = 15
+    const val LEVEL_UI_HIDDEN = 20
+    const val LEVEL_BACKGROUND = 40
+    const val LEVEL_MODERATE = 60
+    const val LEVEL_COMPLETE = 80
+
+    fun resolve(level: Int): MemoryTrimAction {
+        val uiHiddenOrPressure =
+            level >= LEVEL_UI_HIDDEN ||
+                level == LEVEL_RUNNING_LOW ||
+                level == LEVEL_RUNNING_CRITICAL
+        val heavyPressure =
+            level >= LEVEL_BACKGROUND ||
+                level == LEVEL_RUNNING_CRITICAL
+        return MemoryTrimAction(
+            clearImageMemoryCache = uiHiddenOrPressure,
+            clearDynamicColorCache = uiHiddenOrPressure,
+            clearTransientControllerCaches = heavyPressure,
+        )
+    }
+}
+
+/**
+ * Estado reactivo de la función opcional de almacenamiento en carpeta pública del sistema (`Aura Music`).
+ * Por defecto está desactivada (`isEnabled = false`) y solo crea/sincroniza carpetas cuando el usuario la activa.
+ */
+data class SystemFolderStorageState(
+    val isEnabled: Boolean = false,
+    val hasStoragePermission: Boolean = false,
+    val isBusy: Boolean = false,
+    val processedCount: Int = 0,
+    val totalCount: Int = 0,
+    val lastSyncedCount: Int = 0,
+    val folderDisplayPath: String = SystemFolderHelper.DISPLAY_ROOT_PATH,
+    val statusMessage: String? = null,
+) {
+    val progressFraction: Float
+        get() = if (totalCount > 0) {
+            (processedCount.toFloat() / totalCount.toFloat()).coerceIn(0f, 1f)
+        } else {
+            0f
+        }
+}
+
+/**
+ * Reglas puras y constantes para la carpeta pública del sistema `Aura Music`, sus subcarpetas
+ * (`Música`, `Carátulas`), archivos `.json` y normalización segura de nombres de archivo.
+ */
+object SystemFolderHelper {
+    const val ROOT_FOLDER_NAME = "Aura Music"
+    const val MUSIC_SUBFOLDER_NAME = "Música"
+    const val COVERS_SUBFOLDER_NAME = "Carátulas"
+    const val LIBRARY_JSON_FILE_NAME = "aura_biblioteca.json"
+    const val PLAYER_CONFIG_JSON_FILE_NAME = "aura_player_config.json"
+    const val ENGINE_VERSIONS_JSON_FILE_NAME = "engine_versions.json"
+    const val DISPLAY_ROOT_PATH = "Almacenamiento interno/Aura Music"
+
+    val SUPPORTED_AUDIO_EXTENSIONS = setOf(
+        "mp3", "flac", "m4a", "aac", "ogg", "opus", "wav", "alac", "aiff",
+    )
+
+    private val invalidFileCharsRegex = Regex("[\\\\/:*?\"<>|\\u0000-\\u001F]")
+    private val whitespaceRegex = Regex("\\s+")
+
+    /**
+     * Limpia un segmento de nombre de archivo para hacerlo compatible con FAT32/exFAT/Android
+     * evitando caracteres ilegales, espacios duplicados o puntos finales inválidos.
+     */
+    fun sanitizeFileNameSegment(raw: String, maxLength: Int = 72): String {
+        val cleaned = raw
+            .replace(invalidFileCharsRegex, " ")
+            .replace(whitespaceRegex, " ")
+            .trim()
+            .trim('.')
+            .trim()
+            .take(maxLength)
+            .trim()
+        return cleaned.ifEmpty { "Pista" }
+    }
+
+    /**
+     * Construye un nombre legible y seguro para guardar un archivo de audio dentro de `Aura Music/Música`.
+     */
+    fun buildTrackAudioFileName(
+        title: String,
+        artist: String,
+        extension: String,
+        fingerprint: String,
+        disambiguate: Boolean = false,
+    ): String {
+        val safeTitle = sanitizeFileNameSegment(title, maxLength = 64)
+        val cleanArtist = artist.trim()
+        val includeArtist = cleanArtist.isNotEmpty() &&
+            !cleanArtist.equals(TrackMetadataHelper.DEFAULT_ARTIST, ignoreCase = true)
+        val baseName = if (includeArtist) {
+            val safeArtist = sanitizeFileNameSegment(cleanArtist, maxLength = 44)
+            "$safeArtist - $safeTitle"
+        } else {
+            safeTitle
+        }
+        val cleanExt = extension.lowercase()
+            .filter { it.isLetterOrDigit() }
+            .takeIf { it.isNotEmpty() }
+            ?: "mp3"
+        val suffix = if (disambiguate) {
+            "_${fingerprint.take(6).ifEmpty { "aura" }}"
+        } else {
+            ""
+        }
+        return "$baseName$suffix.$cleanExt"
+    }
+
+    /**
+     * Verifica si un nombre de archivo corresponde a un formato de audio soportado y no es oculto ni temporal.
+     */
+    fun isSupportedAudioFileName(fileName: String): Boolean {
+        val trimmed = fileName.trim()
+        if (trimmed.isEmpty() || trimmed.startsWith(".") || trimmed.endsWith(".tmp", ignoreCase = true)) {
+            return false
+        }
+        val ext = trimmed.substringAfterLast('.', "").lowercase()
+        return ext in SUPPORTED_AUDIO_EXTENSIONS
+    }
+}
+
+
 
 
 

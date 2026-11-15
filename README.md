@@ -4,10 +4,14 @@ Reproductor de música local y descargador de solo audio para Android construido
 
 ## Características actuales
 
-- **Importación manual de música (SAF) con parser en Rust**: Aura Music nunca escanea todo el teléfono. El usuario decide exactamente qué importar:
+- **Importación manual de música (SAF) con parser en Rust**: Aura Music nunca escanea todo el teléfono de forma invasiva. El usuario decide exactamente qué importar:
   - Una canción individual, varias por tandas o una carpeta completa (con subcarpetas) manteniendo permisos persistentes.
   - Procesamiento por lotes optimizado con deduplicación única en Room y concurrencia acotada en segundo plano.
   - La lectura de etiquetas (ID3, Vorbis, FLAC, MP4/M4A, WAV, AIFF), duración y carátula embebida se ejecuta en Rust (`lofty`) directamente desde el descriptor SAF, guardando la imagen con su extensión real (`.jpg`, `.png`, `.webp`, `.gif`, `.bmp`).
+- **Carpeta del sistema opcional (`Aura Music`, desactivada por defecto)**:
+  - Apartado especial en *Ajustes → Carpeta del sistema (Aura Music)* (`SettingsSystemFolderScreen`), desactivado por defecto para mantener la biblioteca en el almacenamiento privado de la app salvo que el usuario quiera exponerla en el explorador del teléfono.
+  - Al activarla (con permiso de almacenamiento en Android 8–10 o acceso a archivos en Android 11–15), crea automáticamente `Almacenamiento interno/Aura Music/Música`, `Aura Music/Carátulas` (con `.nomedia` para no llenar la galería) y archivos `.json` (`aura_biblioteca.json`, `aura_player_config.json`, `engine_versions.json`).
+  - Transfiere automáticamente las canciones, carátulas y `.json` existentes hacia `Aura Music` actualizando Room sin perder playlists ni *Me gusta*, dirige ahí las nuevas descargas/carátulas y detecta automáticamente cualquier canción que el usuario copie dentro de `Aura Music/Música` al abrir o volver a la app.
 - **Descarga de solo audio en segundo plano con `yt-dlp` + `yt-dlp-ejs` + `QuickJS-NG` (sin WebView ni FFmpeg)**:
   - Pantalla dedicada (`:feature:downloader`) accesible únicamente desde el menú *Importar* (o estado vacío) de *Biblioteca*.
   - Intérprete ligero **Python 3.11** (Chaquopy MIT) compilado a bytecode `.pyc`, instalando únicamente `yt-dlp` y `yt-dlp-ejs` con `--no-deps` para reducir peso.
@@ -41,7 +45,11 @@ Reproductor de música local y descargador de solo audio para Android construido
   - **Playlists automáticas por artista**: en la pestaña *Artistas* dentro de *Playlists y Artistas*, Aura Music agrupa automáticamente todas las canciones que comparten el mismo artista (`ArtistPlaylistBuilder`); al abrir un artista (`ArtistDetailScreen`) o reproducir desde su lista, la cola carga **únicamente** las canciones de ese artista (en orden o en aleatorio).
 - **Edición local de metadatos (título y artista)**: desde el menú de opciones de cualquier pista (en *Biblioteca*, *Favoritos*, *Playlists* o *Artistas*) o desde el menú de 3 puntos del reproductor (`PlayerScreen`), el usuario puede editar el **nombre de la canción** y el **nombre del artista** (`EditTrackMetadataDialog` + `TrackMetadataHelper`). Los cambios se guardan en Room sin alterar el archivo de audio original y sincronizan al instante las agrupaciones por artista, la cola, el mini reproductor y la notificación del sistema (`replaceMediaItem`).
 - **Animaciones creativas de eliminación en Rust (`aura_core::delete_fx`)**: Al confirmar la eliminación de una canción en *Biblioteca* o al quitarla de una *Playlist*, se reproduce aleatoriamente uno de tres efectos procesados por píxel en **Rust** sobre `DirectByteBuffer` RGBA8888 (`Cenizas`, `Papel quemándose` o `Aura extraña` adaptada al color acento activo), sin ralentizar la UI en Kotlin y con interruptor para activar/desactivar en *Ajustes*.
-- **Ajustes de apariencia, auriculares y controles AVRCP**: Selector de 8 paletas de color dinámicas (Material 3), interruptores para colores dinámicos de carátula y animaciones de eliminación en Rust, estado en vivo de la salida de audio, comportamiento automático para auriculares, ajustes finos de botones multimedia (cable y Bluetooth AVRCP) persistidos con **Jetpack DataStore**, y estado del motor nativo Rust.
+- **Ajustes de apariencia, carpeta del sistema, auriculares y controles AVRCP**: Selector de 8 paletas de color dinámicas (Material 3), interruptores para colores dinámicos de carátula y animaciones de eliminación en Rust, configuración opcional de la **carpeta del sistema `Aura Music`**, estado en vivo de la salida de audio, comportamiento automático para auriculares, ajustes finos de botones multimedia (cable y Bluetooth AVRCP) persistidos con **Jetpack DataStore**, y estado del motor nativo Rust.
+- **Aislamiento multi-proceso y bajo consumo de RAM en segundo plano**:
+  - `:player` (`android:process=":player"`) aísla `AuraPlaybackService`, ExoPlayer ligero (`DefaultLoadControl` acotado), `AudioDeviceCallback` y el DSP Rust sin cargar Compose, Coil, Room ni Python.
+  - `:downloader` (`android:process=":downloader"`) aísla Chaquopy / Python 3.11 / `yt-dlp` bajo demanda y libera el proceso (`Process.killProcess`) al quedar inactivo tras finalizar la descarga.
+  - El proceso principal (`MAIN`) limita la caché en memoria de Coil al 8 % del heap en `RGB_565` y responde a `onTrimMemory()` / `onLowMemory()` (`MemoryTrimPolicy`) liberando bitmaps y caché dinámica de colores cuando el usuario está jugando u operando otras apps.
 
 ## Requisitos técnicos
 

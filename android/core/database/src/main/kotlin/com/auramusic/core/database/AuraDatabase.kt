@@ -64,6 +64,12 @@ interface TrackDao {
     @Query("SELECT cover_file_path FROM tracks WHERE cover_file_path IS NOT NULL")
     suspend fun getAllReferencedCoverPaths(): List<String>
 
+    @Query("SELECT * FROM tracks ORDER BY added_at DESC, title ASC")
+    suspend fun getAllTracksOnce(): List<TrackEntity>
+
+    @Query("UPDATE tracks SET content_uri = :contentUri, cover_file_path = :coverFilePath WHERE id = :trackId")
+    suspend fun updateStorageLocation(trackId: Long, contentUri: String, coverFilePath: String?)
+
     @Query("DELETE FROM tracks WHERE id = :trackId")
     suspend fun deleteById(trackId: Long)
 }
@@ -89,6 +95,12 @@ interface PlaylistDao {
         """,
     )
     fun observePlaylists(): Flow<List<PlaylistSummaryRow>>
+
+    @Query("SELECT * FROM playlists ORDER BY created_at DESC")
+    suspend fun getAllPlaylistsOnce(): List<PlaylistEntity>
+
+    @Query("SELECT * FROM playlist_tracks ORDER BY added_at ASC")
+    suspend fun getAllCrossRefsOnce(): List<PlaylistTrackCrossRef>
 
     @Query("SELECT * FROM playlists WHERE id = :playlistId LIMIT 1")
     fun observePlaylistById(playlistId: Long): Flow<PlaylistEntity?>

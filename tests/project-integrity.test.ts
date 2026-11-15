@@ -1434,8 +1434,229 @@ test(':app layer is cleanly modularized into dedicated coordinators and chrome h
   assert.match(rootKt, /AuraBottomChrome\(/);
 });
 
+test('RAM optimization: isolates :player and :downloader processes, bounds ExoPlayer/Coil caches, and trims memory in background', () => {
+  const modelsKt = fs.readFileSync(
+    path.join(rootDir, 'android/core/model/src/main/kotlin/com/auramusic/core/model/AuraModels.kt'),
+    'utf8',
+  );
+  const modelsTestKt = fs.readFileSync(
+    path.join(rootDir, 'android/core/model/src/test/kotlin/com/auramusic/core/model/AuraModelsTest.kt'),
+    'utf8',
+  );
+  const playerManifest = fs.readFileSync(
+    path.join(rootDir, 'android/core/player/src/main/AndroidManifest.xml'),
+    'utf8',
+  );
+  const downloaderManifest = fs.readFileSync(
+    path.join(rootDir, 'android/core/downloader/src/main/AndroidManifest.xml'),
+    'utf8',
+  );
+  const playerIpcKt = path.join(
+    rootDir,
+    'android/core/player/src/main/kotlin/com/auramusic/core/player/AuraPlayerIpc.kt',
+  );
+  const downloaderIpcKt = path.join(
+    rootDir,
+    'android/core/downloader/src/main/kotlin/com/auramusic/core/downloader/AuraDownloaderIpc.kt',
+  );
+  const downloaderClientKt = path.join(
+    rootDir,
+    'android/core/downloader/src/main/kotlin/com/auramusic/core/downloader/AuraDownloaderRemoteClient.kt',
+  );
+  const playbackServiceKt = fs.readFileSync(
+    path.join(rootDir, 'android/core/player/src/main/kotlin/com/auramusic/core/player/AuraPlaybackService.kt'),
+    'utf8',
+  );
+  const playerControllerKt = fs.readFileSync(
+    path.join(rootDir, 'android/core/player/src/main/kotlin/com/auramusic/core/player/AuraPlayerController.kt'),
+    'utf8',
+  );
+  const downloaderServiceKt = fs.readFileSync(
+    path.join(rootDir, 'android/core/downloader/src/main/kotlin/com/auramusic/core/downloader/AuraDownloadForegroundService.kt'),
+    'utf8',
+  );
+  const appKt = fs.readFileSync(
+    path.join(rootDir, 'android/app/src/main/kotlin/com/auramusic/app/AuraApplication.kt'),
+    'utf8',
+  );
+  const libCoordKt = fs.readFileSync(
+    path.join(rootDir, 'android/app/src/main/kotlin/com/auramusic/app/AuraLibraryCoordinator.kt'),
+    'utf8',
+  );
+  const mainKt = fs.readFileSync(
+    path.join(rootDir, 'android/app/src/main/kotlin/com/auramusic/app/MainActivity.kt'),
+    'utf8',
+  );
+  const coverThemeKt = fs.readFileSync(
+    path.join(rootDir, 'android/feature/player/src/main/kotlin/com/auramusic/feature/player/CoverDynamicTheme.kt'),
+    'utf8',
+  );
+  const libraryScreenKt = fs.readFileSync(
+    path.join(rootDir, 'android/feature/library/src/main/kotlin/com/auramusic/feature/library/LibraryScreen.kt'),
+    'utf8',
+  );
+  const playlistsScreenKt = fs.readFileSync(
+    path.join(rootDir, 'android/feature/playlists/src/main/kotlin/com/auramusic/feature/playlists/PlaylistsScreen.kt'),
+    'utf8',
+  );
+  const artistDetailKt = fs.readFileSync(
+    path.join(rootDir, 'android/feature/playlists/src/main/kotlin/com/auramusic/feature/playlists/ArtistDetailScreen.kt'),
+    'utf8',
+  );
 
+  // Modelos puros y pruebas unitarias
+  assert.match(modelsKt, /enum class AuraProcessRole/);
+  assert.match(modelsKt, /object AuraProcessRoleResolver/);
+  assert.match(modelsKt, /object MemoryTrimPolicy/);
+  assert.match(modelsTestKt, /process role resolver/);
+  assert.match(modelsTestKt, /memory trim policy/);
 
+  // Aislamiento de procesos en manifests
+  assert.match(playerManifest, /android:process=":player"/);
+  assert.match(downloaderManifest, /android:process=":downloader"/);
 
+  // Archivos IPC nuevos
+  assert.ok(fs.existsSync(playerIpcKt), 'Missing AuraPlayerIpc.kt');
+  assert.ok(fs.existsSync(downloaderIpcKt), 'Missing AuraDownloaderIpc.kt');
+  assert.ok(fs.existsSync(downloaderClientKt), 'Missing AuraDownloaderRemoteClient.kt');
+
+  // Reproductor ligero y sincronización Binder
+  assert.match(playbackServiceKt, /DefaultLoadControl\.Builder/);
+  assert.match(playbackServiceKt, /releaseOutgoingFadePlayerIfIdle/);
+  assert.match(playbackServiceKt, /setSessionExtras\(/);
+  assert.match(playerControllerKt, /MediaController\.Listener/);
+  assert.match(playerControllerKt, /onExtrasChanged/);
+  assert.match(playerControllerKt, /fun syncEqualizer\(/);
+  assert.match(playerControllerKt, /fun trimMemoryIfDetached\(/);
+
+  // Descargador aislado y liberación del proceso Python tras inactividad
+  assert.match(downloaderServiceKt, /Process\.killProcess\(/);
+  assert.match(downloaderServiceKt, /MSG_INSPECT_URL/);
+  assert.doesNotMatch(appKt, /val ytDlpAudioDownloader/);
+  assert.match(appKt, /remoteWorkerMode\s*=\s*true/);
+  assert.match(libCoordKt, /AuraDownloaderRemoteClient/);
+  assert.match(libCoordKt, /WhileSubscribed\(5_000L\)/);
+
+  // Coil acotado, RGB_565, clearCoverColorCache y ciclo onStart/onStop/onTrimMemory
+  assert.match(appKt, /SingletonImageLoader\.Factory/);
+  assert.match(appKt, /allowRgb565\(true\)/);
+  assert.match(appKt, /override fun onTrimMemory\(/);
+  assert.match(appKt, /clearCoverColorCache\(\)/);
+  assert.match(coverThemeKt, /fun clearCoverColorCache\(/);
+  assert.match(mainKt, /viewModel\.onUiForeground\(\)/);
+  assert.match(mainKt, /viewModel\.onUiBackground\(\)/);
+  assert.match(libraryScreenKt, /\.size\(168\)/);
+  assert.match(playlistsScreenKt, /\.size\(168\)/);
+  assert.match(artistDetailKt, /\.size\(168\)/);
+});
+
+test('optional system folder (Aura Music) is disabled by default, migrates tracks/covers/json, and auto-discovers dropped audio', () => {
+  const modelsKt = fs.readFileSync(
+    path.join(rootDir, 'android/core/model/src/main/kotlin/com/auramusic/core/model/AuraModels.kt'),
+    'utf8',
+  );
+  const modelsTestKt = fs.readFileSync(
+    path.join(rootDir, 'android/core/model/src/test/kotlin/com/auramusic/core/model/AuraModelsTest.kt'),
+    'utf8',
+  );
+  const manifestXml = fs.readFileSync(
+    path.join(rootDir, 'android/app/src/main/AndroidManifest.xml'),
+    'utf8',
+  );
+  const dbKt = fs.readFileSync(
+    path.join(rootDir, 'android/core/database/src/main/kotlin/com/auramusic/core/database/AuraDatabase.kt'),
+    'utf8',
+  );
+  const reposKt = fs.readFileSync(
+    path.join(rootDir, 'android/core/database/src/main/kotlin/com/auramusic/core/database/AuraRepositories.kt'),
+    'utf8',
+  );
+  const systemManagerPath = path.join(
+    rootDir,
+    'android/core/importer/src/main/kotlin/com/auramusic/core/importer/AuraSystemStorageManager.kt',
+  );
+  const importerKt = fs.readFileSync(
+    path.join(rootDir, 'android/core/importer/src/main/kotlin/com/auramusic/core/importer/AudioImporter.kt'),
+    'utf8',
+  );
+  const settingsKt = fs.readFileSync(
+    path.join(rootDir, 'android/feature/settings/src/main/kotlin/com/auramusic/feature/settings/SettingsScreen.kt'),
+    'utf8',
+  );
+  const appKt = fs.readFileSync(
+    path.join(rootDir, 'android/app/src/main/kotlin/com/auramusic/app/AuraApplication.kt'),
+    'utf8',
+  );
+  const libCoordKt = fs.readFileSync(
+    path.join(rootDir, 'android/app/src/main/kotlin/com/auramusic/app/AuraLibraryCoordinator.kt'),
+    'utf8',
+  );
+  const vmKt = fs.readFileSync(
+    path.join(rootDir, 'android/app/src/main/kotlin/com/auramusic/app/AuraViewModel.kt'),
+    'utf8',
+  );
+  const chromeKt = fs.readFileSync(
+    path.join(rootDir, 'android/app/src/main/kotlin/com/auramusic/app/AuraAppChrome.kt'),
+    'utf8',
+  );
+  const rootKt = fs.readFileSync(
+    path.join(rootDir, 'android/app/src/main/kotlin/com/auramusic/app/AuraAppRoot.kt'),
+    'utf8',
+  );
+
+  // 1. Modelos y pruebas unitarias en :core:model (desactivada por defecto)
+  assert.match(modelsKt, /data class SystemFolderStorageState/);
+  assert.match(modelsKt, /val isEnabled:\s*Boolean\s*=\s*false/);
+  assert.match(modelsKt, /object SystemFolderHelper/);
+  assert.match(modelsKt, /ROOT_FOLDER_NAME\s*=\s*"Aura Music"/);
+  assert.match(modelsKt, /MUSIC_SUBFOLDER_NAME\s*=\s*"Música"/);
+  assert.match(modelsKt, /COVERS_SUBFOLDER_NAME\s*=\s*"Carátulas"/);
+  assert.match(modelsKt, /LIBRARY_JSON_FILE_NAME\s*=\s*"aura_biblioteca\.json"/);
+  assert.match(modelsTestKt, /system folder helper sanitizes filenames and disables system folder by default/);
+
+  // 2. Permisos en AndroidManifest (Android 8-15)
+  assert.match(manifestXml, /android\.permission\.MANAGE_EXTERNAL_STORAGE/);
+  assert.match(manifestXml, /android\.permission\.READ_EXTERNAL_STORAGE/);
+  assert.match(manifestXml, /android\.permission\.WRITE_EXTERNAL_STORAGE/);
+  assert.match(manifestXml, /android:requestLegacyExternalStorage="true"/);
+
+  // 3. Persistencia Room + DataStore (default = false)
+  assert.match(dbKt, /suspend fun updateStorageLocation\(/);
+  assert.match(dbKt, /suspend fun getAllTracksOnce\(/);
+  assert.match(reposKt, /class StoragePreferencesRepository/);
+  assert.match(reposKt, /booleanPreferencesKey\("system_folder_enabled"\)/);
+  assert.match(reposKt, /prefs\[systemFolderEnabledKey\]\s*\?:\s*false/);
+  assert.match(reposKt, /suspend fun updateTrackStorageLocation\(/);
+  assert.match(reposKt, /"Carátulas"/);
+
+  // 4. Manager e importador en :core:importer
+  assert.ok(fs.existsSync(systemManagerPath), 'Missing AuraSystemStorageManager.kt');
+  const systemManagerKt = fs.readFileSync(systemManagerPath, 'utf8');
+  assert.match(systemManagerKt, /suspend fun enableAndMigrate\(/);
+  assert.match(systemManagerKt, /suspend fun syncOnAppEntryOrManual\(/);
+  assert.match(systemManagerKt, /suspend fun syncJsonSnapshotsIfEnabled\(/);
+  assert.match(systemManagerKt, /\.nomedia/);
+  assert.match(systemManagerKt, /extractTrackFromLocalFile/);
+  assert.match(importerKt, /suspend fun extractTrackFromLocalFile\(/);
+  assert.match(importerKt, /AuraSystemStorageManager\.getMusicDir\(\)/);
+  assert.match(importerKt, /AuraSystemStorageManager\.getCoversDir\(\)/);
+
+  // 5. Subpantalla dedicada y categoría en Ajustes
+  assert.match(settingsKt, /Carpeta del sistema \(Aura Music\)/);
+  assert.match(settingsKt, /onOpenSystemFolder:\s*\(\) -> Unit/);
+  assert.match(settingsKt, /fun SettingsSystemFolderScreen\(/);
+  assert.match(settingsKt, /Crear y usar carpeta Aura Music/);
+
+  // 6. Conexión completa en :app (onStart/arranque, launcher de permisos y navegación)
+  assert.match(appKt, /val storagePreferencesRepository:\s*StoragePreferencesRepository/);
+  assert.match(appKt, /val systemStorageManager:\s*AuraSystemStorageManager/);
+  assert.match(libCoordKt, /fun refreshSystemFolderAndAutoSync\(/);
+  assert.match(libCoordKt, /fun setSystemFolderEnabled\(/);
+  assert.match(vmKt, /val systemFolderState:\s*StateFlow<SystemFolderStorageState>/);
+  assert.match(vmKt, /libraryCoordinator\.refreshSystemFolderAndAutoSync\(\)/);
+  assert.match(chromeKt, /fun rememberAuraSystemStoragePermissionLauncher\(/);
+  assert.match(rootKt, /SETTINGS_SYSTEM_FOLDER\s*=\s*"settings\/system_folder"/);
+  assert.match(rootKt, /SettingsSystemFolderScreen\(/);
+});
 
 

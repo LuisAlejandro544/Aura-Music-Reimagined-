@@ -84,11 +84,13 @@ import androidx.compose.ui.graphics.layer.drawLayer
 import androidx.compose.ui.graphics.rememberGraphicsLayer
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.layout
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import coil3.compose.AsyncImage
+import coil3.request.ImageRequest
 import com.auramusic.core.model.DeleteAnimationEffect
 import com.auramusic.core.model.DeleteEffectFrameRenderer
 import com.auramusic.core.model.ImportProgress
@@ -452,10 +454,17 @@ private fun TrackRowCard(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Box {
+                val context = LocalContext.current
                 val file = track.coverFilePath?.let(::File)?.takeIf { it.exists() }
                 if (file != null) {
+                    val thumbRequest = remember(file.absolutePath, file.lastModified()) {
+                        ImageRequest.Builder(context)
+                            .data(file)
+                            .size(168)
+                            .build()
+                    }
                     AsyncImage(
-                        model = file,
+                        model = thumbRequest,
                         contentDescription = track.title,
                         contentScale = ContentScale.Crop,
                         modifier = Modifier

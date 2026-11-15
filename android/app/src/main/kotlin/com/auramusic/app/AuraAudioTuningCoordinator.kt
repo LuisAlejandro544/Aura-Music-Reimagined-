@@ -1,5 +1,6 @@
 package com.auramusic.app
 
+import android.content.Context
 import com.auramusic.core.database.AudioEffectsPreferencesRepository
 import com.auramusic.core.database.EqualizerPreferencesRepository
 import com.auramusic.core.database.HeadphonePreferencesRepository
@@ -13,9 +14,12 @@ import com.auramusic.core.model.HeadphoneRoutingHelper
 import com.auramusic.core.model.PlaybackTuning
 import com.auramusic.core.model.PlaybackTuningHelper
 import com.auramusic.core.player.AuraAudioOutputMonitor
+import com.auramusic.core.player.AuraPlayerConfigSnapshot
+import com.auramusic.core.player.AuraPlayerConfigStore
 import com.auramusic.core.player.AuraPlayerController
 import com.auramusic.core.rust.AuraRustBridge
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
@@ -27,6 +31,7 @@ import kotlinx.coroutines.launch
  * (Reverb, Audio 8D, Crossfeed binaural, calidez Slowed) y preferencias de auriculares/AVRCP.
  */
 class AuraAudioTuningCoordinator(
+    private val appContext: Context,
     private val scope: CoroutineScope,
     private val playerController: AuraPlayerController,
     private val equalizerPreferencesRepository: EqualizerPreferencesRepository,
@@ -34,6 +39,7 @@ class AuraAudioTuningCoordinator(
     private val headphonePreferencesRepository: HeadphonePreferencesRepository,
     audioOutputMonitor: AuraAudioOutputMonitor,
     private val playbackTuningProvider: () -> PlaybackTuning,
+    private val onPlayerConfigPersisted: (suspend () -> Unit)? = null,
 ) {
     val equalizerState: StateFlow<EqualizerState> = equalizerPreferencesRepository.equalizerState
         .stateIn(
@@ -62,10 +68,7 @@ class AuraAudioTuningCoordinator(
     fun startSyncLoops() {
         scope.launch {
             headphonePreferences.collect { prefs ->
-                playerController.updateHeadphoneControlTuning(
-                    previousRestartThresholdMs = prefs.previousRestartThresholdMs,
-                    wrapQueueNavigation = prefs.wrapQueueNavigation,
-                )
+                playerController.syncHeadphonePreferences(prefs)
             }
         }
         scope.launch {
@@ -74,6 +77,26 @@ class AuraAudioTuningCoordinator(
             }.collect { (fx, route, hp) ->
                 syncEffectsToRust(fx, route, hp)
             }
+        }
+    }
+
+    fun persistPlayerConfigSnapshot(
+        equalizer: EqualizerState = equalizerState.value,
+        effects: AudioEffectsState = audioEffects.value,
+        tuning: PlaybackTuning = playbackTuningProvider(),
+        headphonePrefs: HeadphonePreferences = headphonePreferences.value,
+    ) {
+        scope.launch(Dispatchers.IO) {
+            AuraPlayerConfigStore.writeSnapshot(
+                context = appContext,
+                snapshot = AuraPlayerConfigSnapshot(
+                    equalizer = equalizer,
+                    audioEffects = effects,
+                    playbackTuning = tuning,
+                    headphonePreferences = headphonePrefs,
+                ),
+            )
+            onPlayerConfigPersisted?.invoke()
         }
     }
 
@@ -118,6 +141,8 @@ class AuraAudioTuningCoordinator(
 
     private fun updateEqualizerState(nextState: EqualizerState) {
         val normalized = nextState.normalized()
+        playerController.syncEqualizer(normalized)
+        persistPlayerConfigSnapshot(equalizer = normalized)
         scope.launch {
             AuraRustBridge.setEqualizerConfig(normalized.isEnabled, normalized.bandGainsDb)
             equalizerPreferencesRepository.saveEqualizerState(normalized)
@@ -343,6 +368,8 @@ class AuraAudioTuningCoordinator(
 
     private fun updateHeadphonePreferences(transform: (HeadphonePreferences) -> HeadphonePreferences) {
         val next = transform(headphonePreferences.value).normalized()
+        playerController.syncHeadphonePreferences(next)
+        persistPlayerConfigSnapshot(headphonePrefs = next)
         scope.launch {
             headphonePreferencesRepository.saveHeadphonePreferences(next)
         }
@@ -355,6 +382,8 @@ class AuraAudioTuningCoordinator(
             effects = normalized,
         )
         playerController.setPlaybackParameters(resolvedParams.speed, resolvedParams.pitch)
+        playerController.syncAudioEffects(normalized)
+        persistPlayerConfigSnapshot(effects = normalized)
         scope.launch {
             syncEffectsToRust(normalized, audioOutputRoute.value, headphonePreferences.value)
             audioEffectsPreferencesRepository.saveAudioEffectsState(normalized)

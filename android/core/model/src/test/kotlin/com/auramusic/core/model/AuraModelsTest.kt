@@ -467,9 +467,67 @@ class AuraModelsTest {
                 reasonIsRepeat = false,
             ),
         )
+        assertEquals(42_000L, SleepTimerHelper.computeRemainingMs(endElapsedMs = 142_000L, nowElapsedMs = 100_000L))
+        assertEquals(0L, SleepTimerHelper.computeRemainingMs(endElapsedMs = 90_000L, nowElapsedMs = 100_000L))
+    }
+
+    @Test
+    fun `process role resolver isolates main, player, and downloader processes`() {
+        assertEquals(AuraProcessRole.MAIN, AuraProcessRoleResolver.resolve("com.auramusic.app"))
+        assertEquals(AuraProcessRole.MAIN, AuraProcessRoleResolver.resolve(null))
+        assertEquals(AuraProcessRole.PLAYER, AuraProcessRoleResolver.resolve("com.auramusic.app:player\u0000\u0000"))
+        assertEquals(AuraProcessRole.DOWNLOADER, AuraProcessRoleResolver.resolve("com.auramusic.app.debug:downloader"))
+    }
+
+    @Test
+    fun `memory trim policy clears visual caches on ui hidden and low memory pressure`() {
+        val moderate = MemoryTrimPolicy.resolve(MemoryTrimPolicy.LEVEL_RUNNING_MODERATE)
+        assertFalse(moderate.clearImageMemoryCache)
+        assertFalse(moderate.clearDynamicColorCache)
+        assertFalse(moderate.clearTransientControllerCaches)
+
+        val uiHidden = MemoryTrimPolicy.resolve(MemoryTrimPolicy.LEVEL_UI_HIDDEN)
+        assertTrue(uiHidden.clearImageMemoryCache)
+        assertTrue(uiHidden.clearDynamicColorCache)
+        assertFalse(uiHidden.clearTransientControllerCaches)
+
+        val runningLow = MemoryTrimPolicy.resolve(MemoryTrimPolicy.LEVEL_RUNNING_LOW)
+        assertTrue(runningLow.clearImageMemoryCache)
+        assertTrue(runningLow.clearDynamicColorCache)
+
+        val background = MemoryTrimPolicy.resolve(MemoryTrimPolicy.LEVEL_BACKGROUND)
+        assertTrue(background.clearImageMemoryCache)
+        assertTrue(background.clearDynamicColorCache)
+        assertTrue(background.clearTransientControllerCaches)
+    }
+
+    @Test
+    fun `system folder helper sanitizes filenames and disables system folder by default`() {
+        val defaultState = SystemFolderStorageState()
+        assertFalse(defaultState.isEnabled)
+        assertEquals(SystemFolderHelper.DISPLAY_ROOT_PATH, defaultState.folderDisplayPath)
+
+        val fileName = SystemFolderHelper.buildTrackAudioFileName(
+            title = "Mi: Canción? / Demo*  ",
+            artist = "Artista <Test>",
+            extension = "FLAC",
+            fingerprint = "abcdef123456",
+        )
+        assertEquals("Artista Test - Mi Canción Demo.flac", fileName)
+
+        val unknownArtistName = SystemFolderHelper.buildTrackAudioFileName(
+            title = "Instrumental",
+            artist = TrackMetadataHelper.DEFAULT_ARTIST,
+            extension = "mp3",
+            fingerprint = "1234567890",
+            disambiguate = true,
+        )
+        assertEquals("Instrumental_123456.mp3", unknownArtistName)
+
+        assertTrue(SystemFolderHelper.isSupportedAudioFileName("tema.mp3"))
+        assertTrue(SystemFolderHelper.isSupportedAudioFileName("pista.FLAC"))
+        assertFalse(SystemFolderHelper.isSupportedAudioFileName(".nomedia"))
+        assertFalse(SystemFolderHelper.isSupportedAudioFileName("aura_biblioteca.json"))
+        assertFalse(SystemFolderHelper.isSupportedAudioFileName("descarga.mp3.tmp"))
     }
 }
-
-
-
-

@@ -26,13 +26,23 @@ import androidx.compose.material.icons.rounded.AutoAwesome
 import androidx.compose.material.icons.rounded.AutoFixHigh
 import androidx.compose.material.icons.rounded.BluetoothAudio
 import androidx.compose.material.icons.rounded.Check
+import androidx.compose.material.icons.rounded.CheckCircle
+import androidx.compose.material.icons.rounded.CreateNewFolder
+import androidx.compose.material.icons.rounded.Description
 import androidx.compose.material.icons.rounded.FastForward
+import androidx.compose.material.icons.rounded.Folder
 import androidx.compose.material.icons.rounded.Headphones
+import androidx.compose.material.icons.rounded.Image
+import androidx.compose.material.icons.rounded.Info
+import androidx.compose.material.icons.rounded.LibraryMusic
+import androidx.compose.material.icons.rounded.LockOpen
 import androidx.compose.material.icons.rounded.Memory
 import androidx.compose.material.icons.rounded.Palette
 import androidx.compose.material.icons.rounded.Speaker
+import androidx.compose.material.icons.rounded.Sync
 import androidx.compose.material.icons.rounded.TouchApp
 import androidx.compose.material.icons.rounded.Usb
+import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -40,6 +50,7 @@ import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
@@ -62,6 +73,8 @@ import com.auramusic.core.model.AudioOutputRouteState
 import com.auramusic.core.model.AudioOutputType
 import com.auramusic.core.model.HeadphonePreferences
 import com.auramusic.core.model.HeadphoneRoutingHelper
+import com.auramusic.core.model.SystemFolderHelper
+import com.auramusic.core.model.SystemFolderStorageState
 
 /**
  * Pantalla principal de Ajustes (menú por categorías).
@@ -71,6 +84,7 @@ import com.auramusic.core.model.HeadphoneRoutingHelper
  * 2. Colores dinámicos y animación al eliminar
  * 3. Auriculares y salida de audio (AudioDeviceCallback)
  * 4. Botones multimedia (Cable y Bluetooth AVRCP)
+ * 5. Carpeta del sistema (Aura Music/Música, Carátulas y .json)
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -98,6 +112,8 @@ fun SettingsScreen(
     onOpenVisualEffects: () -> Unit = {},
     onOpenHeadphoneSettings: () -> Unit = {},
     onOpenMediaButtons: () -> Unit = {},
+    systemFolderState: SystemFolderStorageState = SystemFolderStorageState(),
+    onOpenSystemFolder: () -> Unit = {},
 ) {
     val routeIcon = when (outputRoute.outputType) {
         AudioOutputType.BLUETOOTH_HEADSET -> Icons.Rounded.BluetoothAudio
@@ -112,6 +128,15 @@ fun SettingsScreen(
         if (headphonePreferences.tripleTapPreviousEnabled) add("3x Ant.")
     }.ifEmpty { listOf("Toque único") }.joinToString(" • ") +
         " • Salto ${headphonePreferences.seekStepSeconds} s"
+
+    val systemFolderSummary = when {
+        systemFolderState.isBusy ->
+            "Sincronizando (${systemFolderState.processedCount}/${systemFolderState.totalCount})..."
+        systemFolderState.isEnabled ->
+            "Activa • ${SystemFolderHelper.ROOT_FOLDER_NAME}/${SystemFolderHelper.MUSIC_SUBFOLDER_NAME} y ${SystemFolderHelper.COVERS_SUBFOLDER_NAME}"
+        else ->
+            "Desactivada • Solo almacenamiento interno privado"
+    }
 
     Scaffold(
         modifier = modifier,
@@ -186,6 +211,17 @@ fun SettingsScreen(
                     title = "Botones multimedia (Cable y Bluetooth AVRCP)",
                     subtitle = mediaButtonsSummary,
                     onClick = onOpenMediaButtons,
+                )
+            }
+
+            item {
+                SettingsCategoryCard(
+                    icon = Icons.Rounded.Folder,
+                    title = "Carpeta del sistema (Aura Music)",
+                    subtitle = systemFolderSummary,
+                    highlightIcon = systemFolderState.isEnabled,
+                    highlightSubtitle = systemFolderState.isEnabled,
+                    onClick = onOpenSystemFolder,
                 )
             }
 
@@ -626,6 +662,365 @@ fun SettingsMediaButtonsScreen(
     }
 }
 
+/**
+ * Subpantalla especial dedicada para activar, migrar y sincronizar la carpeta pública
+ * del sistema `Aura Music` (`Música`, `Carátulas` y archivos `.json`).
+ * Por defecto permanece desactivada para mantener la memoria privada intacta salvo que
+ * el usuario decida activarla.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun SettingsSystemFolderScreen(
+    state: SystemFolderStorageState,
+    onToggleEnabled: (Boolean) -> Unit,
+    onRequestPermission: () -> Unit,
+    onSyncNow: () -> Unit,
+    onBack: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Scaffold(
+        modifier = modifier,
+        containerColor = MaterialTheme.colorScheme.background,
+        topBar = {
+            TopAppBar(
+                title = {
+                    Column {
+                        Text(
+                            text = "Carpeta del sistema",
+                            style = MaterialTheme.typography.titleLarge,
+                            fontWeight = FontWeight.Bold,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                        Text(
+                            text = SystemFolderHelper.ROOT_FOLDER_NAME,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.primary,
+                        )
+                    }
+                },
+                navigationIcon = {
+                    IconButton(onClick = onBack) {
+                        Icon(
+                            imageVector = Icons.AutoMirrored.Rounded.ArrowBack,
+                            contentDescription = "Volver",
+                        )
+                    }
+                },
+                colors = TopAppBarDefaults.topAppBarColors(
+                    containerColor = MaterialTheme.colorScheme.background,
+                ),
+            )
+        },
+    ) { innerPadding ->
+        LazyColumn(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(innerPadding),
+            contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 140.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            item {
+                Card(
+                    shape = RoundedCornerShape(18.dp),
+                    colors = CardDefaults.cardColors(
+                        containerColor = if (state.isEnabled) {
+                            MaterialTheme.colorScheme.primaryContainer
+                        } else {
+                            MaterialTheme.colorScheme.surfaceContainerHigh
+                        },
+                    ),
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(18.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Surface(
+                            modifier = Modifier.size(48.dp),
+                            shape = RoundedCornerShape(12.dp),
+                            color = if (state.isEnabled) {
+                                MaterialTheme.colorScheme.primary
+                            } else {
+                                MaterialTheme.colorScheme.surfaceContainerHighest
+                            },
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Icon(
+                                    imageVector = Icons.Rounded.CreateNewFolder,
+                                    contentDescription = null,
+                                    tint = if (state.isEnabled) {
+                                        MaterialTheme.colorScheme.onPrimary
+                                    } else {
+                                        MaterialTheme.colorScheme.primary
+                                    },
+                                )
+                            }
+                        }
+                        Spacer(modifier = Modifier.width(14.dp))
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = state.folderDisplayPath,
+                                style = MaterialTheme.typography.titleSmall,
+                                fontWeight = FontWeight.Bold,
+                                color = if (state.isEnabled) {
+                                    MaterialTheme.colorScheme.onPrimaryContainer
+                                } else {
+                                    MaterialTheme.colorScheme.onSurface
+                                },
+                            )
+                            Spacer(modifier = Modifier.height(2.dp))
+                            Text(
+                                text = if (state.isEnabled) {
+                                    "Activa • Las canciones y carátulas se sincronizan automáticamente"
+                                } else {
+                                    "Desactivada por defecto • Usa la memoria privada de la app"
+                                },
+                                style = MaterialTheme.typography.bodySmall,
+                                color = if (state.isEnabled) {
+                                    MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.85f)
+                                } else {
+                                    MaterialTheme.colorScheme.onSurfaceVariant
+                                },
+                            )
+                        }
+                    }
+                }
+            }
+
+            item {
+                SettingsToggleCard(
+                    icon = Icons.Rounded.Folder,
+                    title = "Crear y usar carpeta Aura Music",
+                    subtitle = if (state.isEnabled) {
+                        "Activada • Traspasa canciones, carátulas y archivos .json al sistema"
+                    } else {
+                        "Al activar, traspasa tus canciones, carátulas y .json a esta carpeta"
+                    },
+                    checked = state.isEnabled,
+                    enabled = !state.isBusy,
+                    onCheckedChange = onToggleEnabled,
+                )
+            }
+
+            if (state.isBusy) {
+                item {
+                    Surface(
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(16.dp),
+                        color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                    ) {
+                        Column(
+                            modifier = Modifier.padding(16.dp),
+                            verticalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
+                            Text(
+                                text = state.statusMessage ?: "Sincronizando carpeta Aura Music...",
+                                style = MaterialTheme.typography.bodyMedium,
+                                fontWeight = FontWeight.SemiBold,
+                            )
+                            if (state.totalCount > 0) {
+                                LinearProgressIndicator(
+                                    progress = { state.progressFraction },
+                                    modifier = Modifier.fillMaxWidth(),
+                                )
+                                Text(
+                                    text = "${state.processedCount} de ${state.totalCount} canciones procesadas",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            } else {
+                                LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+                            }
+                        }
+                    }
+                }
+            } else if (!state.statusMessage.isNullOrBlank()) {
+                item {
+                    Surface(
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(16.dp),
+                        color = MaterialTheme.colorScheme.secondaryContainer,
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(14.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Icon(
+                                imageVector = Icons.Rounded.CheckCircle,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.onSecondaryContainer,
+                            )
+                            Spacer(modifier = Modifier.width(10.dp))
+                            Text(
+                                text = state.statusMessage.orEmpty(),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSecondaryContainer,
+                            )
+                        }
+                    }
+                }
+            }
+
+            item {
+                Surface(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(18.dp),
+                    color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                    tonalElevation = 2.dp,
+                ) {
+                    Column(
+                        modifier = Modifier.padding(16.dp),
+                        verticalArrangement = Arrangement.spacedBy(12.dp),
+                    ) {
+                        Text(
+                            text = "Contenido de la carpeta ${SystemFolderHelper.ROOT_FOLDER_NAME}",
+                            style = MaterialTheme.typography.titleSmall,
+                            fontWeight = FontWeight.Bold,
+                        )
+                        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+
+                        FolderStructureRow(
+                            icon = Icons.Rounded.LibraryMusic,
+                            title = "${SystemFolderHelper.ROOT_FOLDER_NAME}/${SystemFolderHelper.MUSIC_SUBFOLDER_NAME}",
+                            description = "Almacena tus canciones traspasadas, descargas y pistas nuevas. Si copias una canción aquí y abres Aura Music, aparecerá automáticamente.",
+                        )
+                        FolderStructureRow(
+                            icon = Icons.Rounded.Image,
+                            title = "${SystemFolderHelper.ROOT_FOLDER_NAME}/${SystemFolderHelper.COVERS_SUBFOLDER_NAME}",
+                            description = "Guarda las portadas embebidas, de galería (WebP) y procedurales con archivo .nomedia para no llenar tu galería.",
+                        )
+                        FolderStructureRow(
+                            icon = Icons.Rounded.Description,
+                            title = "${SystemFolderHelper.ROOT_FOLDER_NAME}/*.json",
+                            description = "Respaldo legible de tu biblioteca (${SystemFolderHelper.LIBRARY_JSON_FILE_NAME}) y configuración de audio (${SystemFolderHelper.PLAYER_CONFIG_JSON_NAME}).",
+                        )
+                    }
+                }
+            }
+
+            if (!state.hasStoragePermission) {
+                item {
+                    Surface(
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(16.dp),
+                        color = MaterialTheme.colorScheme.surfaceContainerLow,
+                    ) {
+                        Column(
+                            modifier = Modifier.padding(16.dp),
+                            verticalArrangement = Arrangement.spacedBy(10.dp),
+                        ) {
+                            Text(
+                                text = "Permiso necesario para carpeta pública",
+                                style = MaterialTheme.typography.titleSmall,
+                                fontWeight = FontWeight.SemiBold,
+                            )
+                            Text(
+                                text = "Android requiere autorizar el acceso a archivos del sistema para que Aura Music cree la carpeta raíz /Aura Music y detecte canciones copiadas desde tu explorador.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                            Button(
+                                onClick = onRequestPermission,
+                                enabled = !state.isBusy,
+                                modifier = Modifier.fillMaxWidth(),
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Rounded.LockOpen,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(18.dp),
+                                )
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text("Conceder permiso y activar")
+                            }
+                        }
+                    }
+                }
+            } else if (state.isEnabled) {
+                item {
+                    FilledTonalButton(
+                        onClick = onSyncNow,
+                        enabled = !state.isBusy,
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Icon(
+                            imageVector = Icons.Rounded.Sync,
+                            contentDescription = null,
+                            modifier = Modifier.size(18.dp),
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("Escanear y sincronizar carpeta ahora")
+                    }
+                }
+            }
+
+            item {
+                Surface(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(16.dp),
+                    color = MaterialTheme.colorScheme.surfaceContainerLow,
+                ) {
+                    Row(
+                        modifier = Modifier.padding(14.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Icon(
+                            imageVector = Icons.Rounded.Info,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        Spacer(modifier = Modifier.width(10.dp))
+                        Text(
+                            text = "Si desactivas esta opción más adelante, Aura Music conservará intactos todos tus archivos en la carpeta /Aura Music sin borrar nada.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun FolderStructureRow(
+    icon: ImageVector,
+    title: String,
+    description: String,
+) {
+    Row(verticalAlignment = Alignment.Top) {
+        Surface(
+            modifier = Modifier.size(36.dp),
+            shape = RoundedCornerShape(10.dp),
+            color = MaterialTheme.colorScheme.primaryContainer,
+        ) {
+            Box(contentAlignment = Alignment.Center) {
+                Icon(
+                    imageVector = icon,
+                    contentDescription = null,
+                    modifier = Modifier.size(20.dp),
+                    tint = MaterialTheme.colorScheme.primary,
+                )
+            }
+        }
+        Spacer(modifier = Modifier.width(12.dp))
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = title,
+                style = MaterialTheme.typography.labelLarge,
+                fontWeight = FontWeight.SemiBold,
+            )
+            Spacer(modifier = Modifier.height(2.dp))
+            Text(
+                text = description,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
+}
+
 @Composable
 private fun SettingsCategoryCard(
     icon: ImageVector,
@@ -711,12 +1106,13 @@ private fun SettingsToggleCard(
     subtitle: String,
     checked: Boolean,
     onCheckedChange: (Boolean) -> Unit,
+    enabled: Boolean = true,
 ) {
     Surface(
         modifier = Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(16.dp))
-            .clickable { onCheckedChange(!checked) },
+            .clickable(enabled = enabled) { onCheckedChange(!checked) },
         shape = RoundedCornerShape(16.dp),
         color = MaterialTheme.colorScheme.surfaceContainerHigh,
         tonalElevation = 2.dp,
@@ -759,6 +1155,7 @@ private fun SettingsToggleCard(
             Spacer(modifier = Modifier.width(8.dp))
             Switch(
                 checked = checked,
+                enabled = enabled,
                 onCheckedChange = onCheckedChange,
             )
         }

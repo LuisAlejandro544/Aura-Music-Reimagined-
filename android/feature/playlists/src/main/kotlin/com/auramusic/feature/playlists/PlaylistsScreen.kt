@@ -85,11 +85,13 @@ import androidx.compose.ui.graphics.layer.drawLayer
 import androidx.compose.ui.graphics.rememberGraphicsLayer
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.layout
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import coil3.compose.AsyncImage
+import coil3.request.ImageRequest
 import com.auramusic.core.model.ArtistPlaylist
 import com.auramusic.core.model.DeleteAnimationEffect
 import com.auramusic.core.model.DeleteEffectFrameRenderer
@@ -760,10 +762,17 @@ private fun PlaylistCard(
                 .padding(10.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
+            val context = LocalContext.current
             val coverFile = playlist.coverFilePath?.let(::File)?.takeIf { it.exists() }
             if (coverFile != null) {
+                val thumbRequest = remember(coverFile.absolutePath, coverFile.lastModified()) {
+                    ImageRequest.Builder(context)
+                        .data(coverFile)
+                        .size(168)
+                        .build()
+                }
                 AsyncImage(
-                    model = coverFile,
+                    model = thumbRequest,
                     contentDescription = playlist.name,
                     contentScale = ContentScale.Crop,
                     modifier = Modifier
@@ -834,10 +843,17 @@ private fun ArtistPlaylistCard(
                 .padding(10.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
+            val context = LocalContext.current
             val coverFile = artistPlaylist.coverFilePath?.let(::File)?.takeIf { it.exists() }
             if (coverFile != null) {
+                val thumbRequest = remember(coverFile.absolutePath, coverFile.lastModified()) {
+                    ImageRequest.Builder(context)
+                        .data(coverFile)
+                        .size(168)
+                        .build()
+                }
                 AsyncImage(
-                    model = coverFile,
+                    model = thumbRequest,
                     contentDescription = artistPlaylist.artistName,
                     contentScale = ContentScale.Crop,
                     modifier = Modifier
@@ -927,10 +943,17 @@ private fun PlaylistTrackRow(
                 .padding(horizontal = 10.dp, vertical = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
+            val context = LocalContext.current
             val coverFile = track.coverFilePath?.let(::File)?.takeIf { it.exists() }
             if (coverFile != null) {
+                val thumbRequest = remember(coverFile.absolutePath, coverFile.lastModified()) {
+                    ImageRequest.Builder(context)
+                        .data(coverFile)
+                        .size(168)
+                        .build()
+                }
                 AsyncImage(
-                    model = coverFile,
+                    model = thumbRequest,
                     contentDescription = track.title,
                     contentScale = ContentScale.Crop,
                     modifier = Modifier

@@ -5,6 +5,7 @@
         <service
             android:name="com.auramusic.core.downloader.AuraDownloadForegroundService"
             android:exported="false"
-            android:foregroundServiceType="dataSync" />
+            android:foregroundServiceType="dataSync"
+            android:process=":downloader" />
     </application>
 </manifest>

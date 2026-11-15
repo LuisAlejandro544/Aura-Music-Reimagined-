@@ -58,6 +58,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -108,8 +109,16 @@ fun DownloaderScreen(
     onSelectPreviewFormat: (String) -> Unit = {},
     onDismissDownloadStatus: () -> Unit,
     onDismissUpdateMessage: () -> Unit,
+    onScreenActiveChanged: (Boolean) -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
+    DisposableEffect(Unit) {
+        onScreenActiveChanged(true)
+        onDispose {
+            onScreenActiveChanged(false)
+        }
+    }
+
     var urlInput by rememberSaveable { mutableStateOf("") }
     val clipboardManager = LocalClipboardManager.current
 

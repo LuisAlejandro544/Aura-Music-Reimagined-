@@ -1,6 +1,10 @@
 package com.auramusic.app
 
+import android.content.Context
+import android.content.Intent
 import android.net.Uri
+import android.os.Build
+import android.provider.Settings
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
@@ -24,6 +28,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import com.auramusic.core.importer.AuraSystemStorageManager
 import com.auramusic.core.model.PlaybackState
 import com.auramusic.feature.player.MiniPlayerBar
 
@@ -94,6 +99,58 @@ fun rememberAuraSafLaunchers(
                 galleryCoverLauncher.launch("image/*")
             },
         )
+    }
+}
+
+/**
+ * Crea y recuerda el flujo de solicitud de permiso de almacenamiento para la carpeta
+ * pública `Aura Music` (Android 8–10 mediante diálogo clásico y Android 11–15 mediante
+ * `MANAGE_EXTERNAL_STORAGE` con respaldo en ajustes de la aplicación).
+ */
+@Composable
+fun rememberAuraSystemStoragePermissionLauncher(
+    context: Context,
+    onPermissionEvaluated: (Boolean) -> Unit,
+): () -> Unit {
+    val manageFilesLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.StartActivityForResult(),
+    ) {
+        onPermissionEvaluated(AuraSystemStorageManager.hasStoragePermission(context))
+    }
+
+    val legacyPermissionsLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestMultiplePermissions(),
+    ) {
+        onPermissionEvaluated(AuraSystemStorageManager.hasStoragePermission(context))
+    }
+
+    return remember(context, manageFilesLauncher, legacyPermissionsLauncher) {
+        {
+            if (AuraSystemStorageManager.hasStoragePermission(context)) {
+                onPermissionEvaluated(true)
+            } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                val primaryIntent = AuraSystemStorageManager.buildManageAllFilesIntent(context)
+                val launchedPrimary = runCatching {
+                    manageFilesLauncher.launch(primaryIntent)
+                }.isSuccess
+                if (!launchedPrimary) {
+                    val allFilesIntent = Intent(Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION)
+                    val launchedFallback = runCatching {
+                        manageFilesLauncher.launch(allFilesIntent)
+                    }.isSuccess
+                    if (!launchedFallback) {
+                        val detailsIntent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+                            data = Uri.parse("package:${context.packageName}")
+                        }
+                        runCatching { manageFilesLauncher.launch(detailsIntent) }
+                    }
+                }
+            } else {
+                legacyPermissionsLauncher.launch(
+                    AuraSystemStorageManager.legacyStoragePermissions(),
+                )
+            }
+        }
     }
 }
 

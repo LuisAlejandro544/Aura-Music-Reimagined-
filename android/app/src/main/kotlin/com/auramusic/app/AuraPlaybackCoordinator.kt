@@ -24,6 +24,7 @@ class AuraPlaybackCoordinator(
     private val playbackPreferencesRepository: PlaybackPreferencesRepository,
     private val audioEffectsStateProvider: () -> AudioEffectsState,
     private val onEffectsAdjustedByManualTuning: (AudioEffectsState) -> Unit,
+    private val onPlaybackTuningChanged: (PlaybackTuning) -> Unit = {},
 ) {
     val playbackState: StateFlow<PlaybackState> = playerController.playbackState
 
@@ -81,6 +82,9 @@ class AuraPlaybackCoordinator(
     fun cycleRepeat() = playerController.cycleRepeatMode()
 
     fun setCrossfadeEnabled(enabled: Boolean) {
+        val nextTuning = playbackTuning.value.copy(crossfadeEnabled = enabled).normalized()
+        playerController.syncPlaybackTuning(nextTuning)
+        onPlaybackTuningChanged(nextTuning)
         scope.launch {
             playbackPreferencesRepository.setCrossfadeEnabled(enabled)
         }
@@ -88,6 +92,9 @@ class AuraPlaybackCoordinator(
 
     fun setCrossfadeSeconds(seconds: Int) {
         val clamped = PlaybackTuningHelper.clampCrossfadeSeconds(seconds)
+        val nextTuning = playbackTuning.value.copy(crossfadeSeconds = clamped).normalized()
+        playerController.syncPlaybackTuning(nextTuning)
+        onPlaybackTuningChanged(nextTuning)
         scope.launch {
             playbackPreferencesRepository.setCrossfadeSeconds(clamped)
         }
@@ -104,8 +111,10 @@ class AuraPlaybackCoordinator(
             )
         } else {
             currentTuning.copy(playbackSpeed = clampedSpeed)
-        }
+        }.normalized()
         applyResolvedTuningImmediately(nextTuning, nextEffects)
+        playerController.syncPlaybackTuning(nextTuning)
+        onPlaybackTuningChanged(nextTuning)
         scope.launch {
             playbackPreferencesRepository.setPlaybackSpeed(clampedSpeed)
             if (currentTuning.linkPitchToSpeed) {
@@ -122,8 +131,10 @@ class AuraPlaybackCoordinator(
         val nextTuning = currentTuning.copy(
             playbackPitch = clampedPitch,
             linkPitchToSpeed = false,
-        )
+        ).normalized()
         applyResolvedTuningImmediately(nextTuning, nextEffects)
+        playerController.syncPlaybackTuning(nextTuning)
+        onPlaybackTuningChanged(nextTuning)
         scope.launch {
             if (wasLinked) {
                 playbackPreferencesRepository.setLinkPitchToSpeed(false)
@@ -143,8 +154,10 @@ class AuraPlaybackCoordinator(
         val nextTuning = currentTuning.copy(
             linkPitchToSpeed = linked,
             playbackPitch = syncedPitch,
-        )
+        ).normalized()
         applyResolvedTuningImmediately(nextTuning, nextEffects)
+        playerController.syncPlaybackTuning(nextTuning)
+        onPlaybackTuningChanged(nextTuning)
         scope.launch {
             playbackPreferencesRepository.setLinkPitchToSpeed(linked)
             if (linked) {
@@ -159,8 +172,10 @@ class AuraPlaybackCoordinator(
             playbackSpeed = PlaybackTuning.DEFAULT_PLAYBACK_SPEED,
             playbackPitch = PlaybackTuning.DEFAULT_PLAYBACK_PITCH,
             linkPitchToSpeed = false,
-        )
+        ).normalized()
         applyResolvedTuningImmediately(nextTuning, nextEffects)
+        playerController.syncPlaybackTuning(nextTuning)
+        onPlaybackTuningChanged(nextTuning)
         scope.launch {
             playbackPreferencesRepository.setLinkPitchToSpeed(false)
             playbackPreferencesRepository.setPlaybackSpeed(PlaybackTuning.DEFAULT_PLAYBACK_SPEED)

@@ -10,7 +10,9 @@ import android.os.Build
 import android.webkit.MimeTypeMap
 import androidx.documentfile.provider.DocumentFile
 import com.auramusic.core.database.MusicRepository
+import com.auramusic.core.database.StoragePreferencesRepository
 import com.auramusic.core.model.ImportProgress
+import com.auramusic.core.model.SystemFolderHelper
 import com.auramusic.core.model.Track
 import com.auramusic.core.rust.AuraRustBridge
 import kotlinx.coroutines.Dispatchers
@@ -20,6 +22,7 @@ import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withLock
@@ -46,6 +49,7 @@ import kotlin.math.roundToInt
 class AudioImporter(
     private val context: Context,
     private val repository: MusicRepository,
+    private val storagePreferencesRepository: StoragePreferencesRepository? = null,
 ) {
     private val _progress = MutableStateFlow(ImportProgress())
     val progress: StateFlow<ImportProgress> = _progress.asStateFlow()
@@ -110,24 +114,31 @@ class AudioImporter(
     }
 
     /**
-     * Elimina archivos de carátula huérfanos en `filesDir/covers` que ya no pertenezcan
-     * a ninguna canción registrada en Room.
+     * Elimina archivos de carátula huérfanos en `filesDir/covers` (y en `Aura Music/Carátulas`
+     * si la carpeta pública está activa) que ya no pertenezcan a ninguna canción registrada en Room.
      */
     suspend fun cleanupOrphanCovers(): Int = withContext(Dispatchers.IO) {
-        val coversDir = File(context.filesDir, "covers")
-        if (!coversDir.exists() || !coversDir.isDirectory) return@withContext 0
+        val candidateDirs = buildList {
+            add(File(context.filesDir, "covers"))
+            if (isSystemFolderActive()) {
+                add(AuraSystemStorageManager.getCoversDir())
+            }
+        }
 
         val referencedPaths = repository.getAllReferencedCoverPaths()
             .mapNotNull { path -> runCatching { File(path).canonicalPath }.getOrNull() }
             .toSet()
 
         var removed = 0
-        coversDir.listFiles()?.forEach { file ->
-            if (file.isFile) {
-                val canonical = runCatching { file.canonicalPath }.getOrNull()
-                if (canonical != null && canonical !in referencedPaths) {
-                    if (runCatching { file.delete() }.getOrDefault(false)) {
-                        removed++
+        for (dir in candidateDirs) {
+            if (!dir.exists() || !dir.isDirectory) continue
+            dir.listFiles()?.forEach { file ->
+                if (file.isFile && !file.name.startsWith(".")) {
+                    val canonical = runCatching { file.canonicalPath }.getOrNull()
+                    if (canonical != null && canonical !in referencedPaths) {
+                        if (runCatching { file.delete() }.getOrDefault(false)) {
+                            removed++
+                        }
                     }
                 }
             }
@@ -137,8 +148,8 @@ class AudioImporter(
 
     /**
      * Importa un archivo de audio descargado localmente por `:core:downloader` hacia Room.
-     * Lee duración/etiquetas/carátula embebida directamente en Rust (`lofty`), convierte la
-     * miniatura descargada a WebP sin pérdida si existe, o genera una carátula procedural Rust.
+     * Si la carpeta del sistema `Aura Music` está activa, traslada automáticamente la descarga a
+     * `Aura Music/Música` y guarda su carátula en `Aura Music/Carátulas`.
      */
     suspend fun importDownloadedAudioFile(
         audioFile: File,
@@ -151,7 +162,8 @@ class AudioImporter(
     ): Track? = withContext(Dispatchers.IO) {
         if (!audioFile.exists() || audioFile.length() <= 0L) return@withContext null
 
-        val contentUri = Uri.fromFile(audioFile).toString()
+        val systemFolderActive = isSystemFolderActive()
+        val coversDir = resolveCoversDirectory(systemFolderActive)
         val (dbUris, dbFingerprints) = repository.getAllTrackIdentities()
 
         val metadata = runCatching {
@@ -182,6 +194,18 @@ class AudioImporter(
             sizeBytes = audioFile.length(),
         )
 
+        val finalAudioFile = if (systemFolderActive) {
+            moveFileIntoSystemMusicFolder(
+                sourceFile = audioFile,
+                title = title,
+                artist = artist,
+                fingerprint = fingerprint,
+            ) ?: audioFile
+        } else {
+            audioFile
+        }
+
+        val contentUri = Uri.fromFile(finalAudioFile).toString()
         if (contentUri in dbUris || fingerprint in dbFingerprints) {
             return@withContext null
         }
@@ -189,7 +213,7 @@ class AudioImporter(
         val embeddedBytes = metadata?.embeddedCoverBytes
         val (coverPath, isProcedural) = coverWriteMutex.withLock {
             if (embeddedBytes != null && embeddedBytes.isNotEmpty()) {
-                saveEmbeddedCover(fingerprint, embeddedBytes) to false
+                saveEmbeddedCover(fingerprint, embeddedBytes, coversDir) to false
             } else if (thumbnailFile != null && thumbnailFile.exists() && thumbnailFile.length() > 0L) {
                 val webpPath = saveCustomCoverAsLosslessWebp(
                     trackId = System.currentTimeMillis(),
@@ -204,6 +228,7 @@ class AudioImporter(
                         fingerprint = fingerprint,
                         seedKey = seedKey,
                         accentArgb = accentArgb,
+                        outputDirectory = coversDir,
                     )
                     procPath to true
                 }
@@ -214,6 +239,7 @@ class AudioImporter(
                     fingerprint = fingerprint,
                     seedKey = seedKey,
                     accentArgb = accentArgb,
+                    outputDirectory = coversDir,
                 )
                 procPath to true
             }
@@ -298,23 +324,33 @@ class AudioImporter(
             return@withContext existing
         }
 
+        val systemFolderActive = isSystemFolderActive()
         val finalizedFile = if (copiedLocalFile != null && copiedLocalFile.exists()) {
             val ext = copiedLocalFile.extension.ifBlank { "audio" }
-            val stableFile = File(
-                File(context.filesDir, "opened_audio").apply { mkdirs() },
-                "open_${parsed.trackFingerprint.take(24)}.$ext",
-            )
-            if (stableFile != copiedLocalFile) {
-                if (stableFile.exists() || copiedLocalFile.renameTo(stableFile)) {
-                    if (copiedLocalFile.exists() && copiedLocalFile != stableFile) {
-                        runCatching { copiedLocalFile.delete() }
+            if (systemFolderActive) {
+                moveFileIntoSystemMusicFolder(
+                    sourceFile = copiedLocalFile,
+                    title = parsed.title,
+                    artist = parsed.artist,
+                    fingerprint = parsed.trackFingerprint,
+                ) ?: copiedLocalFile
+            } else {
+                val stableFile = File(
+                    File(context.filesDir, "opened_audio").apply { mkdirs() },
+                    "open_${parsed.trackFingerprint.take(24)}.$ext",
+                )
+                if (stableFile != copiedLocalFile) {
+                    if (stableFile.exists() || copiedLocalFile.renameTo(stableFile)) {
+                        if (copiedLocalFile.exists() && copiedLocalFile != stableFile) {
+                            runCatching { copiedLocalFile.delete() }
+                        }
+                        stableFile
+                    } else {
+                        copiedLocalFile
                     }
-                    stableFile
                 } else {
                     copiedLocalFile
                 }
-            } else {
-                copiedLocalFile
             }
         } else {
             null
@@ -365,7 +401,8 @@ class AudioImporter(
 
     /**
      * Elimina el archivo de audio si pertenece a los directorios internos administrados
-     * (`filesDir/downloads` o `filesDir/opened_audio`).
+     * (`filesDir/downloads`, `filesDir/opened_audio`) o a `Aura Music/Música` cuando la carpeta
+     * del sistema está activa (evitando que vuelva a importarse automáticamente al reiniciar).
      */
     suspend fun deleteOwnedDownloadFileIfExists(contentUri: String) = withContext(Dispatchers.IO) {
         val parsed = runCatching { Uri.parse(contentUri) }.getOrNull() ?: return@withContext
@@ -374,10 +411,14 @@ class AudioImporter(
         val target = File(path)
         val canonicalTarget = runCatching { target.canonicalPath }.getOrNull() ?: return@withContext
 
-        val ownedDirs = listOf(
-            File(context.filesDir, "downloads"),
-            File(context.filesDir, "opened_audio"),
-        )
+        val ownedDirs = buildList {
+            add(File(context.filesDir, "downloads"))
+            add(File(context.filesDir, "opened_audio"))
+            if (isSystemFolderActive()) {
+                add(AuraSystemStorageManager.getMusicDir())
+                add(AuraSystemStorageManager.getRootDir())
+            }
+        }
         val belongsToAppStorage = ownedDirs.any { dir ->
             val canonicalDir = runCatching { dir.canonicalPath }.getOrNull()
             canonicalDir != null && canonicalTarget.startsWith(canonicalDir + File.separator)
@@ -410,13 +451,14 @@ class AudioImporter(
 
     /**
      * Convierte una imagen elegida de la galería del usuario a WebP sin pérdida de calidad
-     * con máxima compresión y la guarda en `filesDir/covers/` fuera del hilo principal.
+     * con máxima compresión y la guarda en `filesDir/covers/` (o `Aura Music/Carátulas/` si
+     * está activa la carpeta pública del sistema) fuera del hilo principal.
      */
     suspend fun saveCustomCoverAsLosslessWebp(
         trackId: Long,
         imageUri: Uri,
     ): String? = withContext(Dispatchers.IO) {
-        val coversDir = File(context.filesDir, "covers").apply { mkdirs() }
+        val coversDir = resolveCoversDirectory(isSystemFolderActive())
         val outputFile = File(coversDir, "custom_${trackId}_${System.currentTimeMillis()}.webp")
 
         val decoded = decodeGalleryBitmapSafely(imageUri, maxEdgePx = 1080) ?: return@withContext null
@@ -598,7 +640,113 @@ class AudioImporter(
         )
     }
 
-    private suspend fun extractTrackWithCover(uri: Uri, accentArgb: Int): Track? {
+    /**
+     * Extrae metadatos, carátula y huella digital en Rust para un archivo local dentro de
+     * `Aura Music/Música`, guardando su carátula directamente en `coversDirOverride`.
+     */
+    suspend fun extractTrackFromLocalFile(
+        audioFile: File,
+        coversDirOverride: File,
+        accentArgb: Int,
+    ): Track? = withContext(Dispatchers.IO) {
+        if (!audioFile.exists() || !audioFile.isFile || audioFile.length() <= 0L) {
+            return@withContext null
+        }
+        extractTrackWithCover(
+            uri = Uri.fromFile(audioFile),
+            accentArgb = accentArgb,
+            coversDirOverride = coversDirOverride,
+        )
+    }
+
+    private suspend fun isSystemFolderActive(): Boolean {
+        val enabled = storagePreferencesRepository?.systemFolderEnabled?.first() ?: false
+        return enabled && AuraSystemStorageManager.hasStoragePermission(context)
+    }
+
+    private fun resolveCoversDirectory(systemFolderActive: Boolean): File {
+        val dir = if (systemFolderActive) {
+            AuraSystemStorageManager.getCoversDir()
+        } else {
+            File(context.filesDir, "covers")
+        }
+        if (!dir.exists()) {
+            dir.mkdirs()
+        }
+        if (systemFolderActive && dir.isDirectory) {
+            val noMedia = File(dir, ".nomedia")
+            if (!noMedia.exists()) {
+                runCatching { noMedia.createNewFile() }
+            }
+        }
+        return dir
+    }
+
+    private fun moveFileIntoSystemMusicFolder(
+        sourceFile: File,
+        title: String,
+        artist: String,
+        fingerprint: String,
+    ): File? {
+        if (!sourceFile.exists() || sourceFile.length() <= 0L) return null
+        val musicDir = AuraSystemStorageManager.getMusicDir().apply { mkdirs() }
+        if (!musicDir.isDirectory) return null
+
+        val ext = sourceFile.extension.ifBlank { "mp3" }
+        var dest = File(
+            musicDir,
+            SystemFolderHelper.buildTrackAudioFileName(
+                title = title,
+                artist = artist,
+                extension = ext,
+                fingerprint = fingerprint,
+                disambiguate = false,
+            ),
+        )
+        if (dest.exists()) {
+            dest = File(
+                musicDir,
+                SystemFolderHelper.buildTrackAudioFileName(
+                    title = title,
+                    artist = artist,
+                    extension = ext,
+                    fingerprint = fingerprint,
+                    disambiguate = true,
+                ),
+            )
+        }
+        if (dest.exists()) {
+            dest = File(musicDir, "${dest.nameWithoutExtension}_${System.currentTimeMillis()}.$ext")
+        }
+
+        val tmp = File(musicDir, ".${dest.name}.tmp")
+        return runCatching {
+            sourceFile.inputStream().use { input ->
+                FileOutputStream(tmp).use { output ->
+                    input.copyTo(output, bufferSize = 32 * 1024)
+                }
+            }
+            if (!tmp.renameTo(dest)) {
+                tmp.copyTo(dest, overwrite = true)
+                tmp.delete()
+            }
+            if (dest.exists() && dest.length() > 0L) {
+                runCatching { sourceFile.delete() }
+                dest
+            } else {
+                null
+            }
+        }.getOrElse {
+            runCatching { tmp.delete() }
+            null
+        }
+    }
+
+    private suspend fun extractTrackWithCover(
+        uri: Uri,
+        accentArgb: Int,
+        coversDirOverride: File? = null,
+    ): Track? {
         val localFile = if (uri.scheme == "file") uri.path?.let(::File) else null
         val docFile = if (localFile == null) DocumentFile.fromSingleUri(context, uri) else null
         val fallbackName = (localFile?.nameWithoutExtension
@@ -626,10 +774,11 @@ class AudioImporter(
                 sizeBytes = sizeBytes,
             )
 
+            val coversDir = coversDirOverride ?: resolveCoversDirectory(isSystemFolderActive())
             val embeddedBytes = metadata.embeddedCoverBytes
             val (coverPath, isProcedural) = coverWriteMutex.withLock {
                 if (embeddedBytes != null && embeddedBytes.isNotEmpty()) {
-                    saveEmbeddedCover(fingerprint, embeddedBytes) to false
+                    saveEmbeddedCover(fingerprint, embeddedBytes, coversDir) to false
                 } else {
                     // Sin carátula embebida: Rust genera una carátula procedural única (sin IA).
                     val seedKey = "$title|$artist|$album|$fingerprint"
@@ -638,6 +787,7 @@ class AudioImporter(
                         fingerprint = fingerprint,
                         seedKey = seedKey,
                         accentArgb = accentArgb,
+                        outputDirectory = coversDir,
                     )
                     path to true
                 }
@@ -659,8 +809,12 @@ class AudioImporter(
         }
     }
 
-    private fun saveEmbeddedCover(fingerprint: String, bytes: ByteArray): String {
-        val coversDir = File(context.filesDir, "covers").apply { mkdirs() }
+    private fun saveEmbeddedCover(
+        fingerprint: String,
+        bytes: ByteArray,
+        coversDir: File,
+    ): String {
+        if (!coversDir.exists()) coversDir.mkdirs()
         val extension = detectImageExtension(bytes)
         val file = File(coversDir, "emb_${fingerprint.take(24)}.$extension")
         if (!file.exists() || file.length() == 0L) {

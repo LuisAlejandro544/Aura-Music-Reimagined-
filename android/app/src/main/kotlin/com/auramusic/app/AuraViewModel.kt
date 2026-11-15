@@ -21,6 +21,7 @@ import com.auramusic.core.model.PlaybackTuning
 import com.auramusic.core.model.PlaybackTuningHelper
 import com.auramusic.core.model.Playlist
 import com.auramusic.core.model.SleepTimerState
+import com.auramusic.core.model.SystemFolderStorageState
 import com.auramusic.core.model.Track
 import com.auramusic.core.rust.AuraRustBridge
 import kotlinx.coroutines.Dispatchers
@@ -64,6 +65,7 @@ class AuraViewModel(
 
     init {
         audioTuningCoordinator = AuraAudioTuningCoordinator(
+            appContext = container.appContext,
             scope = viewModelScope,
             playerController = container.playerController,
             equalizerPreferencesRepository = container.equalizerPreferencesRepository,
@@ -71,6 +73,7 @@ class AuraViewModel(
             headphonePreferencesRepository = container.headphonePreferencesRepository,
             audioOutputMonitor = container.audioOutputMonitor,
             playbackTuningProvider = { playbackCoordinator.playbackTuning.value },
+            onPlayerConfigPersisted = { container.systemStorageManager.syncJsonSnapshotsIfEnabled() },
         )
 
         playbackCoordinator = AuraPlaybackCoordinator(
@@ -81,15 +84,20 @@ class AuraViewModel(
             onEffectsAdjustedByManualTuning = { updatedFx ->
                 audioTuningCoordinator.updateAudioEffectsState(updatedFx)
             },
+            onPlaybackTuningChanged = { updatedTuning ->
+                audioTuningCoordinator.persistPlayerConfigSnapshot(tuning = updatedTuning)
+            },
         )
 
         libraryCoordinator = AuraLibraryCoordinator(
+            appContext = container.appContext,
             scope = viewModelScope,
             musicRepository = container.musicRepository,
             themePreferencesRepository = container.themePreferencesRepository,
             downloaderPreferencesRepository = container.downloaderPreferencesRepository,
             audioImporter = container.audioImporter,
-            ytDlpAudioDownloader = container.ytDlpAudioDownloader,
+            systemStorageManager = container.systemStorageManager,
+            downloaderClient = container.downloaderRemoteClient,
             playerController = container.playerController,
             onOpenPlayerRequested = { _openPlayerChannel.trySend(Unit) },
             onUiMessage = { message -> _uiMessagesChannel.trySend(message) },
@@ -122,10 +130,10 @@ class AuraViewModel(
             val savedTuning = tuningJob.await()
             val savedFx = fxJob.await()
             val savedHp = hpJob.await()
-            container.playerController.updateHeadphoneControlTuning(
-                previousRestartThresholdMs = savedHp.previousRestartThresholdMs,
-                wrapQueueNavigation = savedHp.wrapQueueNavigation,
-            )
+            container.playerController.syncEqualizer(savedEq)
+            container.playerController.syncPlaybackTuning(savedTuning)
+            container.playerController.syncAudioEffects(savedFx)
+            container.playerController.syncHeadphonePreferences(savedHp)
             audioTuningCoordinator.syncEffectsToRust(savedFx, audioOutputRoute.value, savedHp)
             val resolvedParams = PlaybackTuningHelper.resolvePlaybackParameters(savedTuning, savedFx)
             container.playerController.setPlaybackParameters(resolvedParams.speed, resolvedParams.pitch)
@@ -138,6 +146,22 @@ class AuraViewModel(
 
         audioTuningCoordinator.startSyncLoops()
         libraryCoordinator.refreshDownloaderStatusInBackground()
+        libraryCoordinator.refreshSystemFolderAndAutoSync()
+    }
+
+    fun onUiForeground() {
+        container.playerController.onUiAttached()
+        libraryCoordinator.setDownloaderUiForeground(true)
+        libraryCoordinator.refreshSystemFolderAndAutoSync()
+    }
+
+    fun onUiBackground() {
+        container.playerController.onUiDetached()
+        libraryCoordinator.setDownloaderUiForeground(false)
+    }
+
+    fun setDownloaderScreenActive(active: Boolean) {
+        libraryCoordinator.setDownloaderScreenActive(active)
     }
 
     val accentColor: StateFlow<AppAccentColor>
@@ -196,6 +220,9 @@ class AuraViewModel(
 
     val downloaderEngineStatus: StateFlow<DownloaderEngineStatus>
         get() = libraryCoordinator.downloaderEngineStatus
+
+    val systemFolderState: StateFlow<SystemFolderStorageState>
+        get() = libraryCoordinator.systemFolderState
 
     fun observePlaylistName(playlistId: Long): Flow<String?> =
         libraryCoordinator.observePlaylistName(playlistId)
@@ -325,6 +352,14 @@ class AuraViewModel(
 
     fun setDeleteAnimationsEnabled(enabled: Boolean) =
         libraryCoordinator.setDeleteAnimationsEnabled(enabled)
+
+    fun setSystemFolderEnabled(enabled: Boolean, requestPermission: () -> Unit) =
+        libraryCoordinator.setSystemFolderEnabled(enabled, requestPermission)
+
+    fun onSystemFolderPermissionResult(granted: Boolean) =
+        libraryCoordinator.onSystemFolderPermissionResult(granted)
+
+    fun syncSystemFolderNow() = libraryCoordinator.syncSystemFolderNow()
 
     /**
      * Actualiza el nombre de la canción y el nombre del artista en Room.

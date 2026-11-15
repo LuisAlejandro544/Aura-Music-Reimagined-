@@ -18,31 +18,31 @@
 │   ├── app/                           # Módulo ejecutable principal (:app)
 │   │   ├── build.gradle.kts           # minSdk 26, targetSdk 35, ABIs 32/64 bits, useLegacyPackaging = true
 │   │   └── src/main/
-│   │       ├── AndroidManifest.xml    # Permisos de red (INTERNET), foreground service (mediaPlayback/dataSync), WAKE_LOCK e intent-filter ACTION_VIEW ("Abrir con")
+│   │       ├── AndroidManifest.xml    # Permisos de red (INTERNET), almacenamiento opcional para Aura Music (READ/WRITE/MANAGE_EXTERNAL_STORAGE), foreground service (mediaPlayback/dataSync), WAKE_LOCK e intent-filter ACTION_VIEW
 │   │       ├── res/                   # Icono adaptativo, strings y tema base
 │   │       └── kotlin/com/auramusic/app/
-│   │           ├── AuraApplication.kt           # Contenedor modular de dependencias (implementa AuraDownloadHost y AuraPlaybackTuningProvider, inicia AuraAudioOutputMonitor)
+│   │           ├── AuraApplication.kt           # Contenedor multi-proceso (MAIN, :player, :downloader), Coil acotado RGB_565 y onTrimMemory
 │   │           ├── AuraTheme.kt                 # Esquema de color Material 3 dinámico
 │   │           ├── AuraPlaybackCoordinator.kt   # Coordinador modular de cola, transporte, velocidad, tono de voz, Crossfade y temporizador
 │   │           ├── AuraAudioTuningCoordinator.kt # Coordinador modular de ecualizador, efectos Rust y preferencias de auriculares/AVRCP
-│   │           ├── AuraLibraryCoordinator.kt    # Coordinador modular de biblioteca, playlists, importación SAF, descargas yt-dlp y tema visual
+│   │           ├── AuraLibraryCoordinator.kt    # Coordinador modular de biblioteca, playlists, importación SAF, carpeta del sistema Aura Music, descargas yt-dlp y tema visual
 │   │           ├── AuraViewModel.kt             # Orquestador StateFlow principal conectado a los coordinadores modulares de :app
-│   │           ├── AuraAppChrome.kt             # Launchers SAF y barra inferior compartida (MiniPlayerBar + NavigationBar)
-│   │           ├── AuraAppRoot.kt               # Navegación (incluye QueueScreen, ArtistDetailScreen y AudioEffectsScreen), EditTrackMetadataDialog y apertura desde intents externos
-│   │           └── MainActivity.kt              # Punto de entrada edge-to-edge y receptor onCreate/onNewIntent para ACTION_VIEW
+│   │           ├── AuraAppChrome.kt             # Launchers SAF, flujo de permisos de almacenamiento y barra inferior compartida
+│   │           ├── AuraAppRoot.kt               # Navegación (incluye QueueScreen, ArtistDetailScreen, AudioEffectsScreen y SettingsSystemFolderScreen) y modales
+│   │           └── MainActivity.kt              # Punto de entrada edge-to-edge, ciclo onStart/onStop y receptor ACTION_VIEW
 │   ├── core/
-│   │   ├── model/                     # Entidades y lógica pura (Track, Playlist, ArtistPlaylistBuilder, TrackMetadataHelper, AudioDownloadQuality, DownloadFormatHelper, PlaybackQueueHelper, PlaybackTuningHelper, SleepTimerState, SleepTimerHelper, AudioEffectsState, AudioOutputRouteState, HeadphonePreferences, HeadphoneRoutingHelper, DownloadState, EqualizerState, etc.)
+│   │   ├── model/                     # Entidades y lógica pura (Track, Playlist, ArtistPlaylistBuilder, TrackMetadataHelper, AudioDownloadQuality, DownloadFormatHelper, PlaybackQueueHelper, PlaybackTuningHelper, SleepTimerState, SleepTimerHelper, AudioEffectsState, AudioOutputRouteState, HeadphonePreferences, HeadphoneRoutingHelper, SystemFolderStorageState, SystemFolderHelper, AuraProcessRole, MemoryTrimPolicy, etc.)
 │   │   ├── rust/                      # Puente JNI (AuraRustBridge), códec y tarea cargo-ndk (--lib --bin aura_qjs)
-│   │   ├── database/                  # Room (DAOs, entidades, actualización local de metadatos, AuraMigrations) y DataStore (tema, EQ, 8D/Reverb/Slowed/Crossfeed, auriculares/AVRCP, animaciones, crossfade/velocidad/tono de voz, calidad de descarga y auto-update)
-│   │   ├── importer/                  # Importador SAF, receptor seguro "Abrir con" (opened_audio/), importación de audio descargado vía Rust fd y WebP sin pérdida
-│   │   ├── downloader/                # Chaquopy Python 3.11 (.pyc), aura_ytdlp.py, AuraDownloadForegroundService (dataSync) y AndroidManifest.xml
-│   │   └── player/                    # Media3 ExoPlayer, AuraAudioOutputMonitor (AudioDeviceCallback), AuraSleepTimerBridge (comandos y estado del temporizador), AuraPlaybackService (Crossfade + Velocidad + Tono de voz + Slowed varispeed + Temporizador + AuraMediaSessionCallback + SessionControlForwardingPlayer + setSessionActivity), AuraPlayerController, RustEqualizerAudioProcessor y res/drawable/ic_aura_notification.xml
+│   │   ├── database/                  # Room (DAOs, entidades, migración de rutas de almacenamiento, AuraMigrations) y DataStore (tema, EQ, 8D/Reverb/Slowed/Crossfeed, auriculares/AVRCP, carpeta del sistema desactivada por defecto, animaciones, crossfade/velocidad/tono de voz, calidad y auto-update)
+│   │   ├── importer/                  # Importador SAF, AuraSystemStorageManager (carpeta pública Aura Music/Música, Carátulas y .json), receptor "Abrir con" (opened_audio/), importación Rust fd y WebP sin pérdida
+│   │   ├── downloader/                # Chaquopy Python 3.11 (.pyc), aura_ytdlp.py, AuraDownloadForegroundService (proceso :downloader), AuraDownloaderIpc y AuraDownloaderRemoteClient
+│   │   └── player/                    # Media3 ExoPlayer en proceso :player, AuraAudioOutputMonitor, AuraSleepTimerBridge, AuraPlayerConfigStore, AuraPlayerIpc, AuraPlaybackService, AuraPlayerController y RustEqualizerAudioProcessor
 │   ├── feature/
 │   │   ├── library/                   # Pantalla Biblioteca + buscador + menú de cola/edición de metadatos + hoja de importación / enlace a descargas + animación Rust
 │   │   ├── downloader/                # Pantalla dedicada Descargar audio + selector de calidad/formato real + vista previa + cancelación + auto-actualizador (sin WebView)
 │   │   ├── playlists/                 # PlaylistsScreen (pestañas Mis playlists y Artistas), LikedSongsScreen, PlaylistDetailScreen y ArtistDetailScreen (con edición de metadatos)
 │   │   ├── player/                    # MiniPlayerBar, PlayerScreen (menú de 3 puntos con Velocidad/Tono de voz y Crossfade, Temporizador, 8D/Reverb/Slowed/Crossfeed, edición de metadatos), SleepTimerBottomSheet, QueueScreen y CoverDynamicTheme (Palette + MaterialKolor)
-│   │   ├── settings/                  # Pantalla Ajustes (color global, toggles carátula dinámica/animaciones Rust, salida de audio/auriculares, botones multimedia cable/Bluetooth AVRCP y estado Rust)
+│   │   ├── settings/                  # Hub de Ajustes + subpantallas dedicadas (Tema, Efectos visuales, Auriculares, Botones multimedia y Carpeta del sistema Aura Music)
 │   │   ├── equalizer/                 # Pantalla dedicada del ecualizador de 10 bandas (abierta desde PlayerScreen)
 │   │   └── effects/                   # Pantalla dedicada AudioEffectsScreen para Crossfeed binaural estático, Audio 8D, Reverb estéreo y modo Slowed en Rust (abierta desde PlayerScreen)
 │   └── rust/aura_core/                # Crate Rust (Edition 2024)

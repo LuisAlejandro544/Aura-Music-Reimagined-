@@ -151,8 +151,9 @@ object AuraRustBridge {
         seedKey: String,
         accentArgb: Int = 0,
         sizePx: Int = 640,
+        outputDirectory: File? = null,
     ): String = withContext(Dispatchers.Default) {
-        val coversDir = File(context.filesDir, "covers").apply { mkdirs() }
+        val coversDir = (outputDirectory ?: File(context.filesDir, "covers")).apply { mkdirs() }
         val outputFile = File(coversDir, "proc_${fingerprint.take(24)}.png")
         if (outputFile.exists() && outputFile.length() > 0L) {
             return@withContext outputFile.absolutePath

@@ -5,6 +5,7 @@
         <service
             android:name="com.auramusic.core.player.AuraPlaybackService"
             android:exported="true"
+            android:process=":player"
             android:foregroundServiceType="mediaPlayback">
             <intent-filter>
                 <action android:name="androidx.media3.session.MediaSessionService" />

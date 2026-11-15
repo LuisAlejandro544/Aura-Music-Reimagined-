@@ -176,10 +176,58 @@ class MusicRepository(
             trackDao.countTracksUsingCoverPath(previousPath) == 0
         ) {
             val previousFile = java.io.File(previousPath)
-            if (previousFile.parentFile?.name == "covers" && previousFile.exists()) {
+            val parentName = previousFile.parentFile?.name
+            if ((parentName == "covers" || parentName == "Carátulas") && previousFile.exists()) {
                 runCatching { previousFile.delete() }
             }
         }
+    }
+
+    /**
+     * Devuelve una instantánea de todas las pistas registradas en Room (fuera del hilo principal).
+     */
+    suspend fun getAllTracksOnce(): List<Track> = withContext(Dispatchers.IO) {
+        trackDao.getAllTracksOnce().map { it.toDomain() }
+    }
+
+    /**
+     * Devuelve una instantánea de todas las playlists y sus referencias de canciones para respaldo JSON.
+     */
+    suspend fun getPlaylistsSnapshotOnce(): Pair<List<Playlist>, List<PlaylistTrackCrossRef>> =
+        withContext(Dispatchers.IO) {
+            val playlists = playlistDao.getAllPlaylistsOnce().map { entity ->
+                Playlist(
+                    id = entity.id,
+                    name = entity.name,
+                    createdAt = entity.createdAt,
+                )
+            }
+            val refs = playlistDao.getAllCrossRefsOnce()
+            playlists to refs
+        }
+
+    /**
+     * Actualiza de forma segura la URI del audio y la ruta de su carátula tras migrarlos
+     * hacia la carpeta pública `Aura Music`, evitando colisiones de índice único en Room.
+     */
+    suspend fun updateTrackStorageLocation(
+        trackId: Long,
+        newContentUri: String,
+        newCoverPath: String?,
+    ): Boolean = withContext(Dispatchers.IO) {
+        val current = trackDao.getById(trackId) ?: return@withContext false
+        if (current.contentUri != newContentUri) {
+            val conflict = trackDao.findByUriOrFingerprint(newContentUri, current.trackFingerprint)
+            if (conflict != null && conflict.id != trackId && conflict.contentUri == newContentUri) {
+                return@withContext false
+            }
+        }
+        trackDao.updateStorageLocation(
+            trackId = trackId,
+            contentUri = newContentUri,
+            coverFilePath = newCoverPath,
+        )
+        true
     }
 
     /**
@@ -191,7 +239,8 @@ class MusicRepository(
 
         if (!coverPath.isNullOrBlank() && trackDao.countTracksUsingCoverPath(coverPath) == 0) {
             val coverFile = java.io.File(coverPath)
-            if (coverFile.parentFile?.name == "covers" && coverFile.exists()) {
+            val parentName = coverFile.parentFile?.name
+            if ((parentName == "covers" || parentName == "Carátulas") && coverFile.exists()) {
                 runCatching { coverFile.delete() }
             }
         }
@@ -557,6 +606,29 @@ class HeadphonePreferencesRepository(
                 prefs[seekStepSecondsKey] = HeadphoneRoutingHelper.clampSeekStepSeconds(
                     normalized.seekStepSeconds,
                 )
+            }
+        }
+    }
+}
+
+/**
+ * Repositorio de preferencias en Jetpack DataStore para el modo opcional de carpeta pública
+ * del sistema (`Aura Music/Música`, `Carátulas` y archivos `.json`).
+ * Por defecto permanece desactivado (`false`).
+ */
+class StoragePreferencesRepository(
+    private val context: Context,
+) {
+    private val systemFolderEnabledKey = booleanPreferencesKey("system_folder_enabled")
+
+    val systemFolderEnabled: Flow<Boolean> = context.auraSettingsDataStore.data.map { prefs ->
+        prefs[systemFolderEnabledKey] ?: false
+    }
+
+    suspend fun setSystemFolderEnabled(enabled: Boolean) {
+        withContext(Dispatchers.IO) {
+            context.auraSettingsDataStore.edit { prefs ->
+                prefs[systemFolderEnabledKey] = enabled
             }
         }
     }

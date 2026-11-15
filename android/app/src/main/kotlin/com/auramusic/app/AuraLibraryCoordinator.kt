@@ -1,11 +1,13 @@
 package com.auramusic.app
 
+import android.content.Context
 import android.net.Uri
 import com.auramusic.core.database.DownloaderPreferencesRepository
 import com.auramusic.core.database.MusicRepository
 import com.auramusic.core.database.ThemePreferencesRepository
-import com.auramusic.core.downloader.YtDlpAudioDownloader
+import com.auramusic.core.downloader.AuraDownloaderRemoteClient
 import com.auramusic.core.importer.AudioImporter
+import com.auramusic.core.importer.AuraSystemStorageManager
 import com.auramusic.core.model.AppAccentColor
 import com.auramusic.core.model.ArtistPlaylist
 import com.auramusic.core.model.ArtistPlaylistBuilder
@@ -14,6 +16,7 @@ import com.auramusic.core.model.DownloadState
 import com.auramusic.core.model.DownloaderEngineStatus
 import com.auramusic.core.model.ImportProgress
 import com.auramusic.core.model.Playlist
+import com.auramusic.core.model.SystemFolderStorageState
 import com.auramusic.core.model.Track
 import com.auramusic.core.player.AuraPlayerController
 import kotlinx.coroutines.CoroutineScope
@@ -28,20 +31,24 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
 /**
- * Coordinador modular de biblioteca, playlists, importación SAF, descargas yt-dlp,
- * edición local de metadatos/carátulas y preferencias visuales.
+ * Coordinador modular de biblioteca, playlists, importación SAF, descargas aisladas vía IPC
+ * (`AuraDownloaderRemoteClient`), edición local de metadatos/carátulas y preferencias visuales.
  */
 class AuraLibraryCoordinator(
+    private val appContext: Context,
     private val scope: CoroutineScope,
     private val musicRepository: MusicRepository,
     private val themePreferencesRepository: ThemePreferencesRepository,
     private val downloaderPreferencesRepository: DownloaderPreferencesRepository,
     private val audioImporter: AudioImporter,
-    private val ytDlpAudioDownloader: YtDlpAudioDownloader,
+    private val systemStorageManager: AuraSystemStorageManager,
+    private val downloaderClient: AuraDownloaderRemoteClient,
     private val playerController: AuraPlayerController,
     private val onOpenPlayerRequested: () -> Unit,
     private val onUiMessage: (String) -> Unit,
 ) {
+    @Volatile
+    private var pendingEnableSystemFolder = false
     val accentColor: StateFlow<AppAccentColor> = themePreferencesRepository.accentColor
         .stateIn(
             scope = scope,
@@ -65,32 +72,33 @@ class AuraLibraryCoordinator(
                 initialValue = true,
             )
 
+    // WhileSubscribed(5_000) evita recalcular mapas y colecciones de biblioteca cuando la UI no está activa.
     val tracks: StateFlow<List<Track>> = musicRepository.observeAllTracks()
         .onEach { updated -> playerController.refreshTrackSnapshots(updated) }
         .stateIn(
             scope = scope,
-            started = SharingStarted.Eagerly,
+            started = SharingStarted.WhileSubscribed(5_000L),
             initialValue = emptyList(),
         )
 
     val likedTracks: StateFlow<List<Track>> = musicRepository.observeLikedTracks()
         .stateIn(
             scope = scope,
-            started = SharingStarted.Eagerly,
+            started = SharingStarted.WhileSubscribed(5_000L),
             initialValue = emptyList(),
         )
 
     val likedCount: StateFlow<Int> = musicRepository.observeLikedCount()
         .stateIn(
             scope = scope,
-            started = SharingStarted.Eagerly,
+            started = SharingStarted.WhileSubscribed(5_000L),
             initialValue = 0,
         )
 
     val playlists: StateFlow<List<Playlist>> = musicRepository.observePlaylists()
         .stateIn(
             scope = scope,
-            started = SharingStarted.Eagerly,
+            started = SharingStarted.WhileSubscribed(5_000L),
             initialValue = emptyList(),
         )
 
@@ -98,20 +106,123 @@ class AuraLibraryCoordinator(
         .map { currentTracks -> ArtistPlaylistBuilder.buildFromTracks(currentTracks) }
         .stateIn(
             scope = scope,
-            started = SharingStarted.Eagerly,
+            started = SharingStarted.WhileSubscribed(5_000L),
             initialValue = emptyList(),
         )
 
     val importProgress: StateFlow<ImportProgress> = audioImporter.progress
 
-    val downloadState: StateFlow<DownloadState> = ytDlpAudioDownloader.downloadState
+    val downloadState: StateFlow<DownloadState> = downloaderClient.downloadState
 
-    val downloaderEngineStatus: StateFlow<DownloaderEngineStatus> = ytDlpAudioDownloader.engineStatus
+    val downloaderEngineStatus: StateFlow<DownloaderEngineStatus> = downloaderClient.engineStatus
 
+    val systemFolderState: StateFlow<SystemFolderStorageState> = systemStorageManager.state
+
+    /**
+     * Lee el estado en caché de versiones del descargador e importa cualquier pista terminada
+     * pendiente en `pending_imports/` sin arrancar Python/Chaquopy en el proceso principal.
+     */
     fun refreshDownloaderStatusInBackground() {
         scope.launch(Dispatchers.IO) {
-            runCatching { ytDlpAudioDownloader.refreshEngineStatus() }
+            runCatching {
+                downloaderClient.refreshCachedStatus()
+                val drained = downloaderClient.drainPendingImports(accentColor.value.primaryArgb.toInt())
+                if (drained > 0) {
+                    systemStorageManager.syncJsonSnapshotsIfEnabled()
+                }
+            }
         }
+    }
+
+    /**
+     * Comprueba permisos y, si la carpeta pública `Aura Music` está activa, escanea
+     * `Aura Music/Música` al entrar o volver a la app para detectar canciones copiadas manualmente.
+     */
+    fun refreshSystemFolderAndAutoSync() {
+        scope.launch(Dispatchers.IO) {
+            runCatching {
+                systemStorageManager.refreshState()
+                val hasPermission = AuraSystemStorageManager.hasStoragePermission(appContext)
+                if (pendingEnableSystemFolder && hasPermission) {
+                    pendingEnableSystemFolder = false
+                    val result = systemStorageManager.enableAndMigrate(
+                        accentArgb = accentColor.value.primaryArgb.toInt(),
+                    )
+                    result.statusMessage?.let(onUiMessage)
+                    return@launch
+                }
+
+                val discovered = systemStorageManager.syncOnAppEntryOrManual(
+                    accentArgb = accentColor.value.primaryArgb.toInt(),
+                    migrateRemainingTracks = false,
+                )
+                if (discovered > 0) {
+                    val label = if (discovered == 1) "canción nueva detectada" else "canciones nuevas detectadas"
+                    onUiMessage("Aura Music: $discovered $label en la carpeta del sistema.")
+                }
+            }
+        }
+    }
+
+    fun setSystemFolderEnabled(
+        enabled: Boolean,
+        requestPermission: () -> Unit,
+    ) {
+        if (!enabled) {
+            pendingEnableSystemFolder = false
+            scope.launch(Dispatchers.IO) {
+                systemStorageManager.disableSystemFolder()
+            }
+            return
+        }
+
+        if (!AuraSystemStorageManager.hasStoragePermission(appContext)) {
+            pendingEnableSystemFolder = true
+            requestPermission()
+            return
+        }
+
+        pendingEnableSystemFolder = false
+        scope.launch(Dispatchers.IO) {
+            val result = systemStorageManager.enableAndMigrate(
+                accentArgb = accentColor.value.primaryArgb.toInt(),
+            )
+            result.statusMessage?.let(onUiMessage)
+        }
+    }
+
+    fun onSystemFolderPermissionResult(granted: Boolean) {
+        scope.launch(Dispatchers.IO) {
+            systemStorageManager.refreshState()
+            val actuallyGranted = granted || AuraSystemStorageManager.hasStoragePermission(appContext)
+            pendingEnableSystemFolder = false
+            if (actuallyGranted) {
+                val result = systemStorageManager.enableAndMigrate(
+                    accentArgb = accentColor.value.primaryArgb.toInt(),
+                )
+                result.statusMessage?.let(onUiMessage)
+            } else {
+                onUiMessage("Permiso de almacenamiento denegado. La carpeta Aura Music sigue desactivada.")
+            }
+        }
+    }
+
+    fun syncSystemFolderNow() {
+        scope.launch(Dispatchers.IO) {
+            systemStorageManager.syncOnAppEntryOrManual(
+                accentArgb = accentColor.value.primaryArgb.toInt(),
+                migrateRemainingTracks = true,
+            )
+            systemStorageManager.state.value.statusMessage?.let(onUiMessage)
+        }
+    }
+
+    fun setDownloaderUiForeground(inForeground: Boolean) {
+        downloaderClient.setUiForeground(inForeground)
+    }
+
+    fun setDownloaderScreenActive(active: Boolean) {
+        downloaderClient.setScreenActive(active)
     }
 
     fun observePlaylistName(playlistId: Long): Flow<String?> =
@@ -131,6 +242,7 @@ class AuraLibraryCoordinator(
                 uris = uris,
                 accentArgb = accentColor.value.primaryArgb.toInt(),
             )
+            systemStorageManager.syncJsonSnapshotsIfEnabled()
         }
     }
 
@@ -140,6 +252,7 @@ class AuraLibraryCoordinator(
                 treeUri = treeUri,
                 accentArgb = accentColor.value.primaryArgb.toInt(),
             )
+            systemStorageManager.syncJsonSnapshotsIfEnabled()
         }
     }
 
@@ -148,57 +261,53 @@ class AuraLibraryCoordinator(
     }
 
     fun inspectDownloadUrl(url: String) {
-        scope.launch {
-            ytDlpAudioDownloader.inspectAudioUrl(rawUrl = url)
-        }
+        downloaderClient.inspectAudioUrl(rawUrl = url)
     }
 
     fun confirmPendingDownload() {
-        ytDlpAudioDownloader.startBackgroundConfirmedDownload(
+        downloaderClient.startBackgroundConfirmedDownload(
             accentArgb = accentColor.value.primaryArgb.toInt(),
         )
     }
 
     fun downloadAudioFromUrl(url: String) {
-        ytDlpAudioDownloader.startBackgroundUrlDownload(
+        downloaderClient.startBackgroundUrlDownload(
             rawUrl = url,
             accentArgb = accentColor.value.primaryArgb.toInt(),
         )
     }
 
     fun cancelActiveDownload() {
-        ytDlpAudioDownloader.requestCancelDownload()
+        downloaderClient.requestCancelDownload()
     }
 
     fun checkDownloaderUpdates() {
-        scope.launch {
-            ytDlpAudioDownloader.checkAndUpdateEngines(force = true)
-        }
+        downloaderClient.checkAndUpdateEngines(force = true)
     }
 
     fun setDownloaderAutoUpdate(enabled: Boolean) {
         scope.launch {
             downloaderPreferencesRepository.setAutoUpdateEnabled(enabled)
-            ytDlpAudioDownloader.refreshEngineStatus()
+            downloaderClient.refreshCachedStatus()
         }
     }
 
     fun setDownloaderAudioQuality(quality: AudioDownloadQuality) {
         scope.launch {
-            ytDlpAudioDownloader.setPreferredAudioQuality(quality)
+            downloaderClient.setPreferredAudioQuality(quality)
         }
     }
 
     fun selectDownloaderPreviewFormat(formatId: String) {
-        ytDlpAudioDownloader.selectPreviewAudioFormat(formatId)
+        downloaderClient.selectPreviewAudioFormat(formatId)
     }
 
     fun dismissDownloadStatus() {
-        ytDlpAudioDownloader.clearDownloadStatus()
+        downloaderClient.clearDownloadStatus()
     }
 
     fun dismissDownloaderUpdateMessage() {
-        ytDlpAudioDownloader.clearUpdateMessage()
+        downloaderClient.clearUpdateMessage()
     }
 
     fun openExternalAudioUri(uri: Uri) {
@@ -218,6 +327,7 @@ class AuraLibraryCoordinator(
                 playerController.playQueue(queue, startIndex)
                 onOpenPlayerRequested()
                 onUiMessage("Abriendo en Aura Music: ${importedTrack.title}")
+                systemStorageManager.syncJsonSnapshotsIfEnabled()
             } else {
                 onUiMessage("No se pudo abrir el archivo de audio seleccionado.")
             }
@@ -227,18 +337,20 @@ class AuraLibraryCoordinator(
     fun toggleLike(trackId: Long) {
         scope.launch {
             musicRepository.toggleLike(trackId)
+            systemStorageManager.syncJsonSnapshotsIfEnabled()
         }
     }
 
     fun deleteTrack(trackId: Long) {
         scope.launch {
-            val snapshot = tracks.value
+            val snapshot = musicRepository.observeAllTracks().first()
             val targetTrack = snapshot.firstOrNull { it.id == trackId }
             musicRepository.deleteTrack(trackId)
             audioImporter.cleanupOrphanCovers()
             if (targetTrack != null && snapshot.none { it.id != trackId && it.contentUri == targetTrack.contentUri }) {
                 audioImporter.deleteOwnedDownloadFileIfExists(targetTrack.contentUri)
             }
+            systemStorageManager.syncJsonSnapshotsIfEnabled()
         }
     }
 
@@ -246,18 +358,21 @@ class AuraLibraryCoordinator(
         if (name.isBlank()) return
         scope.launch {
             musicRepository.createPlaylist(name)
+            systemStorageManager.syncJsonSnapshotsIfEnabled()
         }
     }
 
     fun deletePlaylist(playlistId: Long) {
         scope.launch {
             musicRepository.deletePlaylist(playlistId)
+            systemStorageManager.syncJsonSnapshotsIfEnabled()
         }
     }
 
     fun addTrackToPlaylist(playlistId: Long, trackId: Long) {
         scope.launch {
             musicRepository.addTrackToPlaylist(playlistId, trackId)
+            systemStorageManager.syncJsonSnapshotsIfEnabled()
         }
     }
 
@@ -266,12 +381,14 @@ class AuraLibraryCoordinator(
         scope.launch {
             val playlistId = musicRepository.createPlaylist(name)
             musicRepository.addTrackToPlaylist(playlistId, trackId)
+            systemStorageManager.syncJsonSnapshotsIfEnabled()
         }
     }
 
     fun removeTrackFromPlaylist(playlistId: Long, trackId: Long) {
         scope.launch {
             musicRepository.removeTrackFromPlaylist(playlistId, trackId)
+            systemStorageManager.syncJsonSnapshotsIfEnabled()
         }
     }
 
@@ -302,6 +419,7 @@ class AuraLibraryCoordinator(
             )
             if (updated != null) {
                 onUiMessage("Metadatos actualizados: ${updated.title}")
+                systemStorageManager.syncJsonSnapshotsIfEnabled()
             }
         }
     }
@@ -318,6 +436,7 @@ class AuraLibraryCoordinator(
                     newCoverPath = webpPath,
                     isProcedural = false,
                 )
+                systemStorageManager.syncJsonSnapshotsIfEnabled()
             }
         }
     }

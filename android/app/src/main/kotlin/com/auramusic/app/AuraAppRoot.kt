@@ -40,6 +40,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -70,6 +71,7 @@ import com.auramusic.feature.settings.SettingsAccentThemeScreen
 import com.auramusic.feature.settings.SettingsHeadphonesScreen
 import com.auramusic.feature.settings.SettingsMediaButtonsScreen
 import com.auramusic.feature.settings.SettingsScreen
+import com.auramusic.feature.settings.SettingsSystemFolderScreen
 import com.auramusic.feature.settings.SettingsVisualEffectsScreen
 import kotlinx.coroutines.launch
 
@@ -81,6 +83,7 @@ private object AuraRoutes {
     const val SETTINGS_VISUAL_FX = "settings/visual_fx"
     const val SETTINGS_HEADPHONES = "settings/headphones"
     const val SETTINGS_MEDIA_BUTTONS = "settings/media_buttons"
+    const val SETTINGS_SYSTEM_FOLDER = "settings/system_folder"
     const val EQUALIZER = "equalizer"
     const val AUDIO_EFFECTS = "audio_effects"
     const val DOWNLOADER = "downloader"
@@ -124,6 +127,8 @@ fun AuraAppRoot(viewModel: AuraViewModel) {
     val headphonePreferences by viewModel.headphonePreferences.collectAsStateWithLifecycle()
     val audioOutputRoute by viewModel.audioOutputRoute.collectAsStateWithLifecycle()
     val rustEngineInfo by viewModel.rustEngineInfo.collectAsStateWithLifecycle()
+    val systemFolderState by viewModel.systemFolderState.collectAsStateWithLifecycle()
+    val appContext = LocalContext.current
 
     val snackbarHostState = remember { SnackbarHostState() }
     val uiScope = rememberCoroutineScope()
@@ -173,6 +178,10 @@ fun AuraAppRoot(viewModel: AuraViewModel) {
         onImportFolder = viewModel::importFolder,
         onSetCustomTrackCover = viewModel::setCustomTrackCover,
     )
+    val requestSystemStoragePermission = rememberAuraSystemStoragePermissionLauncher(
+        context = appContext,
+        onPermissionEvaluated = viewModel::onSystemFolderPermissionResult,
+    )
 
     val navigateTopTab: (String) -> Unit = { route ->
         navController.navigate(route) {
@@ -207,7 +216,8 @@ fun AuraAppRoot(viewModel: AuraViewModel) {
                         currentRoute == AuraRoutes.SETTINGS_THEME ||
                         currentRoute == AuraRoutes.SETTINGS_VISUAL_FX ||
                         currentRoute == AuraRoutes.SETTINGS_HEADPHONES ||
-                        currentRoute == AuraRoutes.SETTINGS_MEDIA_BUTTONS,
+                        currentRoute == AuraRoutes.SETTINGS_MEDIA_BUTTONS ||
+                        currentRoute == AuraRoutes.SETTINGS_SYSTEM_FOLDER,
                     onOpenFullPlayer = {
                         navController.navigate(AuraRoutes.PLAYER) {
                             launchSingleTop = true
@@ -381,6 +391,7 @@ fun AuraAppRoot(viewModel: AuraViewModel) {
                         rustEngineInfo = rustEngineInfo,
                         outputRoute = audioOutputRoute,
                         headphonePreferences = headphonePreferences,
+                        systemFolderState = systemFolderState,
                         onOpenAccentTheme = {
                             navController.navigate(AuraRoutes.SETTINGS_THEME) {
                                 launchSingleTop = true
@@ -398,6 +409,11 @@ fun AuraAppRoot(viewModel: AuraViewModel) {
                         },
                         onOpenMediaButtons = {
                             navController.navigate(AuraRoutes.SETTINGS_MEDIA_BUTTONS) {
+                                launchSingleTop = true
+                            }
+                        },
+                        onOpenSystemFolder = {
+                            navController.navigate(AuraRoutes.SETTINGS_SYSTEM_FOLDER) {
                                 launchSingleTop = true
                             }
                         },
@@ -446,6 +462,26 @@ fun AuraAppRoot(viewModel: AuraViewModel) {
                     )
                 }
 
+                composable(AuraRoutes.SETTINGS_SYSTEM_FOLDER) {
+                    SettingsSystemFolderScreen(
+                        state = systemFolderState,
+                        onToggleEnabled = { enabled ->
+                            viewModel.setSystemFolderEnabled(
+                                enabled = enabled,
+                                requestPermission = requestSystemStoragePermission,
+                            )
+                        },
+                        onRequestPermission = {
+                            viewModel.setSystemFolderEnabled(
+                                enabled = true,
+                                requestPermission = requestSystemStoragePermission,
+                            )
+                        },
+                        onSyncNow = viewModel::syncSystemFolderNow,
+                        onBack = { navController.popBackStack() },
+                    )
+                }
+
                 composable(AuraRoutes.DOWNLOADER) {
                     DownloaderScreen(
                         downloadState = downloadState,
@@ -475,6 +511,7 @@ fun AuraAppRoot(viewModel: AuraViewModel) {
                         onSelectPreviewFormat = viewModel::selectDownloaderPreviewFormat,
                         onDismissDownloadStatus = viewModel::dismissDownloadStatus,
                         onDismissUpdateMessage = viewModel::dismissDownloaderUpdateMessage,
+                        onScreenActiveChanged = viewModel::setDownloaderScreenActive,
                     )
                 }
 

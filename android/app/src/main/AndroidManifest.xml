@@ -1,8 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- Manifiesto principal de Aura Music.
-     Solo solicita permisos mínimos para reproducción en segundo plano (Media3) y notificaciones
-     multimedia; no pide READ_EXTERNAL_STORAGE ni escanea el teléfono porque la importación es
-     100% manual vía Storage Access Framework (SAF). -->
+     Solicita permisos mínimos para reproducción en segundo plano (Media3), descargas y
+     notificaciones multimedia. Los permisos de almacenamiento en carpeta pública
+     (MANAGE_EXTERNAL_STORAGE / WRITE_EXTERNAL_STORAGE hasta Android 10) son totalmente
+     opcionales y solo se usan si el usuario activa manualmente "Carpeta del sistema (Aura Music)"
+     en Ajustes; nunca escanea todo el teléfono de forma automática. -->
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
@@ -12,12 +14,20 @@
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <uses-permission
+        android:name="android.permission.READ_EXTERNAL_STORAGE"
+        android:maxSdkVersion="32" />
+    <uses-permission
+        android:name="android.permission.WRITE_EXTERNAL_STORAGE"
+        android:maxSdkVersion="29" />
+    <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE" />
 
     <application
         android:name=".AuraApplication"
         android:allowBackup="true"
         android:icon="@mipmap/ic_launcher"
         android:label="@string/app_name"
+        android:requestLegacyExternalStorage="true"
         android:roundIcon="@mipmap/ic_launcher_round"
         android:supportsRtl="true"
         android:theme="@style/Theme.AuraMusic">

@@ -4,18 +4,27 @@ import android.content.ComponentName
 import android.content.Context
 import android.net.Uri
 import android.os.Bundle
+import android.os.SystemClock
+import androidx.annotation.OptIn
 import androidx.core.net.toUri
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
 import androidx.media3.common.PlaybackParameters
 import androidx.media3.common.Player
+import androidx.media3.common.util.UnstableApi
 import androidx.media3.session.MediaController
 import androidx.media3.session.SessionCommand
 import androidx.media3.session.SessionToken
+import com.auramusic.core.model.AudioEffectsState
+import com.auramusic.core.model.EqualizerState
+import com.auramusic.core.model.HeadphonePreferences
 import com.auramusic.core.model.PlaybackQueueHelper
 import com.auramusic.core.model.PlaybackState
+import com.auramusic.core.model.PlaybackTuning
 import com.auramusic.core.model.PlaybackTuningHelper
 import com.auramusic.core.model.RepeatMode
+import com.auramusic.core.model.SleepTimerHelper
+import com.auramusic.core.model.SleepTimerMode
 import com.auramusic.core.model.SleepTimerState
 import com.auramusic.core.model.Track
 import kotlinx.coroutines.CoroutineScope
@@ -50,14 +59,27 @@ class AuraPlayerController(
     private var controller: MediaController? = null
     private var connectJob: Job? = null
     private var progressTickerJob: Job? = null
+    private var sleepTimerUiTickerJob: Job? = null
     private var activeQueue: List<Track> = emptyList()
     private var latestLibraryTracks: List<Track> = emptyList()
     private var isUiAttached: Boolean = true
     private var pendingQueue: Pair<List<Track>, Int>? = null
     private val pendingActions = mutableListOf<(MediaController) -> Unit>()
     private var previousRestartThresholdMs: Long =
-        com.auramusic.core.model.HeadphonePreferences.DEFAULT_PREVIOUS_RESTART_MS
+        HeadphonePreferences.DEFAULT_PREVIOUS_RESTART_MS
     private var wrapQueueNavigation: Boolean = true
+
+    private var cachedEqualizerState: EqualizerState? = null
+    private var cachedAudioEffectsState: AudioEffectsState? = null
+    private var cachedPlaybackTuning: PlaybackTuning? = null
+    private var cachedHeadphonePrefs: HeadphonePreferences? = null
+
+    @OptIn(UnstableApi::class)
+    private val controllerListener = object : MediaController.Listener {
+        override fun onExtrasChanged(controller: MediaController, extras: Bundle) {
+            handleSessionExtras(extras)
+        }
+    }
 
     private val playerListener = object : Player.Listener {
         override fun onIsPlayingChanged(isPlaying: Boolean) {
@@ -100,12 +122,14 @@ class AuraPlayerController(
      * Garantiza que la interfaz tenga una conexión activa con [AuraPlaybackService]
      * al volver a abrir la app aunque el Activity o ViewModel anterior haya sido destruido.
      */
+    @OptIn(UnstableApi::class)
     fun onUiAttached() {
         isUiAttached = true
         val active = controller
         if (active == null || !active.isConnected) {
             connectToService()
         } else {
+            handleSessionExtras(active.sessionExtras)
             syncStateFromPlayer()
             if (active.isPlaying) {
                 startProgressTicker()
@@ -114,14 +138,26 @@ class AuraPlayerController(
     }
 
     /**
-     * Detiene el ticker visual de progreso cuando no hay UI visible, sin destruir
-     * el [MediaController] ni interrumpir la reproducción en segundo plano.
+     * Detiene los tickers visuales de progreso y temporizador cuando no hay UI visible,
+     * sin destruir el [MediaController] ni interrumpir la reproducción en el proceso `:player`.
      */
     fun onUiDetached() {
         isUiAttached = false
         stopProgressTicker()
+        stopSleepTimerUiTicker()
     }
 
+    /**
+     * Libera referencias temporales a la lista completa de pistas cuando el sistema solicita
+     * recortar memoria y la interfaz permanece en segundo plano.
+     */
+    fun trimMemoryIfDetached() {
+        if (!isUiAttached) {
+            latestLibraryTracks = emptyList()
+        }
+    }
+
+    @OptIn(UnstableApi::class)
     private fun connectToService() {
         val current = controller
         if (current != null && current.isConnected) return
@@ -133,12 +169,43 @@ class AuraPlayerController(
                 ComponentName(context, AuraPlaybackService::class.java),
             )
             val mediaController = runCatching {
-                MediaController.Builder(context, token).buildAsync().await()
+                MediaController.Builder(context, token)
+                    .setListener(controllerListener)
+                    .buildAsync()
+                    .await()
             }.getOrNull() ?: return@launch
 
             controller?.removeListener(playerListener)
             controller = mediaController
             mediaController.addListener(playerListener)
+
+            // Reenvía configuraciones locales cacheadas al proceso `:player` por si cambió o acaba de iniciar.
+            cachedEqualizerState?.let {
+                mediaController.sendCustomCommand(
+                    SessionCommand(AuraPlayerIpcContract.ACTION_SYNC_EQUALIZER, Bundle.EMPTY),
+                    AuraPlayerIpcContract.equalizerToBundle(it),
+                )
+            }
+            cachedAudioEffectsState?.let {
+                mediaController.sendCustomCommand(
+                    SessionCommand(AuraPlayerIpcContract.ACTION_SYNC_AUDIO_EFFECTS, Bundle.EMPTY),
+                    AuraPlayerIpcContract.audioEffectsToBundle(it),
+                )
+            }
+            cachedPlaybackTuning?.let {
+                mediaController.sendCustomCommand(
+                    SessionCommand(AuraPlayerIpcContract.ACTION_SYNC_PLAYBACK_TUNING, Bundle.EMPTY),
+                    AuraPlayerIpcContract.playbackTuningToBundle(it),
+                )
+            }
+            cachedHeadphonePrefs?.let {
+                mediaController.sendCustomCommand(
+                    SessionCommand(AuraPlayerIpcContract.ACTION_SYNC_HEADPHONE_PREFS, Bundle.EMPTY),
+                    AuraPlayerIpcContract.headphonePrefsToBundle(it),
+                )
+            }
+
+            handleSessionExtras(mediaController.sessionExtras)
 
             val queued = pendingQueue
             if (queued != null) {
@@ -536,6 +603,96 @@ class AuraPlayerController(
     }
 
     /**
+     * Envía al proceso aislado `:player` el estado actualizado del ecualizador Rust.
+     */
+    fun syncEqualizer(state: EqualizerState) {
+        cachedEqualizerState = state
+        val player = controller?.takeIf { it.isConnected } ?: return
+        player.sendCustomCommand(
+            SessionCommand(AuraPlayerIpcContract.ACTION_SYNC_EQUALIZER, Bundle.EMPTY),
+            AuraPlayerIpcContract.equalizerToBundle(state),
+        )
+    }
+
+    /**
+     * Envía al proceso aislado `:player` los efectos espaciales / Slowed / Reverb / Crossfeed.
+     */
+    fun syncAudioEffects(state: AudioEffectsState) {
+        cachedAudioEffectsState = state
+        val player = controller?.takeIf { it.isConnected } ?: return
+        player.sendCustomCommand(
+            SessionCommand(AuraPlayerIpcContract.ACTION_SYNC_AUDIO_EFFECTS, Bundle.EMPTY),
+            AuraPlayerIpcContract.audioEffectsToBundle(state),
+        )
+    }
+
+    /**
+     * Envía al proceso aislado `:player` los ajustes de Crossfade, velocidad y tono.
+     */
+    fun syncPlaybackTuning(tuning: PlaybackTuning) {
+        cachedPlaybackTuning = tuning
+        val player = controller?.takeIf { it.isConnected } ?: return
+        player.sendCustomCommand(
+            SessionCommand(AuraPlayerIpcContract.ACTION_SYNC_PLAYBACK_TUNING, Bundle.EMPTY),
+            AuraPlayerIpcContract.playbackTuningToBundle(tuning),
+        )
+    }
+
+    /**
+     * Envía al proceso aislado `:player` las preferencias de auriculares y AVRCP.
+     */
+    fun syncHeadphonePreferences(prefs: HeadphonePreferences) {
+        cachedHeadphonePrefs = prefs
+        updateHeadphoneControlTuning(prefs.previousRestartThresholdMs, prefs.wrapQueueNavigation)
+        val player = controller?.takeIf { it.isConnected } ?: return
+        player.sendCustomCommand(
+            SessionCommand(AuraPlayerIpcContract.ACTION_SYNC_HEADPHONE_PREFS, Bundle.EMPTY),
+            AuraPlayerIpcContract.headphonePrefsToBundle(prefs),
+        )
+    }
+
+    private fun handleSessionExtras(extras: Bundle) {
+        val remoteState = AuraPlayerIpcContract.sleepTimerFromBundle(extras)
+        if (remoteState.mode == SleepTimerMode.DURATION && remoteState.endElapsedMs > 0L) {
+            val remaining = SleepTimerHelper.computeRemainingMs(
+                endElapsedMs = remoteState.endElapsedMs,
+                nowElapsedMs = SystemClock.elapsedRealtime(),
+            )
+            AuraSleepTimerBridge.publishState(remoteState.copy(remainingMs = remaining))
+            if (isUiAttached && remaining > 0L) {
+                startSleepTimerUiTicker(remoteState)
+            } else {
+                stopSleepTimerUiTicker()
+            }
+        } else {
+            stopSleepTimerUiTicker()
+            AuraSleepTimerBridge.publishState(remoteState)
+        }
+    }
+
+    private fun startSleepTimerUiTicker(baseState: SleepTimerState) {
+        sleepTimerUiTickerJob?.cancel()
+        sleepTimerUiTickerJob = scope.launch {
+            while (isActive && isUiAttached && baseState.mode == SleepTimerMode.DURATION) {
+                val remaining = SleepTimerHelper.computeRemainingMs(
+                    endElapsedMs = baseState.endElapsedMs,
+                    nowElapsedMs = SystemClock.elapsedRealtime(),
+                )
+                AuraSleepTimerBridge.publishState(baseState.copy(remainingMs = remaining))
+                if (remaining <= 0L) {
+                    break
+                }
+                delay(500L)
+            }
+        }
+    }
+
+    private fun stopSleepTimerUiTicker() {
+        sleepTimerUiTickerJob?.cancel()
+        sleepTimerUiTickerJob = null
+    }
+
+    /**
      * Mantiene sincronizados cambios de metadata en caliente (por ejemplo, marcar Me gusta)
      * y permite reconstruir pistas si el servicio siguió sonando tras reiniciar la UI.
      */
@@ -689,6 +846,7 @@ class AuraPlayerController(
     fun release() {
         isUiAttached = false
         stopProgressTicker()
+        stopSleepTimerUiTicker()
         connectJob?.cancel()
         connectJob = null
         controller?.removeListener(playerListener)

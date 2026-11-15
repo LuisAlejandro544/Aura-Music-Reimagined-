@@ -55,10 +55,12 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import coil3.compose.AsyncImage
+import coil3.request.ImageRequest
 import com.auramusic.core.model.ArtistPlaylist
 import com.auramusic.core.model.Track
 import java.io.File
@@ -163,10 +165,17 @@ fun ArtistDetailScreen(
                                 .padding(14.dp),
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
+                            val context = LocalContext.current
                             val coverFile = artistPlaylist.coverFilePath?.let(::File)?.takeIf { it.exists() }
                             if (coverFile != null) {
+                                val thumbRequest = remember(coverFile.absolutePath, coverFile.lastModified()) {
+                                    ImageRequest.Builder(context)
+                                        .data(coverFile)
+                                        .size(204)
+                                        .build()
+                                }
                                 AsyncImage(
-                                    model = coverFile,
+                                    model = thumbRequest,
                                     contentDescription = artistPlaylist.artistName,
                                     contentScale = ContentScale.Crop,
                                     modifier = Modifier
@@ -295,10 +304,17 @@ private fun ArtistTrackRow(
                 .padding(horizontal = 10.dp, vertical = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
+            val context = LocalContext.current
             val coverFile = track.coverFilePath?.let(::File)?.takeIf { it.exists() }
             if (coverFile != null) {
+                val thumbRequest = remember(coverFile.absolutePath, coverFile.lastModified()) {
+                    ImageRequest.Builder(context)
+                        .data(coverFile)
+                        .size(168)
+                        .build()
+                }
                 AsyncImage(
-                    model = coverFile,
+                    model = thumbRequest,
                     contentDescription = track.title,
                     contentScale = ContentScale.Crop,
                     modifier = Modifier

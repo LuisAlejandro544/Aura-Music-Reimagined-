@@ -51,6 +51,17 @@ private object CoverColorCache {
     fun put(key: String, profile: CoverColorProfile) {
         cache.put(key, profile)
     }
+
+    fun clear() {
+        cache.evictAll()
+    }
+}
+
+/**
+ * Libera el caché LRU de perfiles cromáticos cuando Android solicita reducir el uso de RAM.
+ */
+fun clearCoverColorCache() {
+    CoverColorCache.clear()
 }
 
 private const val COVER_COLOR_ANIMATION_MS = 520
