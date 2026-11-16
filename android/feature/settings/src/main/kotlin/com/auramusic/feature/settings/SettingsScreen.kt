@@ -1,5 +1,6 @@
 package com.auramusic.feature.settings
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -368,16 +369,15 @@ fun SettingsAccentThemeScreen(
                 val primaryColor = Color(accent.primaryArgb)
                 val containerColor = Color(accent.primaryContainerArgb)
 
+                // Usa Surface interactivo con borde y shape nativos para clipping exacto del toque.
                 Surface(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(14.dp))
-                        .border(
-                            width = if (isSelected) 2.dp else 1.dp,
-                            color = if (isSelected) primaryColor else MaterialTheme.colorScheme.outlineVariant,
-                            shape = RoundedCornerShape(14.dp),
-                        )
-                        .clickable { onSelectAccent(accent) },
+                    onClick = { onSelectAccent(accent) },
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(14.dp),
+                    border = BorderStroke(
+                        width = if (isSelected) 2.dp else 1.dp,
+                        color = if (isSelected) primaryColor else MaterialTheme.colorScheme.outlineVariant,
+                    ),
                     color = if (isSelected) {
                         MaterialTheme.colorScheme.surfaceContainerHigh
                     } else {

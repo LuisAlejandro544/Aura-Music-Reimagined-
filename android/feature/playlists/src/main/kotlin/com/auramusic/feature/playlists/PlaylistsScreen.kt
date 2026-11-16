@@ -190,9 +190,8 @@ fun PlaylistsScreen(
                 ) {
                     item {
                         Card(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clickable(onClick = onOpenLikedSongs),
+                            onClick = onOpenLikedSongs,
+                            modifier = Modifier.fillMaxWidth(),
                             shape = RoundedCornerShape(18.dp),
                             colors = CardDefaults.cardColors(
                                 containerColor = MaterialTheme.colorScheme.primaryContainer,
@@ -761,9 +760,8 @@ private fun PlaylistCard(
     onDelete: () -> Unit,
 ) {
     Surface(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable(onClick = onOpen),
+        onClick = onOpen,
+        modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(14.dp),
         color = MaterialTheme.colorScheme.surfaceContainerLow,
         tonalElevation = 2.dp,
@@ -842,9 +840,8 @@ private fun ArtistPlaylistCard(
     onPlayOnlyArtist: () -> Unit,
 ) {
     Surface(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable(onClick = onOpen),
+        onClick = onOpen,
+        modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(14.dp),
         color = MaterialTheme.colorScheme.surfaceContainerLow,
         tonalElevation = 2.dp,
@@ -940,10 +937,10 @@ private fun PlaylistTrackRow(
 ) {
     var menuExpanded by remember { mutableStateOf(false) }
 
+    // Sobrecarga interactiva de Surface para respetar bordes redondeados y respuesta táctil directa.
     Surface(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable(onClick = onPlay),
+        onClick = onPlay,
+        modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(14.dp),
         color = if (isCurrent) {
             MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.45f)
@@ -1092,13 +1089,36 @@ private fun PlaylistTrackRow(
 }
 
 /**
- * Captura la fila de canción dentro de la playlist y reproduce un efecto aleatorio en Rust
- * (cenizas, papel quemándose o aura extraña) antes de desvincularla de la lista.
+ * Envuelve filas de playlist y activa la captura offscreen con Rust únicamente durante una
+ * eliminación activa, dejando el desplazamiento y los toques en reposo libres de capas extra.
  */
 @Composable
 private fun RustPlaylistDeleteEffectHost(
     trackId: Long,
     activeEffect: DeleteAnimationEffect?,
+    accentArgb: Int,
+    renderer: DeleteEffectFrameRenderer?,
+    onAnimationFinished: () -> Unit,
+    content: @Composable () -> Unit,
+) {
+    if (activeEffect == null) {
+        content()
+        return
+    }
+    ActiveRustPlaylistDeleteEffect(
+        trackId = trackId,
+        activeEffect = activeEffect,
+        accentArgb = accentArgb,
+        renderer = renderer,
+        onAnimationFinished = onAnimationFinished,
+        content = content,
+    )
+}
+
+@Composable
+private fun ActiveRustPlaylistDeleteEffect(
+    trackId: Long,
+    activeEffect: DeleteAnimationEffect,
     accentArgb: Int,
     renderer: DeleteEffectFrameRenderer?,
     onAnimationFinished: () -> Unit,
@@ -1110,7 +1130,6 @@ private fun RustPlaylistDeleteEffectHost(
     var isFinished by remember(trackId, activeEffect) { mutableStateOf(false) }
 
     LaunchedEffect(trackId, activeEffect) {
-        if (activeEffect == null) return@LaunchedEffect
         if (renderer == null) {
             isFinished = true
             onAnimationFinished()

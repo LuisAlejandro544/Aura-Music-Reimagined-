@@ -2330,4 +2330,64 @@ test('yt-dlp downloads exclude unplayable HLS/DASH manifests, imported SAF track
   assert.match(callbackKt, /startIndex\.coerceIn\(0,\s*resolvedItems\.lastIndex\)/);
 });
 
+test('track rows and interactive surfaces avoid idle offscreen GraphicsLayer capture and overlapping layout animations', () => {
+  const libraryScreenKt = fs.readFileSync(
+    path.join(rootDir, 'android/feature/library/src/main/kotlin/com/auramusic/feature/library/LibraryScreen.kt'),
+    'utf8',
+  );
+  const playlistsScreenKt = fs.readFileSync(
+    path.join(rootDir, 'android/feature/playlists/src/main/kotlin/com/auramusic/feature/playlists/PlaylistsScreen.kt'),
+    'utf8',
+  );
+  const artistDetailKt = fs.readFileSync(
+    path.join(rootDir, 'android/feature/playlists/src/main/kotlin/com/auramusic/feature/playlists/ArtistDetailScreen.kt'),
+    'utf8',
+  );
+  const queueScreenKt = fs.readFileSync(
+    path.join(rootDir, 'android/feature/player/src/main/kotlin/com/auramusic/feature/player/QueueScreen.kt'),
+    'utf8',
+  );
+  const playerScreenKt = fs.readFileSync(
+    path.join(rootDir, 'android/feature/player/src/main/kotlin/com/auramusic/feature/player/PlayerScreen.kt'),
+    'utf8',
+  );
+  const downloaderScreenKt = fs.readFileSync(
+    path.join(rootDir, 'android/feature/downloader/src/main/kotlin/com/auramusic/feature/downloader/DownloaderScreen.kt'),
+    'utf8',
+  );
+  const onboardingScreenKt = fs.readFileSync(
+    path.join(rootDir, 'android/feature/onboarding/src/main/kotlin/com/auramusic/feature/onboarding/OnboardingScreen.kt'),
+    'utf8',
+  );
+  const mainKt = fs.readFileSync(
+    path.join(rootDir, 'android/app/src/main/kotlin/com/auramusic/app/MainActivity.kt'),
+    'utf8',
+  );
+
+  // 1. Filas inactivas devuelven content() directamente sin allocate rememberGraphicsLayer/captureLayer.record
+  assert.match(libraryScreenKt, /fun RustDeleteEffectHost\([\s\S]*if\s*\(activeEffect\s*==\s*null\)\s*\{\s*content\(\)\s*return\s*\}/);
+  assert.match(libraryScreenKt, /private fun ActiveRustDeleteEffect\(/);
+  assert.match(playlistsScreenKt, /fun RustPlaylistDeleteEffectHost\([\s\S]*if\s*\(activeEffect\s*==\s*null\)\s*\{\s*content\(\)\s*return\s*\}/);
+  assert.match(playlistsScreenKt, /private fun ActiveRustPlaylistDeleteEffect\(/);
+
+  // 2. Tarjetas y filas reproducibles usan Surface(onClick = ...) / Card(onClick = ...) nativos
+  assert.match(libraryScreenKt, /private fun TrackRowCard[\s\S]*?Surface\(\s*onClick = onPlay,/);
+  assert.match(playlistsScreenKt, /private fun PlaylistTrackRow[\s\S]*?Surface\(\s*onClick = onPlay,/);
+  assert.match(artistDetailKt, /private fun ArtistTrackRow[\s\S]*?Surface\(\s*onClick = onPlay,/);
+  assert.match(queueScreenKt, /private fun QueueItemRow[\s\S]*?Surface\(\s*onClick = onSelect,/);
+  assert.match(playerScreenKt, /fun MiniPlayerBar[\s\S]*?Surface\(\s*onClick = onOpenFullPlayer,/);
+  assert.match(playerScreenKt, /SizeTransform\(clip = false\)/);
+
+  // 3. DownloaderScreen separa feedback y actualizador en items propios sin shrinkVertically/expandVertically
+  assert.match(downloaderScreenKt, /sealed interface DownloaderFeedbackUiState/);
+  assert.match(downloaderScreenKt, /item\(key = "downloader_feedback"\)/);
+  assert.match(downloaderScreenKt, /item\(key = "downloader_engine_updater"\)/);
+  assert.doesNotMatch(downloaderScreenKt, /expandVertically|shrinkVertically/);
+
+  // 4. OnboardingScreen solo graba captureLayer cuando isBurningTransition está activo y MainActivity usa un único Crossfade
+  assert.match(onboardingScreenKt, /val pageModifier = if \(isBurningTransition\)/);
+  assert.match(mainKt, /enum class AuraEntryPhase/);
+  assert.doesNotMatch(mainKt, /AuraStartupCrossfade|AuraOnboardingCrossfade/);
+});
+
 

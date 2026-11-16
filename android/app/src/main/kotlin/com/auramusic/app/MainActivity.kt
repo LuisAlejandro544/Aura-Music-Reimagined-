@@ -30,6 +30,12 @@ import com.auramusic.core.model.OnboardingPermissionStatus
 import com.auramusic.core.rust.AuraRustBridge
 import com.auramusic.feature.onboarding.AuraOnboardingScreen
 
+private enum class AuraEntryPhase {
+    LOADING,
+    ONBOARDING,
+    MAIN_APP,
+}
+
 /**
  * Actividad principal de Aura Music.
  * Aplica el tema dinámico elegido por el usuario, procesa archivos externos abiertos mediante
@@ -104,41 +110,38 @@ class MainActivity : ComponentActivity() {
                 }
             }
 
+            // Unifica carga inicial, onboarding y app principal en un único Crossfade sin contenedores anidados.
+            val entryPhase = when {
+                !isAppReady -> AuraEntryPhase.LOADING
+                !onboardingCompleted -> AuraEntryPhase.ONBOARDING
+                else -> AuraEntryPhase.MAIN_APP
+            }
+
             AuraMusicTheme(accentColor = accentColor) {
                 Crossfade(
-                    targetState = isAppReady,
+                    targetState = entryPhase,
                     animationSpec = tween(durationMillis = 260),
-                    label = "AuraStartupCrossfade",
-                ) { ready ->
-                    if (!ready) {
-                        AuraStartupLoadingScreen()
-                    } else {
-                        Crossfade(
-                            targetState = onboardingCompleted,
-                            animationSpec = tween(durationMillis = 280),
-                            label = "AuraOnboardingCrossfade",
-                        ) { completed ->
-                            if (!completed) {
-                                AuraOnboardingScreen(
-                                    permissionStatus = OnboardingPermissionStatus(
-                                        notificationsGranted = notificationsGranted,
-                                        notificationsRequiredBySystem = Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU,
-                                        storageGranted = storageGranted,
-                                    ),
-                                    accentArgb = accentColor.primaryArgb.toInt(),
-                                    deleteEffectRenderer = onboardingDeleteRenderer,
-                                    onRequestNotificationsPermission = {
-                                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                                            notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
-                                        }
-                                    },
-                                    onRequestStoragePermission = storagePermissionLauncher,
-                                    onCompleteOnboarding = viewModel::completeOnboarding,
-                                )
-                            } else {
-                                AuraAppRoot(viewModel = viewModel)
-                            }
-                        }
+                    label = "AuraEntryCrossfade",
+                ) { phase ->
+                    when (phase) {
+                        AuraEntryPhase.LOADING -> AuraStartupLoadingScreen()
+                        AuraEntryPhase.ONBOARDING -> AuraOnboardingScreen(
+                            permissionStatus = OnboardingPermissionStatus(
+                                notificationsGranted = notificationsGranted,
+                                notificationsRequiredBySystem = Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU,
+                                storageGranted = storageGranted,
+                            ),
+                            accentArgb = accentColor.primaryArgb.toInt(),
+                            deleteEffectRenderer = onboardingDeleteRenderer,
+                            onRequestNotificationsPermission = {
+                                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                                    notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+                                }
+                            },
+                            onRequestStoragePermission = storagePermissionLauncher,
+                            onCompleteOnboarding = viewModel::completeOnboarding,
+                        )
+                        AuraEntryPhase.MAIN_APP -> AuraAppRoot(viewModel = viewModel)
                     }
                 }
             }

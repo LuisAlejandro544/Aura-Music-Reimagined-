@@ -10,7 +10,6 @@ import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -452,10 +451,10 @@ private fun TrackRowCard(
 ) {
     var menuExpanded by remember { mutableStateOf(false) }
 
+    // Usa la sobrecarga interactiva de Surface para recortar el ripple y evitar capas clickable redundantes.
     Surface(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable(onClick = onPlay),
+        onClick = onPlay,
+        modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(14.dp),
         color = if (isCurrent) {
             MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.45f)
@@ -716,9 +715,8 @@ private fun ImportOptionCard(
     onClick: () -> Unit,
 ) {
     Card(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable(onClick = onClick),
+        onClick = onClick,
+        modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(14.dp),
         colors = CardDefaults.cardColors(
             containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
@@ -805,13 +803,36 @@ private fun ImportResultBanner(
 }
 
 /**
- * Captura la tarjeta de canción y delega en Rust la animación cuadro a cuadro
- * (cenizas, papel quemándose o aura extraña) antes de ejecutar la eliminación real en Room.
+ * Envuelve cada fila de canción y activa la captura offscreen con Rust únicamente cuando
+ * existe una animación de eliminación en curso, evitando interferencias de capa o toque en reposo.
  */
 @Composable
 private fun RustDeleteEffectHost(
     trackId: Long,
     activeEffect: DeleteAnimationEffect?,
+    accentArgb: Int,
+    renderer: DeleteEffectFrameRenderer?,
+    onAnimationFinished: () -> Unit,
+    content: @Composable () -> Unit,
+) {
+    if (activeEffect == null) {
+        content()
+        return
+    }
+    ActiveRustDeleteEffect(
+        trackId = trackId,
+        activeEffect = activeEffect,
+        accentArgb = accentArgb,
+        renderer = renderer,
+        onAnimationFinished = onAnimationFinished,
+        content = content,
+    )
+}
+
+@Composable
+private fun ActiveRustDeleteEffect(
+    trackId: Long,
+    activeEffect: DeleteAnimationEffect,
     accentArgb: Int,
     renderer: DeleteEffectFrameRenderer?,
     onAnimationFinished: () -> Unit,
@@ -823,7 +844,6 @@ private fun RustDeleteEffectHost(
     var isFinished by remember(trackId, activeEffect) { mutableStateOf(false) }
 
     LaunchedEffect(trackId, activeEffect) {
-        if (activeEffect == null) return@LaunchedEffect
         if (renderer == null) {
             isFinished = true
             onAnimationFinished()

@@ -1,7 +1,6 @@
 package com.auramusic.feature.playlists
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -289,10 +288,10 @@ private fun ArtistTrackRow(
 ) {
     var menuExpanded by remember { mutableStateOf(false) }
 
+    // Usa Surface interactivo para recortar el ripple y evitar capas clickable externas.
     Surface(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable(onClick = onPlay),
+        onClick = onPlay,
+        modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(14.dp),
         color = if (isCurrent) {
             MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.45f)

@@ -1,14 +1,13 @@
 package com.auramusic.feature.downloader
 
 import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.SizeTransform
 import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
-import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
-import androidx.compose.animation.shrinkVertically
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
@@ -104,6 +103,12 @@ import java.util.Locale
  * 2. Al confirmar el usuario, descarga el flujo de audio mostrando peso total, bytes descargados
  *    y velocidad de internet en tiempo real, integrándolo automáticamente en Room con Rust (`lofty`).
  */
+private sealed interface DownloaderFeedbackUiState {
+    data object Idle : DownloaderFeedbackUiState
+    data class Preview(val preview: DownloadPreview) : DownloaderFeedbackUiState
+    data class Status(val state: DownloadState) : DownloaderFeedbackUiState
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun DownloaderScreen(
@@ -376,58 +381,61 @@ fun DownloaderScreen(
                 }
             }
 
-            item(key = "downloader_feedback_and_engine") {
-                Column {
-                    val preview = downloadState.preview
-                    val feedbackKey = when {
-                        downloadState.status == DownloadStatus.PREVIEW_READY && preview != null -> "preview"
-                        downloadState.status != DownloadStatus.IDLE -> "status_${downloadState.status}"
-                        else -> "idle"
-                    }
-                    AnimatedContent(
-                        targetState = feedbackKey,
-                        transitionSpec = {
-                            (fadeIn(tween(210)) + expandVertically(
-                                animationSpec = spring(
-                                    dampingRatio = 0.85f,
-                                    stiffness = Spring.StiffnessMedium,
-                                ),
-                            )) togetherWith (fadeOut(tween(150)) + shrinkVertically(tween(160)))
-                        },
-                        label = "downloader_feedback_transition",
-                    ) { targetKey ->
-                        val currentPreview = downloadState.preview
-                        if (targetKey == "preview" && currentPreview != null) {
-                            Column {
-                                DownloadPreviewCard(
-                                    preview = currentPreview,
-                                    onSelectFormat = onSelectPreviewFormat,
-                                    onConfirmDownload = onConfirmDownload,
-                                    onCancel = onCancelPreview,
-                                )
-                                Spacer(modifier = Modifier.height(14.dp))
-                            }
-                        } else if (targetKey != "idle" && downloadState.status != DownloadStatus.IDLE) {
-                            Column {
-                                DownloadStatusCard(
-                                    downloadState = downloadState,
-                                    onPlayDownloadedTrack = onPlayDownloadedTrack,
-                                    onCancelDownload = onCancelDownload,
-                                    onDismiss = onDismissDownloadStatus,
-                                )
-                                Spacer(modifier = Modifier.height(14.dp))
-                            }
+            // Aísla la tarjeta de vista previa/estado respecto al actualizador para que los botones no pierdan el toque.
+            item(key = "downloader_feedback") {
+                val preview = downloadState.preview
+                val feedbackState: DownloaderFeedbackUiState = when {
+                    downloadState.status == DownloadStatus.PREVIEW_READY && preview != null ->
+                        DownloaderFeedbackUiState.Preview(preview)
+                    downloadState.status != DownloadStatus.IDLE ->
+                        DownloaderFeedbackUiState.Status(downloadState)
+                    else -> DownloaderFeedbackUiState.Idle
+                }
+                AnimatedContent(
+                    targetState = feedbackState,
+                    contentKey = { target ->
+                        when (target) {
+                            DownloaderFeedbackUiState.Idle -> "idle"
+                            is DownloaderFeedbackUiState.Preview -> "preview"
+                            is DownloaderFeedbackUiState.Status -> "status_${target.state.status}"
+                        }
+                    },
+                    transitionSpec = {
+                        (fadeIn(tween(180)) togetherWith fadeOut(tween(120)))
+                            .using(SizeTransform(clip = false))
+                    },
+                    label = "downloader_feedback_transition",
+                ) { target ->
+                    when (target) {
+                        DownloaderFeedbackUiState.Idle -> Unit
+                        is DownloaderFeedbackUiState.Preview -> {
+                            DownloadPreviewCard(
+                                preview = target.preview,
+                                onSelectFormat = onSelectPreviewFormat,
+                                onConfirmDownload = onConfirmDownload,
+                                onCancel = onCancelPreview,
+                            )
+                        }
+                        is DownloaderFeedbackUiState.Status -> {
+                            DownloadStatusCard(
+                                downloadState = target.state,
+                                onPlayDownloadedTrack = onPlayDownloadedTrack,
+                                onCancelDownload = onCancelDownload,
+                                onDismiss = onDismissDownloadStatus,
+                            )
                         }
                     }
-
-                    EngineUpdaterCard(
-                        engineStatus = engineStatus,
-                        isDownloadBusy = downloadState.isBusy,
-                        onCheckUpdates = onCheckUpdates,
-                        onToggleAutoUpdate = onToggleAutoUpdate,
-                        onDismissUpdateMessage = onDismissUpdateMessage,
-                    )
                 }
+            }
+
+            item(key = "downloader_engine_updater") {
+                EngineUpdaterCard(
+                    engineStatus = engineStatus,
+                    isDownloadBusy = downloadState.isBusy,
+                    onCheckUpdates = onCheckUpdates,
+                    onToggleAutoUpdate = onToggleAutoUpdate,
+                    onDismissUpdateMessage = onDismissUpdateMessage,
+                )
             }
         }
     }

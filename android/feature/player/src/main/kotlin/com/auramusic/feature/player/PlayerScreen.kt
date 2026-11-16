@@ -1,6 +1,7 @@
 package com.auramusic.feature.player
 
 import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.SizeTransform
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
@@ -124,11 +125,12 @@ fun MiniPlayerBar(
         coverPath = track.coverFilePath,
         enabled = dynamicCoverColorsEnabled,
     ) {
+        // Sobrecarga interactiva de Surface y SizeTransform(clip = false) para no bloquear toques ni recortes.
         Surface(
+            onClick = onOpenFullPlayer,
             modifier = modifier
                 .fillMaxWidth()
-                .padding(horizontal = 10.dp, vertical = 6.dp)
-                .clickable(onClick = onOpenFullPlayer),
+                .padding(horizontal = 10.dp, vertical = 6.dp),
             shape = RoundedCornerShape(16.dp),
             color = MaterialTheme.colorScheme.surfaceContainerHigh,
             border = BorderStroke(
@@ -151,6 +153,7 @@ fun MiniPlayerBar(
                         transitionSpec = {
                             (fadeIn(tween(180)) + slideInHorizontally(tween(200)) { it / 8 })
                                 .togetherWith(fadeOut(tween(140)) + slideOutHorizontally(tween(180)) { -it / 8 })
+                                .using(SizeTransform(clip = false))
                         },
                         modifier = Modifier.weight(1f),
                         label = "mini_player_track_switch",

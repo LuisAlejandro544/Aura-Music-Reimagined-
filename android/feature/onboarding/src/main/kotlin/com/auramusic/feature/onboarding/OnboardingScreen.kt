@@ -227,10 +227,10 @@ fun AuraOnboardingScreen(
             )
         }
 
-        // Capa superior: Página 1 (Guía de funcionamiento) capturada para quemarse con Rust.
+        // Capa superior: Página 1 (Guía de funcionamiento); solo graba en captureLayer al quemarse en Rust.
         if (currentPage == OnboardingPage.WELCOME_GUIDE || isBurningTransition) {
-            Box(
-                modifier = Modifier
+            val pageModifier = if (isBurningTransition) {
+                Modifier
                     .fillMaxSize()
                     .graphicsLayer {
                         alpha = if (renderedBurnFrame == null) 1f else 0f
@@ -242,8 +242,11 @@ fun AuraOnboardingScreen(
                             }
                             drawLayer(captureLayer)
                         }
-                    },
-            ) {
+                    }
+            } else {
+                Modifier.fillMaxSize()
+            }
+            Box(modifier = pageModifier) {
                 WelcomeGuidePage(
                     isTransitioning = isBurningTransition,
                     onNextToPermissions = { startBurningTransitionToPermissions() },

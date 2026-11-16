@@ -1,7 +1,6 @@
 package com.auramusic.feature.player
 
 import androidx.compose.foundation.BorderStroke
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -303,10 +302,10 @@ private fun QueueItemRow(
         else -> MaterialTheme.colorScheme.surfaceContainerLow
     }
 
+    // Usa Surface interactivo nativo para respuestas táctiles consistentes en cada pista en cola.
     Surface(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable(onClick = onSelect),
+        onClick = onSelect,
+        modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(14.dp),
         color = containerColor,
         tonalElevation = if (isCurrent) 4.dp else 1.dp,
